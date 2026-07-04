@@ -6,7 +6,9 @@
     "dev": "next dev",
     "build": "next build",
     "start": "next start",
-    "lint": "eslint"
+    "lint": "eslint",
+    "test": "tsc -p tsconfig.test.json && node --test .test-build/test/*.test.js",
+    "check": "npm run lint && npm run test && npm run build"
   },
   "dependencies": {
     "next": "16.2.9",
