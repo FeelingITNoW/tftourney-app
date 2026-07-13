@@ -1,9 +1,18 @@
+import Link from "next/link";
+import { createTournamentAction } from "@/app/actions";
+import { listTournaments } from "@/lib/db/tournaments";
+import type { TournamentSummary } from "@/lib/db/tournaments";
+import { TOURNAMENT_FORMAT_OPTIONS } from "@/lib/tournament/formats";
 import {
   PLAYERS_PER_TFT_LOBBY,
   validateTournamentCreation,
 } from "@/lib/tournament/validation";
 
+export const dynamic = "force-dynamic";
+
 type HomeSearchParams = Promise<{
+  createError?: string | string[];
+  formatId?: string | string[];
   tournamentName?: string | string[];
   playerCount?: string | string[];
 }>;
@@ -22,15 +31,29 @@ export default async function Home({
   searchParams: HomeSearchParams;
 }) {
   const query = await searchParams;
+  const createError = getSearchValue(query.createError);
   const tournamentName = getSearchValue(query.tournamentName);
   const playerCount = getSearchValue(query.playerCount);
+  const formatId = getSearchValue(query.formatId) || "default";
   const hasSubmitted = tournamentName !== "" || playerCount !== "";
   const validation = hasSubmitted
     ? validateTournamentCreation({
         name: tournamentName,
         playerCount,
+        formatId,
       })
     : null;
+  let tournaments: TournamentSummary[] = [];
+  let databaseError = "";
+
+  try {
+    tournaments = await listTournaments();
+  } catch (error) {
+    databaseError =
+      error instanceof Error
+        ? error.message
+        : "Tournament data could not be loaded.";
+  }
 
   return (
     <main className="min-h-screen bg-stone-50 text-zinc-950">
@@ -58,9 +81,9 @@ export default async function Home({
               Set up a TFT bracket with lobby-ready player counts.
             </h1>
             <p className="mt-5 max-w-xl text-base leading-7 text-zinc-600 sm:text-lg">
-              Enter the tournament name and total player count. TFTourney checks
-              that the event can be split cleanly into 8-player lobbies before
-              the organizer flow continues.
+              Enter the tournament name, total player count, and format.
+              TFTourney creates the event as accepting players and keeps it
+              marked as not started until match operations begin.
             </p>
 
             <div className="mt-8 grid max-w-xl grid-cols-3 gap-3 text-sm">
@@ -73,8 +96,8 @@ export default async function Home({
                 <p className="mt-1 text-zinc-500">max players</p>
               </div>
               <div className="border-l-4 border-zinc-800 bg-white px-4 py-3 shadow-sm">
-                <p className="font-semibold text-zinc-950">1</p>
-                <p className="mt-1 text-zinc-500">draft setup</p>
+                <p className="font-semibold text-zinc-950">2</p>
+                <p className="mt-1 text-zinc-500">round default</p>
               </div>
             </div>
           </div>
@@ -86,15 +109,15 @@ export default async function Home({
                   Tournament details
                 </h2>
                 <p className="mt-1 text-sm text-zinc-500">
-                  Start with the two fields needed to create clean lobbies.
+                  Start with the fields needed to save a tournament draft.
                 </p>
               </div>
               <span className="rounded-md bg-emerald-50 px-3 py-1 text-sm font-medium text-emerald-800">
-                Draft
+                Accepting players
               </span>
             </div>
 
-            <form action="/" className="mt-6 space-y-5" method="get">
+            <form action={createTournamentAction} className="mt-6 space-y-5">
               <div>
                 <label
                   className="block text-sm font-medium text-zinc-800"
@@ -172,18 +195,52 @@ export default async function Home({
                 )}
               </div>
 
+              <div>
+                <label
+                  className="block text-sm font-medium text-zinc-800"
+                  htmlFor="formatId"
+                >
+                  Tournament format
+                </label>
+                <select
+                  aria-describedby="formatId-help"
+                  className="mt-2 h-11 w-full rounded-md border border-zinc-300 bg-white px-3 text-base text-zinc-950 outline-none transition focus:border-emerald-700 focus:ring-2 focus:ring-emerald-100"
+                  defaultValue={formatId}
+                  id="formatId"
+                  name="formatId"
+                >
+                  {TOURNAMENT_FORMAT_OPTIONS.map((format) => (
+                    <option key={format.id} value={format.id}>
+                      {format.name}
+                    </option>
+                  ))}
+                </select>
+                <p className="mt-2 text-sm text-zinc-500" id="formatId-help">
+                  The default format is selected for now.
+                </p>
+              </div>
+
               <button
                 className="flex h-11 w-full items-center justify-center rounded-md bg-zinc-950 px-4 text-sm font-semibold text-white transition hover:bg-zinc-800 focus:outline-none focus:ring-2 focus:ring-emerald-600 focus:ring-offset-2"
                 type="submit"
               >
-                Create tournament draft
+                Create tournament
               </button>
             </form>
+
+            {createError ? (
+              <div className="mt-6 rounded-md border border-red-200 bg-red-50 p-4">
+                <p className="text-sm font-semibold text-red-900">
+                  Tournament was not created
+                </p>
+                <p className="mt-2 text-sm text-red-800">{createError}</p>
+              </div>
+            ) : null}
 
             {validation?.success ? (
               <div className="mt-6 rounded-md border border-emerald-200 bg-emerald-50 p-4">
                 <p className="text-sm font-semibold text-emerald-900">
-                  Tournament draft ready
+                  Tournament details are valid
                 </p>
                 <dl className="mt-3 grid grid-cols-2 gap-3 text-sm">
                   <div>
@@ -202,6 +259,72 @@ export default async function Home({
               </div>
             ) : null}
           </div>
+        </section>
+
+        <section className="border-t border-zinc-200 py-8">
+          <div className="flex items-end justify-between gap-4">
+            <div>
+              <h2 className="text-2xl font-semibold text-zinc-950">
+                Tournaments
+              </h2>
+              <p className="mt-1 text-sm text-zinc-500">
+                Click a tournament to view its registered players.
+              </p>
+            </div>
+          </div>
+
+          {databaseError ? (
+            <div className="mt-5 rounded-md border border-amber-200 bg-amber-50 p-4">
+              <p className="text-sm font-semibold text-amber-950">
+                Database unavailable
+              </p>
+              <p className="mt-2 text-sm text-amber-900">{databaseError}</p>
+            </div>
+          ) : tournaments.length === 0 ? (
+            <div className="mt-5 rounded-md border border-zinc-200 bg-white p-5 text-sm text-zinc-500">
+              No tournaments have been created yet.
+            </div>
+          ) : (
+            <div className="mt-5 overflow-hidden rounded-lg border border-zinc-200 bg-white shadow-sm">
+              <table className="w-full border-collapse text-left text-sm">
+                <thead className="bg-zinc-50 text-zinc-600">
+                  <tr>
+                    <th className="px-4 py-3 font-medium">Tournament</th>
+                    <th className="px-4 py-3 font-medium">Status</th>
+                    <th className="px-4 py-3 font-medium">Players</th>
+                    <th className="px-4 py-3 font-medium">Started</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-zinc-200">
+                  {tournaments.map((tournament) => (
+                    <tr key={tournament.id} className="align-top">
+                      <td className="px-4 py-3">
+                        <Link
+                          className="font-semibold text-emerald-800 hover:text-emerald-950"
+                          href={`/tournaments/${tournament.id}`}
+                        >
+                          {tournament.name}
+                        </Link>
+                        <p className="mt-1 text-xs text-zinc-500">
+                          {tournament.formatId}
+                        </p>
+                      </td>
+                      <td className="px-4 py-3 capitalize text-zinc-700">
+                        {tournament.status.replaceAll("_", " ")}
+                      </td>
+                      <td className="px-4 py-3 text-zinc-700">
+                        {tournament.registeredPlayerCount} /{" "}
+                        {tournament.playerCount}
+                      </td>
+                      <td className="px-4 py-3 text-zinc-700">
+                        {tournament.hasStarted ? "Yes" : "No"}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
         </section>
 
         <div className="grid gap-3 border-t border-zinc-200 py-5 text-sm text-zinc-500 sm:grid-cols-3">

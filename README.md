@@ -2,6 +2,27 @@ This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-
 
 ## Getting Started
 
+Create a local environment file before starting the app:
+
+```bash
+cp .env.example .env.local
+```
+
+Set `NEXT_PUBLIC_SUPABASE_URL` to your Supabase REST URL and
+`SUPABASE_SERVICE_ROLE_KEY` to the project service-role key. This workspace is
+linked to project `pwhtssicqwaolxgpfoxw`, so the hosted URL is:
+
+```bash
+NEXT_PUBLIC_SUPABASE_URL=https://pwhtssicqwaolxgpfoxw.supabase.co
+```
+
+If you are using the Supabase CLI, log in and fetch keys with:
+
+```bash
+supabase login
+supabase projects api-keys --project-ref pwhtssicqwaolxgpfoxw -o env
+```
+
 First, run the development server:
 
 ```bash

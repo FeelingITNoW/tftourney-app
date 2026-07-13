@@ -1,5 +1,8 @@
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
 import test from "node:test";
+import { validatePlayerRegistration } from "../lib/tournament/players";
 import {
   isValidTournamentName,
   isValidTournamentPlayerCount,
@@ -54,6 +57,7 @@ test("returns normalized tournament data when creation input is valid", () => {
     assert.deepEqual(result.data, {
       name: "Friday TFT Open",
       playerCount: 32,
+      formatId: "default",
     });
   }
 });
@@ -67,4 +71,57 @@ test("returns field errors when creation input is invalid", () => {
   assert.equal(result.success, false);
   assert.match(result.errors.name ?? "", /Use 3-80 characters/);
   assert.match(result.errors.playerCount ?? "", /divisible by 8/);
+});
+
+test("accepts valid Riot IDs for player registration", () => {
+  const result = validatePlayerRegistration({
+    gameTag: "  Player One # NA1  ",
+  });
+
+  assert.equal(result.success, true);
+
+  if (result.success) {
+    assert.deepEqual(result.data, {
+      gameName: "Player One",
+      tagLine: "NA1",
+      gameTag: "Player One#NA1",
+    });
+  }
+});
+
+test("rejects invalid Riot IDs for player registration", () => {
+  for (const gameTag of ["", "Player", "#TAG", "Player#", "Player#bad tag"]) {
+    const result = validatePlayerRegistration({ gameTag });
+
+    assert.equal(result.success, false);
+    assert.match(result.errors.gameTag ?? "", /GameName#TAG/);
+  }
+});
+
+test("default tournament format uses a qualifier into a six-game final", () => {
+  const format = JSON.parse(
+    readFileSync(
+      join(process.cwd(), "lib/tournament/formats/default.json"),
+      "utf8",
+    ),
+  );
+
+  assert.equal(format.isDefault, true);
+  assert.equal(format.rounds.length, 2);
+
+  const [openingRound, finalRound] = format.rounds;
+  assert.equal(openingRound.games, 6);
+  assert.deepEqual(openingRound.advancement, {
+    type: "top_n",
+    count: 8,
+    rankingMetric: "points",
+    destinationRoundId: "final-round",
+  });
+
+  assert.equal(finalRound.games, 6);
+  assert.deepEqual(finalRound.winCondition, {
+    type: "highest_points_after_games",
+    games: 6,
+    rankingMetric: "points",
+  });
 });
