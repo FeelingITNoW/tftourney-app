@@ -1,11 +1,18 @@
+import {
+  DEFAULT_TOURNAMENT_FORMAT_ID,
+  isValidTournamentFormatId,
+} from "./formats";
+
 export type TournamentCreationInput = {
   name: string;
   playerCount: string | number;
+  formatId?: string;
 };
 
 export type TournamentCreationData = {
   name: string;
   playerCount: number;
+  formatId: string;
 };
 
 export type TournamentCreationErrors = Partial<
@@ -56,6 +63,7 @@ export function validateTournamentCreation(
 ): TournamentCreationValidation {
   const errors: TournamentCreationErrors = {};
   const normalizedName = input.name.trim().replace(/\s+/g, " ");
+  const formatId = input.formatId ?? DEFAULT_TOURNAMENT_FORMAT_ID;
   const parsedPlayerCount =
     typeof input.playerCount === "number"
       ? input.playerCount
@@ -71,6 +79,10 @@ export function validateTournamentCreation(
       "Player count must be a whole number from 8 to 512 and divisible by 8.";
   }
 
+  if (!isValidTournamentFormatId(formatId)) {
+    errors.formatId = "Choose a supported tournament format.";
+  }
+
   if (Object.keys(errors).length > 0) {
     return {
       success: false,
@@ -84,6 +96,7 @@ export function validateTournamentCreation(
     data: {
       name: normalizedName,
       playerCount: parsedPlayerCount,
+      formatId,
     },
     errors: {},
   };

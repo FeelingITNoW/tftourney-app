@@ -1,0 +1,40 @@
+{
+  "id": "default",
+  "name": "Default TFT Tournament Format",
+  "isDefault": true,
+  "rounds": [
+    {
+      "id": "opening-round",
+      "name": "Opening Round",
+      "type": "qualifier",
+      "participants": "all_registered_players",
+      "games": 6,
+      "standings": {
+        "rankingMetric": "points",
+        "sortDirection": "desc"
+      },
+      "advancement": {
+        "type": "top_n",
+        "count": 8,
+        "rankingMetric": "points",
+        "destinationRoundId": "final-round"
+      }
+    },
+    {
+      "id": "final-round",
+      "name": "Final Round",
+      "type": "final",
+      "participants": "advanced_from_opening-round",
+      "games": 6,
+      "standings": {
+        "rankingMetric": "points",
+        "sortDirection": "desc"
+      },
+      "winCondition": {
+        "type": "highest_points_after_games",
+        "games": 6,
+        "rankingMetric": "points"
+      }
+    }
+  ]
+}
