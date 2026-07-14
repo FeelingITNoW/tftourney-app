@@ -115,10 +115,10 @@ drop function if exists public.start_tournament(bigint);
 
 create or replace function public.start_tournament(p_tournament_id text)
 returns table (
-  tournament_id text,
-  entrant_count integer,
-  current_round_id text,
-  current_round_number integer
+  started_tournament_id text,
+  started_entrant_count integer,
+  started_round_id text,
+  started_round_number integer
 )
 language plpgsql
 as $$
@@ -219,3 +219,5 @@ begin
   select p_tournament_id, v_entrant_count, v_current_round_id, 1;
 end;
 $$;
+
+notify pgrst, 'reload schema';

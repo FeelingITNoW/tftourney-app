@@ -59,10 +59,14 @@ export default async function TournamentPage({
     ? `Round ${tournament.currentRoundNumber}`
     : "Not started";
   const potentialEntrantCount = tournament
-    ? selectTournamentEntrants(tournament.players, tournament.playerCount).length
+    ? selectTournamentEntrants(
+        tournament.registrations,
+        tournament.playerCount,
+      ).length
     : 0;
-  const enteredPlayerIds = new Set(
-    tournament?.entries.map((entry) => entry.tournamentPlayerId) ?? [],
+  const enteredRegistrationIds = new Set(
+    tournament?.participants.map((participant) => participant.registrationId) ??
+      [],
   );
 
   return (
@@ -123,13 +127,13 @@ export default async function TournamentPage({
                   <div className="border-l-4 border-amber-500 bg-white px-4 py-3 shadow-sm">
                     <dt className="text-zinc-500">Registered</dt>
                     <dd className="mt-1 font-semibold text-zinc-950">
-                      {tournament.players.length} / {tournament.playerCount}
+                      {tournament.registrations.length} / {tournament.playerCount}
                     </dd>
                   </div>
                   <div className="border-l-4 border-cyan-700 bg-white px-4 py-3 shadow-sm">
                     <dt className="text-zinc-500">Entrants</dt>
                     <dd className="mt-1 font-semibold text-zinc-950">
-                      {tournament.entries.length || potentialEntrantCount}
+                      {tournament.participants.length || potentialEntrantCount}
                     </dd>
                   </div>
                   <div className="border-l-4 border-zinc-300 bg-white px-4 py-3 shadow-sm">
@@ -161,11 +165,11 @@ export default async function TournamentPage({
                         />
                         <button
                           className={`flex h-11 w-full items-center justify-center rounded-md px-4 text-sm font-semibold transition focus:outline-none focus:ring-2 focus:ring-emerald-600 focus:ring-offset-2 ${
-                            tournament.players.length === 0
+                            tournament.registrations.length === 0
                               ? "cursor-not-allowed bg-zinc-200 text-zinc-500"
                               : "bg-emerald-700 text-white hover:bg-emerald-800"
                           }`}
-                          disabled={tournament.players.length === 0}
+                          disabled={tournament.registrations.length === 0}
                           type="submit"
                         >
                           Start tournament
@@ -300,7 +304,7 @@ export default async function TournamentPage({
                 </div>
               </div>
 
-              {tournament.players.length === 0 ? (
+              {tournament.registrations.length === 0 ? (
                 <div className="mt-5 rounded-md border border-zinc-200 bg-white p-5 text-sm text-zinc-500">
                   No players have registered for this tournament yet.
                 </div>
@@ -318,7 +322,7 @@ export default async function TournamentPage({
                       </tr>
                     </thead>
                     <tbody className="divide-y divide-zinc-200">
-                      {tournament.players.map((player, index) => (
+                      {tournament.registrations.map((player, index) => (
                         <tr key={player.id}>
                           <td className="px-4 py-3 text-zinc-500">
                             {index + 1}
@@ -328,7 +332,7 @@ export default async function TournamentPage({
                           </td>
                           {tournament.hasStarted ? (
                             <td className="px-4 py-3 text-zinc-600">
-                              {enteredPlayerIds.has(player.id)
+                              {enteredRegistrationIds.has(player.id)
                                 ? "Entered"
                                 : "Not entered"}
                             </td>

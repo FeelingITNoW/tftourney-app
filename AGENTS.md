@@ -164,3 +164,10 @@ When changing code:
 - Mention the validation commands run and their results.
 - Call out any skipped tests or missing tooling.
 - Leave follow-up TODOs only when they are concrete and still necessary.
+
+## Database Context
+
+The database structure and relationships are documented in 
+[docs/database-schema.md](docs/database-schema.md).
+Before changing queries or models, review this document and the latest migrations
+When implementing migrations update the database-schema.md file 
