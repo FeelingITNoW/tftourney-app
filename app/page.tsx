@@ -292,7 +292,7 @@ export default async function Home({
                     <th className="px-4 py-3 font-medium">Tournament</th>
                     <th className="px-4 py-3 font-medium">Status</th>
                     <th className="px-4 py-3 font-medium">Players</th>
-                    <th className="px-4 py-3 font-medium">Started</th>
+                    <th className="px-4 py-3 font-medium">Round</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-zinc-200">
@@ -317,7 +317,9 @@ export default async function Home({
                         {tournament.playerCount}
                       </td>
                       <td className="px-4 py-3 text-zinc-700">
-                        {tournament.hasStarted ? "Yes" : "No"}
+                        {tournament.currentRoundNumber
+                          ? `Round ${tournament.currentRoundNumber}`
+                          : "Not started"}
                       </td>
                     </tr>
                   ))}

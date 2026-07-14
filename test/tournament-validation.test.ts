@@ -8,6 +8,7 @@ import {
   isValidTournamentPlayerCount,
   validateTournamentCreation,
 } from "../lib/tournament/validation";
+import { selectTournamentEntrants } from "../lib/tournament/start";
 
 test("accepts tournament player counts that divide exactly into TFT lobbies", () => {
   for (const playerCount of [8, 16, 32, 64, 512]) {
@@ -124,4 +125,62 @@ test("default tournament format uses a qualifier into a six-game final", () => {
     games: 6,
     rankingMetric: "points",
   });
+});
+
+test("selects the earliest registered players when starting a tournament", () => {
+  const entrants = selectTournamentEntrants(
+    [
+      {
+        id: "player-3",
+        displayName: "Third",
+        createdAt: "2026-07-14T10:03:00.000Z",
+      },
+      {
+        id: "player-1",
+        displayName: "First",
+        createdAt: "2026-07-14T10:01:00.000Z",
+      },
+      {
+        id: "player-2",
+        displayName: "Second",
+        createdAt: "2026-07-14T10:02:00.000Z",
+      },
+    ],
+    2,
+  );
+
+  assert.deepEqual(
+    entrants.map((entrant) => ({
+      id: entrant.id,
+      seedNumber: entrant.seedNumber,
+    })),
+    [
+      { id: "player-1", seedNumber: 1 },
+      { id: "player-2", seedNumber: 2 },
+    ],
+  );
+});
+
+test("allows a tournament to start with fewer entrants than the player limit", () => {
+  const entrants = selectTournamentEntrants(
+    [
+      {
+        id: "player-1",
+        displayName: "First",
+        createdAt: "2026-07-14T10:01:00.000Z",
+      },
+      {
+        id: "player-2",
+        displayName: "Second",
+        createdAt: "2026-07-14T10:02:00.000Z",
+      },
+    ],
+    16,
+  );
+
+  assert.equal(entrants.length, 2);
+  assert.deepEqual(
+    entrants.map((entrant) => entrant.seedNumber),
+    [1, 2],
+  );
 });

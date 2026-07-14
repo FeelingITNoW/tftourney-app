@@ -16,6 +16,8 @@ export type TournamentSummary = {
   formatId: string;
   status: TournamentStatus;
   hasStarted: boolean;
+  currentRoundId: string | null;
+  currentRoundNumber: number | null;
   createdAt: string;
   registeredPlayerCount: number;
 };
@@ -26,11 +28,31 @@ export type TournamentPlayer = {
   createdAt: string;
 };
 
+export type TournamentEntry = {
+  id: string;
+  tournamentPlayerId: string;
+  displayName: string;
+  seedNumber: number;
+  createdAt: string;
+};
+
+export type TournamentScore = {
+  id: string;
+  tournamentEntryId: string;
+  displayName: string;
+  seedNumber: number;
+  roundId: string;
+  score: number;
+  createdAt: string;
+};
+
 export type TournamentDetail = Omit<
   TournamentSummary,
   "registeredPlayerCount"
 > & {
   players: TournamentPlayer[];
+  entries: TournamentEntry[];
+  scores: TournamentScore[];
 };
 
 const STANDARD_HOST_USER_ID = 1;
@@ -42,6 +64,8 @@ type TournamentRow = {
   format_id: string;
   status: TournamentStatus;
   has_started: boolean;
+  current_round_id: string | null;
+  current_round_number: number | null;
   created_at: string;
 };
 
@@ -53,8 +77,33 @@ type TournamentPlayerRow = {
   created_at: string;
 };
 
+type TournamentEntryRow = {
+  id: string;
+  tournament_id: string;
+  tournament_player_id: string;
+  seed_number: number;
+  display_name: string;
+  created_at: string;
+};
+
+type TournamentScoreRow = {
+  id: string;
+  tournament_id: string;
+  tournament_entry_id: string;
+  round_id: string;
+  score: number;
+  created_at: string;
+};
+
+type StartTournamentRow = {
+  tournament_id: string;
+  entrant_count: number;
+  current_round_id: string;
+  current_round_number: number;
+};
+
 const tournamentSelect =
-  "id,name,player_count,format_id,status,has_started,created_at";
+  "id,name,player_count,format_id,status,has_started,current_round_id,current_round_number,created_at";
 
 function mapTournamentRow(row: TournamentRow): Omit<
   TournamentSummary,
@@ -67,6 +116,8 @@ function mapTournamentRow(row: TournamentRow): Omit<
     formatId: row.format_id,
     status: row.status,
     hasStarted: row.has_started,
+    currentRoundId: row.current_round_id,
+    currentRoundNumber: row.current_round_number,
     createdAt: row.created_at,
   };
 }
@@ -75,6 +126,16 @@ function mapTournamentPlayerRow(row: TournamentPlayerRow): TournamentPlayer {
   return {
     id: row.id,
     displayName: row.display_name ?? row.riot_puuid ?? "Unknown player",
+    createdAt: row.created_at,
+  };
+}
+
+function mapTournamentEntryRow(row: TournamentEntryRow): TournamentEntry {
+  return {
+    id: row.id,
+    tournamentPlayerId: row.tournament_player_id,
+    displayName: row.display_name,
+    seedNumber: row.seed_number,
     createdAt: row.created_at,
   };
 }
@@ -178,10 +239,55 @@ export async function getTournamentDetail(
       },
     },
   );
+  const entries = await supabaseRestRequest<TournamentEntryRow[]>(
+    "tournament_entries",
+    {
+      query: {
+        select:
+          "id,tournament_id,tournament_player_id,seed_number,display_name,created_at",
+        tournament_id: `eq.${tournamentId}`,
+        order: "seed_number.asc",
+      },
+    },
+  );
+  const scores = await supabaseRestRequest<TournamentScoreRow[]>(
+    "tournament_scores",
+    {
+      query: {
+        select:
+          "id,tournament_id,tournament_entry_id,round_id,score,created_at",
+        tournament_id: `eq.${tournamentId}`,
+      },
+    },
+  );
+  const entryById = new Map(
+    entries.map((entry) => [entry.id, mapTournamentEntryRow(entry)]),
+  );
 
   return {
     ...mapTournamentRow(tournament),
     players: players.map(mapTournamentPlayerRow),
+    entries: entries.map(mapTournamentEntryRow),
+    scores: scores
+      .map((score) => {
+        const entry = entryById.get(score.tournament_entry_id);
+
+        if (!entry) {
+          return null;
+        }
+
+        return {
+          id: score.id,
+          tournamentEntryId: score.tournament_entry_id,
+          displayName: entry.displayName,
+          seedNumber: entry.seedNumber,
+          roundId: score.round_id,
+          score: score.score,
+          createdAt: score.created_at,
+        };
+      })
+      .filter((score): score is TournamentScore => score !== null)
+      .sort((a, b) => a.seedNumber - b.seedNumber),
   };
 }
 
@@ -190,6 +296,22 @@ export async function registerTournamentPlayer(input: {
   riotAccount: VerifiedRiotAccount;
 }): Promise<TournamentPlayer> {
   let rows: TournamentPlayerRow[];
+  const tournaments = await supabaseRestRequest<TournamentRow[]>("tournaments", {
+    query: {
+      select: tournamentSelect,
+      id: `eq.${input.tournamentId}`,
+      limit: "1",
+    },
+  });
+  const tournament = tournaments[0];
+
+  if (!tournament) {
+    throw new Error("Tournament was not found.");
+  }
+
+  if (tournament.status !== TOURNAMENT_STATUS_ACCEPTING_PLAYERS) {
+    throw new Error("Registration is closed because the tournament has started.");
+  }
 
   try {
     rows = await supabaseRestRequest<TournamentPlayerRow[]>(
@@ -225,4 +347,25 @@ export async function registerTournamentPlayer(input: {
   }
 
   return mapTournamentPlayerRow(player);
+}
+
+export async function startTournament(input: {
+  tournamentId: string;
+}): Promise<StartTournamentRow> {
+  const rows = await supabaseRestRequest<StartTournamentRow[]>(
+    "rpc/start_tournament",
+    {
+      method: "POST",
+      body: {
+        p_tournament_id: input.tournamentId,
+      },
+    },
+  );
+  const result = rows[0];
+
+  if (!result) {
+    throw new Error("Database did not return the started tournament.");
+  }
+
+  return result;
 }
