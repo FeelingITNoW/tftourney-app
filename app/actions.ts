@@ -6,6 +6,7 @@ import defaultTournamentFormat from "@/lib/tournament/formats/default.json";
 import {
   createTournament,
   registerTournamentPlayer,
+  startTournament,
 } from "@/lib/db/tournaments";
 import { getRiotAccountByRiotId } from "@/lib/riot/accounts";
 import { validatePlayerRegistration } from "@/lib/tournament/players";
@@ -112,6 +113,30 @@ export async function registerPlayerAction(formData: FormData) {
     });
   }
 
+  revalidatePath(detailPath);
+  redirect(detailPath);
+}
+
+export async function startTournamentAction(formData: FormData) {
+  const tournamentId = getFormString(formData, "tournamentId");
+  const detailPath = `/tournaments/${tournamentId}`;
+
+  if (!tournamentId) {
+    redirectWithParams("/", {
+      createError: "Tournament was not found.",
+    });
+  }
+
+  try {
+    await startTournament({ tournamentId });
+  } catch (error) {
+    redirectWithParams(detailPath, {
+      startError:
+        error instanceof Error ? error.message : "Tournament could not be started.",
+    });
+  }
+
+  revalidatePath("/");
   revalidatePath(detailPath);
   redirect(detailPath);
 }
