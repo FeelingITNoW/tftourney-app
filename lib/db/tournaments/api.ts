@@ -1,57 +1,16 @@
-import { DatabaseRequestError, supabaseRestRequest } from "./supabase-rest";
-import type { VerifiedRiotAccount } from "@/lib/riot/accounts";
-
-export const TOURNAMENT_STATUS_ACCEPTING_PLAYERS = "accepting_players";
-
-export type TournamentStatus =
-  | typeof TOURNAMENT_STATUS_ACCEPTING_PLAYERS
-  | "in_progress"
-  | "completed"
-  | "cancelled";
-
-export type TournamentSummary = {
-  id: string;
-  name: string;
-  playerCount: number;
-  formatId: string;
-  status: TournamentStatus;
-  hasStarted: boolean;
-  createdAt: string;
-  registeredPlayerCount: number;
-};
-
-export type TournamentPlayer = {
-  id: string;
-  displayName: string;
-  createdAt: string;
-};
-
-export type TournamentDetail = Omit<
-  TournamentSummary,
-  "registeredPlayerCount"
-> & {
-  players: TournamentPlayer[];
-};
+import { DatabaseRequestError } from "../supabase-rest/errors";
+import { supabaseRestRequest } from "../supabase-rest/api";
+import type { VerifiedRiotAccount } from "@/lib/riot/accounts/types";
+import {
+  TOURNAMENT_STATUS_ACCEPTING_PLAYERS,
+  type TournamentDetail,
+  type TournamentPlayer,
+  type TournamentPlayerRow,
+  type TournamentRow,
+  type TournamentSummary,
+} from "./types";
 
 const STANDARD_HOST_USER_ID = 1;
-
-type TournamentRow = {
-  id: string;
-  name: string;
-  player_count: number;
-  format_id: string;
-  status: TournamentStatus;
-  has_started: boolean;
-  created_at: string;
-};
-
-type TournamentPlayerRow = {
-  id: string;
-  tournament_id: string;
-  display_name: string | null;
-  riot_puuid: string | null;
-  created_at: string;
-};
 
 const tournamentSelect =
   "id,name,player_count,format_id,status,has_started,created_at";
@@ -132,7 +91,7 @@ export async function listTournaments(): Promise<TournamentSummary[]> {
   >("tournament_players", {
     query: {
       select: "tournament_id",
-      tournament_id: `in.(${tournamentIds.join(",")})`,
+      tournament_id: "in.(" + tournamentIds.join(",") + ")",
     },
   });
 
@@ -157,7 +116,7 @@ export async function getTournamentDetail(
   const tournaments = await supabaseRestRequest<TournamentRow[]>("tournaments", {
     query: {
       select: tournamentSelect,
-      id: `eq.${tournamentId}`,
+      id: "eq." + tournamentId,
       limit: "1",
     },
   });
@@ -173,7 +132,7 @@ export async function getTournamentDetail(
     {
       query: {
         select: "id,tournament_id,display_name,riot_puuid,created_at",
-        tournament_id: `eq.${tournamentId}`,
+        tournament_id: "eq." + tournamentId,
         order: "created_at.asc",
       },
     },

@@ -1,30 +1,8 @@
-export class DatabaseConfigError extends Error {
-  constructor() {
-    super(
-      "Database is not configured. Set SUPABASE_URL or NEXT_PUBLIC_SUPABASE_URL, plus SUPABASE_SERVICE_ROLE_KEY, SUPABASE_ANON_KEY, or NEXT_PUBLIC_SUPABASE_ANON_KEY.",
-    );
-    this.name = "DatabaseConfigError";
-  }
-}
-
-export class DatabaseRequestError extends Error {
-  constructor(message: string) {
-    super(message);
-    this.name = "DatabaseRequestError";
-  }
-}
-
-type SupabaseRequestOptions = {
-  method?: "GET" | "POST" | "PATCH" | "DELETE";
-  query?: Record<string, string>;
-  body?: unknown;
-  prefer?: string;
-};
-
-type SupabaseConfig = {
-  url: string;
-  key: string;
-};
+import {
+  DatabaseConfigError,
+  DatabaseRequestError,
+} from "./errors";
+import type { SupabaseConfig, SupabaseRequestOptions } from "./types";
 
 function getSupabaseConfig(): SupabaseConfig | null {
   const url = process.env.NEXT_PUBLIC_SUPABASE_URL ?? process.env.SUPABASE_URL;
@@ -57,7 +35,7 @@ export async function supabaseRestRequest<T>(
     throw new DatabaseConfigError();
   }
 
-  const url = new URL(`${config.url}/rest/v1/${table}`);
+  const url = new URL(config.url + "/rest/v1/" + table);
 
   for (const [key, value] of Object.entries(options.query ?? {})) {
     url.searchParams.set(key, value);
@@ -68,7 +46,7 @@ export async function supabaseRestRequest<T>(
     cache: "no-store",
     headers: {
       apikey: config.key,
-      Authorization: `Bearer ${config.key}`,
+      Authorization: "Bearer " + config.key,
       "Content-Type": "application/json",
       ...(options.prefer ? { Prefer: options.prefer } : {}),
     },
@@ -78,7 +56,10 @@ export async function supabaseRestRequest<T>(
   if (!response.ok) {
     const errorBody = await response.text();
     throw new DatabaseRequestError(
-      `Database request failed with ${response.status}: ${errorBody}`,
+      "Database request failed with " +
+        response.status +
+        ": " +
+        errorBody,
     );
   }
 

@@ -1,41 +1,13 @@
-export class RiotConfigError extends Error {
-  constructor() {
-    super("Riot API is not configured. Set RIOT_API_KEY in .env.local.");
-    this.name = "RiotConfigError";
-  }
-}
-
-export class RiotAccountNotFoundError extends Error {
-  constructor() {
-    super("Riot account was not found. Check the GameName#TAG and try again.");
-    this.name = "RiotAccountNotFoundError";
-  }
-}
-
-export class RiotRequestError extends Error {
-  constructor(message: string) {
-    super(message);
-    this.name = "RiotRequestError";
-  }
-}
-
-export type VerifiedRiotAccount = {
-  puuid: string;
-  gameName: string;
-  tagLine: string;
-  gameTag: string;
-};
-
-type RiotAccountResponse = {
-  puuid: string;
-  gameName: string;
-  tagLine: string;
-};
-
-type RiotConfig = {
-  apiKey: string;
-  accountRegion: string;
-};
+import {
+  RiotAccountNotFoundError,
+  RiotConfigError,
+  RiotRequestError,
+} from "./errors";
+import type {
+  RiotAccountResponse,
+  RiotConfig,
+  VerifiedRiotAccount,
+} from "./types";
 
 const allowedAccountRegions = new Set(["americas", "asia", "europe", "sea"]);
 
@@ -69,7 +41,12 @@ export async function getRiotAccountByRiotId(input: {
   const encodedGameName = encodeURIComponent(input.gameName);
   const encodedTagLine = encodeURIComponent(input.tagLine);
   const response = await fetch(
-    `https://${config.accountRegion}.api.riotgames.com/riot/account/v1/accounts/by-riot-id/${encodedGameName}/${encodedTagLine}`,
+    "https://" +
+      config.accountRegion +
+      ".api.riotgames.com/riot/account/v1/accounts/by-riot-id/" +
+      encodedGameName +
+      "/" +
+      encodedTagLine,
     {
       cache: "no-store",
       headers: {
@@ -92,7 +69,7 @@ export async function getRiotAccountByRiotId(input: {
 
   if (!response.ok) {
     throw new RiotRequestError(
-      `Riot API request failed with ${response.status}.`,
+      "Riot API request failed with " + response.status + ".",
     );
   }
 
@@ -102,6 +79,6 @@ export async function getRiotAccountByRiotId(input: {
     puuid: account.puuid,
     gameName: account.gameName,
     tagLine: account.tagLine,
-    gameTag: `${account.gameName}#${account.tagLine}`,
+    gameTag: account.gameName + "#" + account.tagLine,
   };
 }

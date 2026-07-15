@@ -1,7 +1,7 @@
 import Link from "next/link";
 import { createTournamentAction } from "@/app/actions";
-import { listTournaments } from "@/lib/db/tournaments";
-import type { TournamentSummary } from "@/lib/db/tournaments";
+import { listTournaments } from "@/lib/db/tournaments/api";
+import type { TournamentSummary } from "@/lib/db/tournaments/types";
 import { TOURNAMENT_FORMAT_OPTIONS } from "@/lib/tournament/formats";
 import {
   PLAYERS_PER_TFT_LOBBY,
