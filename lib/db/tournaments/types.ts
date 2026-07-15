@@ -106,6 +106,10 @@ export type CreateTournamentInput = {
   formatConfig: unknown;
 };
 
+export type DeleteTournamentInput = {
+  tournamentId: string;
+};
+
 export type RegisterTournamentPlayerInput = {
   tournamentId: string;
   riotAccount: VerifiedRiotAccount;

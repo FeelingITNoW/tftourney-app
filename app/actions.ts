@@ -5,6 +5,7 @@ import { redirect } from "next/navigation";
 import defaultTournamentFormat from "@/lib/tournament/formats/default.json";
 import {
   createTournament,
+  deleteTournament,
   registerTournamentPlayer,
   startTournament,
 } from "@/lib/db/tournaments/api";
@@ -139,4 +140,35 @@ export async function startTournamentAction(formData: FormData) {
   revalidatePath("/");
   revalidatePath(detailPath);
   redirect(detailPath);
+}
+
+export async function deleteTournamentAction(formData: FormData) {
+  const tournamentId = getFormString(formData, "tournamentId");
+  const confirmation = getFormString(formData, "deleteConfirmation");
+  const detailPath = `/tournaments/${tournamentId}`;
+
+  if (!tournamentId) {
+    redirectWithParams("/", {
+      createError: "Tournament was not found.",
+    });
+  }
+
+  if (confirmation !== "DELETE") {
+    redirectWithParams(detailPath, {
+      deleteError: "Type DELETE exactly to confirm tournament deletion.",
+    });
+  }
+
+  try {
+    await deleteTournament({ tournamentId });
+  } catch (error) {
+    redirectWithParams(detailPath, {
+      deleteError:
+        error instanceof Error ? error.message : "Tournament could not be deleted.",
+    });
+  }
+
+  revalidatePath("/");
+  revalidatePath(detailPath);
+  redirect("/");
 }
