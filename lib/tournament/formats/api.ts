@@ -1,9 +1,6 @@
-export const DEFAULT_TOURNAMENT_FORMAT_ID = "default";
+import type { TournamentFormatOption } from "./types";
 
-export type TournamentFormatOption = {
-  id: string;
-  name: string;
-};
+export const DEFAULT_TOURNAMENT_FORMAT_ID = "default";
 
 export const TOURNAMENT_FORMAT_OPTIONS: TournamentFormatOption[] = [
   {

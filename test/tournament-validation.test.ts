@@ -2,12 +2,12 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import test from "node:test";
-import { validatePlayerRegistration } from "../lib/tournament/players";
+import { validatePlayerRegistration } from "../lib/tournament/players/api";
 import {
   isValidTournamentName,
   isValidTournamentPlayerCount,
   validateTournamentCreation,
-} from "../lib/tournament/validation";
+} from "../lib/tournament/validation/api";
 
 test("accepts tournament player counts that divide exactly into TFT lobbies", () => {
   for (const playerCount of [8, 16, 32, 64, 512]) {

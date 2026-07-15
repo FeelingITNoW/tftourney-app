@@ -1,35 +1,12 @@
 import {
   DEFAULT_TOURNAMENT_FORMAT_ID,
   isValidTournamentFormatId,
-} from "./formats";
-
-export type TournamentCreationInput = {
-  name: string;
-  playerCount: string | number;
-  formatId?: string;
-};
-
-export type TournamentCreationData = {
-  name: string;
-  playerCount: number;
-  formatId: string;
-};
-
-export type TournamentCreationErrors = Partial<
-  Record<keyof TournamentCreationInput, string>
->;
-
-export type TournamentCreationValidation =
-  | {
-      success: true;
-      data: TournamentCreationData;
-      errors: TournamentCreationErrors;
-    }
-  | {
-      success: false;
-      data: null;
-      errors: TournamentCreationErrors;
-    };
+} from "../formats/api";
+import type {
+  TournamentCreationErrors,
+  TournamentCreationInput,
+  TournamentCreationValidation,
+} from "./types";
 
 export const TOURNAMENT_NAME_MIN_LENGTH = 3;
 export const TOURNAMENT_NAME_MAX_LENGTH = 80;

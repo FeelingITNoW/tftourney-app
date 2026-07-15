@@ -6,10 +6,10 @@ import defaultTournamentFormat from "@/lib/tournament/formats/default.json";
 import {
   createTournament,
   registerTournamentPlayer,
-} from "@/lib/db/tournaments";
-import { getRiotAccountByRiotId } from "@/lib/riot/accounts";
-import { validatePlayerRegistration } from "@/lib/tournament/players";
-import { validateTournamentCreation } from "@/lib/tournament/validation";
+} from "@/lib/db/tournaments/api";
+import { getRiotAccountByRiotId } from "@/lib/riot/accounts/api";
+import { validatePlayerRegistration } from "@/lib/tournament/players/api";
+import { validateTournamentCreation } from "@/lib/tournament/validation/api";
 
 function getFormString(formData: FormData, fieldName: string): string {
   const value = formData.get(fieldName);

@@ -1,7 +1,7 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import { registerPlayerAction } from "@/app/actions";
-import { getTournamentDetail } from "@/lib/db/tournaments";
+import { getTournamentDetail } from "@/lib/db/tournaments/api";
 
 export const dynamic = "force-dynamic";
 
