@@ -1,3 +1,8 @@
+import type {
+  SupabaseConfig,
+  SupabaseRequestOptions,
+} from "./types";
+
 export class DatabaseConfigError extends Error {
   constructor() {
     super(
@@ -13,18 +18,6 @@ export class DatabaseRequestError extends Error {
     this.name = "DatabaseRequestError";
   }
 }
-
-type SupabaseRequestOptions = {
-  method?: "GET" | "POST" | "PATCH" | "DELETE";
-  query?: Record<string, string>;
-  body?: unknown;
-  prefer?: string;
-};
-
-type SupabaseConfig = {
-  url: string;
-  key: string;
-};
 
 function getSupabaseConfig(): SupabaseConfig | null {
   const url = process.env.NEXT_PUBLIC_SUPABASE_URL ?? process.env.SUPABASE_URL;

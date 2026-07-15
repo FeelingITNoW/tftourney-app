@@ -1,28 +1,9 @@
-export type PlayerRegistrationInput = {
-  gameTag: string;
-};
-
-export type PlayerRegistrationData = {
-  gameName: string;
-  tagLine: string;
-  gameTag: string;
-};
-
-export type PlayerRegistrationErrors = Partial<
-  Record<keyof PlayerRegistrationInput, string>
->;
-
-export type PlayerRegistrationValidation =
-  | {
-      success: true;
-      data: PlayerRegistrationData;
-      errors: PlayerRegistrationErrors;
-    }
-  | {
-      success: false;
-      data: null;
-      errors: PlayerRegistrationErrors;
-    };
+import type {
+  PlayerRegistrationData,
+  PlayerRegistrationErrors,
+  PlayerRegistrationInput,
+  PlayerRegistrationValidation,
+} from "./types";
 
 export const RIOT_GAME_TAG_MIN_LENGTH = 5;
 export const RIOT_GAME_TAG_MAX_LENGTH = 80;

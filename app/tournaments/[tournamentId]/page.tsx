@@ -4,8 +4,8 @@ import { registerPlayerAction, startTournamentAction } from "@/app/actions";
 import {
   getTournamentDetail,
   TOURNAMENT_STATUS_ACCEPTING_PLAYERS,
-} from "@/lib/db/tournaments";
-import { selectTournamentEntrants } from "@/lib/tournament/start";
+} from "@/lib/db/tournaments/api";
+import { selectTournamentEntrants } from "@/lib/tournament/start/api";
 
 export const dynamic = "force-dynamic";
 

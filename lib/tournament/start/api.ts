@@ -1,12 +1,7 @@
-export type RegisteredTournamentPlayer = {
-  id: string;
-  displayName: string;
-  createdAt: string;
-};
-
-export type TournamentEntrantSelection = RegisteredTournamentPlayer & {
-  seedNumber: number;
-};
+import type {
+  RegisteredTournamentPlayer,
+  TournamentEntrantSelection,
+} from "./types";
 
 export const INITIAL_TOURNAMENT_ROUND_NUMBER = 1;
 

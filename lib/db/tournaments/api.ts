@@ -1,108 +1,27 @@
-import { DatabaseRequestError, supabaseRestRequest } from "./supabase-rest";
-import type { VerifiedRiotAccount } from "@/lib/riot/accounts";
+import {
+  DatabaseRequestError,
+  supabaseRestRequest,
+} from "../supabase-rest/api";
+import type {
+  CreateTournamentInput,
+  RegisterTournamentPlayerInput,
+  StartTournamentInput,
+  StartTournamentResult,
+  TournamentDetail,
+  TournamentParticipant,
+  TournamentParticipantRow,
+  TournamentRegistration,
+  TournamentRegistrationRow,
+  TournamentRoundRow,
+  TournamentScore,
+  TournamentScoreRow,
+  TournamentRow,
+  TournamentSummary,
+} from "./types";
 
 export const TOURNAMENT_STATUS_ACCEPTING_PLAYERS = "accepting_players";
 
-export type TournamentStatus =
-  | typeof TOURNAMENT_STATUS_ACCEPTING_PLAYERS
-  | "in_progress"
-  | "completed"
-  | "cancelled";
-
-export type TournamentSummary = {
-  id: string;
-  name: string;
-  playerCount: number;
-  formatId: string;
-  status: TournamentStatus;
-  hasStarted: boolean;
-  currentRoundId: string | null;
-  currentRoundNumber: number | null;
-  createdAt: string;
-  registeredPlayerCount: number;
-};
-
-export type TournamentRegistration = {
-  id: string;
-  displayName: string;
-  createdAt: string;
-};
-
-export type TournamentParticipant = {
-  id: string;
-  registrationId: string;
-  displayName: string;
-  seedNumber: number;
-  createdAt: string;
-};
-
-export type TournamentScore = {
-  id: string;
-  participantId: string;
-  displayName: string;
-  seedNumber: number;
-  roundId: string;
-  score: number;
-  createdAt: string;
-};
-
-export type TournamentDetail = Omit<
-  TournamentSummary,
-  "registeredPlayerCount"
-> & {
-  registrations: TournamentRegistration[];
-  participants: TournamentParticipant[];
-  scores: TournamentScore[];
-};
-
 const STANDARD_HOST_USER_ID = 1;
-
-type TournamentRow = {
-  id: string | number;
-  name: string;
-  max_players: number;
-  format_id: string;
-  status: TournamentStatus;
-  current_round_id: string | number | null;
-  created_at: string;
-};
-
-type TournamentRegistrationRow = {
-  id: string | number;
-  tournament_id: string | number;
-  display_name: string | null;
-  riot_puuid: string | null;
-  created_at: string;
-};
-
-type TournamentParticipantRow = {
-  id: string;
-  tournament_id: string | number;
-  registration_id: string | number;
-  seed_number: number;
-  display_name_at_start: string;
-  created_at: string;
-};
-
-type TournamentScoreRow = {
-  id: string;
-  participant_id: string;
-  round_id: string | number;
-  score: number;
-  created_at: string;
-};
-
-type TournamentRoundRow = {
-  id: string | number;
-  round_number: number;
-};
-
-type StartTournamentRow = {
-  started_tournament_id: string;
-  started_entrant_count: number;
-  started_round_id: string;
-  started_round_number: number;
-};
 
 const tournamentSelect =
   "id,name,max_players,format_id,status,current_round_id,created_at";
@@ -147,12 +66,9 @@ function mapTournamentParticipantRow(
   };
 }
 
-export async function createTournament(input: {
-  name: string;
-  playerCount: number;
-  formatId: string;
-  formatConfig: unknown;
-}): Promise<TournamentSummary> {
+export async function createTournament(
+  input: CreateTournamentInput,
+): Promise<TournamentSummary> {
   const rows = await supabaseRestRequest<TournamentRow[]>("tournaments", {
     method: "POST",
     query: {
@@ -288,7 +204,12 @@ export async function getTournamentDetail(
             participant_id: `in.(${participantIds.join(",")})`,
           },
         }
-      : { query: { select: "id,participant_id,round_id,score,created_at", limit: "0" } },
+      : {
+          query: {
+            select: "id,participant_id,round_id,score,created_at",
+            limit: "0",
+          },
+        },
   );
   const currentRound = tournament.current_round_id
     ? (
@@ -336,10 +257,9 @@ export async function getTournamentDetail(
   };
 }
 
-export async function registerTournamentPlayer(input: {
-  tournamentId: string;
-  riotAccount: VerifiedRiotAccount;
-}): Promise<TournamentRegistration> {
+export async function registerTournamentPlayer(
+  input: RegisterTournamentPlayerInput,
+): Promise<TournamentRegistration> {
   let rows: TournamentRegistrationRow[];
   const tournaments = await supabaseRestRequest<TournamentRow[]>("tournaments", {
     query: {
@@ -394,10 +314,10 @@ export async function registerTournamentPlayer(input: {
   return mapTournamentRegistrationRow(player);
 }
 
-export async function startTournament(input: {
-  tournamentId: string;
-}): Promise<StartTournamentRow> {
-  const rows = await supabaseRestRequest<StartTournamentRow[]>(
+export async function startTournament(
+  input: StartTournamentInput,
+): Promise<StartTournamentResult> {
+  const rows = await supabaseRestRequest<StartTournamentResult[]>(
     "rpc/start_tournament",
     {
       method: "POST",

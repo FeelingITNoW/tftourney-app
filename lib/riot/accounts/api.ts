@@ -1,3 +1,9 @@
+import type {
+  RiotAccountResponse,
+  RiotConfig,
+  VerifiedRiotAccount,
+} from "./types";
+
 export class RiotConfigError extends Error {
   constructor() {
     super("Riot API is not configured. Set RIOT_API_KEY in .env.local.");
@@ -18,24 +24,6 @@ export class RiotRequestError extends Error {
     this.name = "RiotRequestError";
   }
 }
-
-export type VerifiedRiotAccount = {
-  puuid: string;
-  gameName: string;
-  tagLine: string;
-  gameTag: string;
-};
-
-type RiotAccountResponse = {
-  puuid: string;
-  gameName: string;
-  tagLine: string;
-};
-
-type RiotConfig = {
-  apiKey: string;
-  accountRegion: string;
-};
 
 const allowedAccountRegions = new Set(["americas", "asia", "europe", "sea"]);
 
