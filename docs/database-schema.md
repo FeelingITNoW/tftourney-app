@@ -25,7 +25,7 @@ CREATE TABLE public.tournaments (
   updated_at timestamptz NOT NULL DEFAULT now(),
   CONSTRAINT tournaments_pkey PRIMARY KEY (id),
   CONSTRAINT tournaments_current_round_id_fkey
-    FOREIGN KEY (current_round_id) REFERENCES public.rounds(id)
+    FOREIGN KEY (current_round_id) REFERENCES public.rounds(id) ON DELETE SET NULL
 );
 
 CREATE TABLE public.tournament_registrations (
@@ -39,7 +39,7 @@ CREATE TABLE public.tournament_registrations (
   updated_at timestamptz NOT NULL DEFAULT now(),
   CONSTRAINT tournament_registrations_pkey PRIMARY KEY (id),
   CONSTRAINT tournament_registrations_tournament_id_fkey
-    FOREIGN KEY (tournament_id) REFERENCES public.tournaments(id)
+    FOREIGN KEY (tournament_id) REFERENCES public.tournaments(id) ON DELETE CASCADE
 );
 
 CREATE TABLE public.rounds (
@@ -54,7 +54,7 @@ CREATE TABLE public.rounds (
   updated_at timestamptz NOT NULL DEFAULT now(),
   CONSTRAINT rounds_pkey PRIMARY KEY (id),
   CONSTRAINT rounds_tournament_id_fkey
-    FOREIGN KEY (tournament_id) REFERENCES public.tournaments(id)
+    FOREIGN KEY (tournament_id) REFERENCES public.tournaments(id) ON DELETE CASCADE
 );
 
 CREATE TABLE public.tournament_participants (
@@ -66,10 +66,10 @@ CREATE TABLE public.tournament_participants (
   created_at timestamptz NOT NULL DEFAULT now(),
   CONSTRAINT tournament_participants_pkey PRIMARY KEY (id),
   CONSTRAINT tournament_participants_tournament_id_fkey
-    FOREIGN KEY (tournament_id) REFERENCES public.tournaments(id),
+    FOREIGN KEY (tournament_id) REFERENCES public.tournaments(id) ON DELETE CASCADE,
   CONSTRAINT tournament_participants_registration_tournament_fk
     FOREIGN KEY (registration_id, tournament_id)
-    REFERENCES public.tournament_registrations(id, tournament_id)
+    REFERENCES public.tournament_registrations(id, tournament_id) ON DELETE CASCADE
 );
 
 CREATE TABLE public.lobbies (
@@ -80,7 +80,7 @@ CREATE TABLE public.lobbies (
   updated_at timestamptz NOT NULL DEFAULT now(),
   CONSTRAINT lobbies_pkey PRIMARY KEY (id),
   CONSTRAINT lobbies_round_id_fkey
-    FOREIGN KEY (round_id) REFERENCES public.rounds(id)
+    FOREIGN KEY (round_id) REFERENCES public.rounds(id) ON DELETE CASCADE
 );
 
 CREATE TABLE public.lobby_participants (
@@ -96,9 +96,10 @@ CREATE TABLE public.lobby_participants (
   updated_at timestamptz NOT NULL DEFAULT now(),
   CONSTRAINT lobby_participants_pkey PRIMARY KEY (id),
   CONSTRAINT lobby_participants_lobby_id_fkey
-    FOREIGN KEY (lobby_id) REFERENCES public.lobbies(id),
+    FOREIGN KEY (lobby_id) REFERENCES public.lobbies(id) ON DELETE CASCADE,
   CONSTRAINT lobby_participants_participant_fk
     FOREIGN KEY (participant_id) REFERENCES public.tournament_participants(id)
+    ON DELETE CASCADE
 );
 
 CREATE TABLE public.participant_round_scores (
@@ -110,9 +111,10 @@ CREATE TABLE public.participant_round_scores (
   updated_at timestamptz NOT NULL DEFAULT now(),
   CONSTRAINT participant_round_scores_pkey PRIMARY KEY (id),
   CONSTRAINT participant_round_scores_round_fk
-    FOREIGN KEY (round_id) REFERENCES public.rounds(id),
+    FOREIGN KEY (round_id) REFERENCES public.rounds(id) ON DELETE CASCADE,
   CONSTRAINT participant_round_scores_participant_fk
     FOREIGN KEY (participant_id) REFERENCES public.tournament_participants(id)
+    ON DELETE CASCADE
 );
 
 -- Important unique indexes:

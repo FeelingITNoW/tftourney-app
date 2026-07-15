@@ -1,6 +1,10 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
-import { registerPlayerAction, startTournamentAction } from "@/app/actions";
+import {
+  deleteTournamentAction,
+  registerPlayerAction,
+  startTournamentAction,
+} from "@/app/actions";
 import {
   getTournamentDetail,
   TOURNAMENT_STATUS_ACCEPTING_PLAYERS,
@@ -16,6 +20,7 @@ type TournamentPageParams = Promise<{
 type TournamentPageSearchParams = Promise<{
   registrationError?: string | string[];
   startError?: string | string[];
+  deleteError?: string | string[];
 }>;
 
 function getSearchValue(value: string | string[] | undefined): string {
@@ -37,6 +42,7 @@ export default async function TournamentPage({
   const query = await searchParams;
   const registrationError = getSearchValue(query.registrationError);
   const startError = getSearchValue(query.startError);
+  const deleteError = getSearchValue(query.deleteError);
   let tournament;
   let databaseError = "";
 
@@ -231,6 +237,56 @@ export default async function TournamentPage({
                   {registrationError ? (
                     <p className="mt-3 text-sm font-medium text-red-700">
                       {registrationError}
+                    </p>
+                  ) : null}
+                </div>
+
+                <div className="rounded-lg border border-red-200 bg-red-50 p-5 shadow-sm">
+                  <h2 className="text-lg font-semibold text-red-950">
+                    Delete tournament
+                  </h2>
+                  <p className="mt-2 text-sm text-red-800">
+                    Permanently deletes this tournament, all registrations,
+                    rounds, lobbies, participants, and scores.
+                  </p>
+                  <form
+                    action={deleteTournamentAction}
+                    className="mt-4 space-y-4"
+                  >
+                    <input
+                      name="tournamentId"
+                      type="hidden"
+                      value={tournament.id}
+                    />
+                    <div>
+                      <label
+                        className="block text-sm font-medium text-red-950"
+                        htmlFor="deleteConfirmation"
+                      >
+                        Type DELETE to confirm
+                      </label>
+                      <input
+                        autoComplete="off"
+                        className="mt-2 h-11 w-full rounded-md border border-red-300 bg-white px-3 text-base text-zinc-950 outline-none transition focus:border-red-700 focus:ring-2 focus:ring-red-100"
+                        id="deleteConfirmation"
+                        name="deleteConfirmation"
+                        pattern="DELETE"
+                        placeholder="DELETE"
+                        required
+                        spellCheck={false}
+                        type="text"
+                      />
+                    </div>
+                    <button
+                      className="flex h-11 w-full items-center justify-center rounded-md bg-red-700 px-4 text-sm font-semibold text-white transition hover:bg-red-800 focus:outline-none focus:ring-2 focus:ring-red-600 focus:ring-offset-2"
+                      type="submit"
+                    >
+                      Delete tournament permanently
+                    </button>
+                  </form>
+                  {deleteError ? (
+                    <p className="mt-3 text-sm font-medium text-red-800">
+                      {deleteError}
                     </p>
                   ) : null}
                 </div>

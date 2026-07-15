@@ -4,6 +4,7 @@ import {
 } from "../supabase-rest/api";
 import type {
   CreateTournamentInput,
+  DeleteTournamentInput,
   RegisterTournamentPlayerInput,
   StartTournamentInput,
   StartTournamentResult,
@@ -95,6 +96,25 @@ export async function createTournament(
     ...mapTournamentRow(tournament),
     registeredPlayerCount: 0,
   };
+}
+
+export async function deleteTournament(
+  input: DeleteTournamentInput,
+): Promise<void> {
+  const deletedTournaments = await supabaseRestRequest<
+    Pick<TournamentRow, "id">[]
+  >("tournaments", {
+    method: "DELETE",
+    query: {
+      id: `eq.${input.tournamentId}`,
+      select: "id",
+    },
+    prefer: "return=representation",
+  });
+
+  if (!deletedTournaments?.length) {
+    throw new Error("Tournament was not found.");
+  }
 }
 
 export async function listTournaments(): Promise<TournamentSummary[]> {
