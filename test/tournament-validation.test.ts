@@ -108,6 +108,16 @@ test("default tournament format uses a qualifier into a six-game final", () => {
   );
 
   assert.equal(format.isDefault, true);
+  assert.deepEqual(format.placementPoints, {
+    "1": 8,
+    "2": 7,
+    "3": 6,
+    "4": 5,
+    "5": 4,
+    "6": 3,
+    "7": 2,
+    "8": 1,
+  });
   assert.equal(format.rounds.length, 2);
 
   const [openingRound, finalRound] = format.rounds;
