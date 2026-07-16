@@ -300,6 +300,7 @@ export function Scoresheet({ gameScores, rounds, scores }: ScoresheetProps) {
   if (!activeTab) {
     return null;
 <<<<<<< HEAD
+<<<<<<< HEAD
 >>>>>>> ca21f53 (Added multiple games per round support)
 =======
 =======
@@ -356,10 +357,13 @@ export function Scoresheet({ lobbies, roundLabel, scores }: ScoresheetProps) {
 =======
 =======
 >>>>>>> 1300bff (Added multi-round support)
+=======
+>>>>>>> 7cff729 (fixed merge conflict)
             {activeTab.id === OVERALL_TAB_ID
               ? "Combined standings across every round"
               : `${activeTab.label} game-by-game standings`}
             , ranked from highest to lowest points.
+<<<<<<< HEAD
 <<<<<<< HEAD
 >>>>>>> ca21f53 (Added multiple games per round support)
 =======
@@ -548,6 +552,7 @@ export function Scoresheet({ lobbies, roundLabel, scores }: ScoresheetProps) {
                   >
                     Total
                   </th>
+<<<<<<< HEAD
 <<<<<<< HEAD
 >>>>>>> ca21f53 (Added multiple games per round support)
 >>>>>>> 60dbee6 (Added multiple games per round support)

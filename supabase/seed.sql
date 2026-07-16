@@ -153,7 +153,7 @@ begin
           },
           "winCondition": {
             "type": "highest_points_after_games",
-            "games": 2,
+            "games": 6,
             "rankingMetric": "points"
           }
         }

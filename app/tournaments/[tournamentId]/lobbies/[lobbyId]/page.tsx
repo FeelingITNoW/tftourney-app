@@ -116,8 +116,6 @@ export default async function LobbyScoresPage({
             href={backToTournamentHref}
           >
             Back to lobby browser
->>>>>>> 67350be (Added multi-round support)
->>>>>>> 1300bff (Added multi-round support)
           </Link>
         </header>
 

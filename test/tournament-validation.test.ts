@@ -100,7 +100,7 @@ test("rejects invalid Riot IDs for player registration", () => {
   }
 });
 
-test("default tournament format specifies two games for every round", () => {
+test("default tournament format specifies six-game rounds with reseeding", () => {
   const format = JSON.parse(
     readFileSync(
       join(process.cwd(), "lib/tournament/formats/default.json"),
@@ -147,6 +147,8 @@ test("default tournament format specifies two games for every round", () => {
 =======
   assert.equal(openingRound.games, 2);
 =======
+=======
+>>>>>>> 7cff729 (fixed merge conflict)
   assert.equal(openingRound.games, 6);
   assert.equal(openingRound.reseed, 2);
   assert.deepEqual(openingRound.standings.tieBreakers, [
@@ -154,8 +156,11 @@ test("default tournament format specifies two games for every round", () => {
     { rankingMetric: "round_entry_seed", sortDirection: "asc" },
   ]);
   assert.equal(openingRound.reseedStandings.rankingMetric, "tournament_points");
+<<<<<<< HEAD
 >>>>>>> 67350be (Added multi-round support)
 >>>>>>> 1300bff (Added multi-round support)
+=======
+>>>>>>> 7cff729 (fixed merge conflict)
   assert.deepEqual(openingRound.advancement, {
     type: "top_n",
     count: 8,
@@ -164,10 +169,11 @@ test("default tournament format specifies two games for every round", () => {
   });
 
   assert.equal(finalRound.lobbySeeding, "random");
-  assert.equal(finalRound.games, 2);
+  assert.equal(finalRound.games, 6);
+  assert.equal(finalRound.reseed, 2);
   assert.deepEqual(finalRound.winCondition, {
     type: "highest_points_after_games",
-    games: 2,
+    games: 6,
     rankingMetric: "points",
   });
 });

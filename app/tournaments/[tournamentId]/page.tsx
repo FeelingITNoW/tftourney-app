@@ -13,6 +13,7 @@ import { Scoresheet } from "@/components/tournaments/scoresheet";
 >>>>>>> 1300bff (Added multi-round support)
 import { LobbyBrowser } from "@/components/tournaments/lobby-browser";
 import { RoundTabs } from "@/components/tournaments/round-tabs";
+import { Scoresheet } from "@/components/tournaments/scoresheet";
 import { TournamentDetails } from "@/components/tournaments/tournament-details";
 import {
   getTournamentDetail,
@@ -95,12 +96,19 @@ export default async function TournamentPage({
     tournament?.participants.map((participant) => participant.registrationId) ??
       [],
   );
-  const currentRoundScores =
-    tournament?.scores.filter(
-      (score) => score.roundId === tournament.currentRoundId,
-    ) ?? [];
-  const scoresheetVersion = currentRoundScores
-    .map((score) => `${score.id}:${score.score}`)
+  const scoresheetVersion = (tournament?.scores ?? [])
+    .map((score) => `${score.id}:${score.roundId}:${score.score}`)
+    .concat(
+      tournament?.gameScores.map(
+        (score) =>
+          `${score.participantId}:${score.roundId}:game-${score.gameNumber}:${score.score ?? "pending"}`,
+      ) ?? [],
+    )
+    .concat(
+      tournament?.rounds.map(
+        (round) => `${round.id}:round-${round.roundNumber}`,
+      ) ?? [],
+    )
     .join("|");
   const isTournamentCompleted = tournament?.status === "completed";
 
@@ -452,14 +460,10 @@ export default async function TournamentPage({
                   }
                   scoresheet={
                     <Scoresheet
+                      gameScores={tournament.gameScores}
                       key={scoresheetVersion}
-                      roundLabel={
-                        tournament.currentRoundNumber
-                          ? `Round ${tournament.currentRoundNumber}`
-                          : "the current round"
-                      }
-                      lobbies={tournament.lobbies}
-                      scores={currentRoundScores}
+                      rounds={tournament.rounds}
+                      scores={tournament.scores}
                     />
                   }
                 />
