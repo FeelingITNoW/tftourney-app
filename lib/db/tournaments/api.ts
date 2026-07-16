@@ -356,30 +356,6 @@ export async function getTournamentDetail(
           },
         },
   );
-<<<<<<< HEAD
-<<<<<<< HEAD
-<<<<<<< HEAD
-  const currentRound = tournament.current_round_id
-    ? (
-        await supabaseRestRequest<TournamentRoundRow[]>("rounds", {
-          query: {
-            select: "id,round_number,format_round_id,status",
-            id: `eq.${tournament.current_round_id}`,
-            limit: "1",
-          },
-        })
-      )[0]
-    : null;
-  const lobbies = tournament.current_round_id
-    ? await supabaseRestRequest<TournamentLobbyRow[]>("lobbies", {
-        query: {
-          select: "id,round_id,game_number,lobby_number",
-          round_id: `eq.${tournament.current_round_id}`,
-=======
-=======
->>>>>>> 1300bff (Added multi-round support)
-=======
->>>>>>> 7cff729 (fixed merge conflict)
   const rounds = await supabaseRestRequest<TournamentRoundRow[]>("rounds", {
     query: {
       select: "id,round_number,format_round_id,status",
@@ -396,31 +372,6 @@ export async function getTournamentDetail(
         query: {
           select: "id,round_id,game_number,lobby_number",
           round_id: `in.(${roundIds.join(",")})`,
-<<<<<<< HEAD
-<<<<<<< HEAD
->>>>>>> ca21f53 (Added multiple games per round support)
-=======
-=======
-  const currentRound = tournament.current_round_id
-    ? (
-        await supabaseRestRequest<TournamentRoundRow[]>("rounds", {
-          query: {
-            select: "id,round_number,format_round_id,status",
-            id: `eq.${tournament.current_round_id}`,
-            limit: "1",
-          },
-        })
-      )[0]
-    : null;
-  const lobbies = tournament.current_round_id
-    ? await supabaseRestRequest<TournamentLobbyRow[]>("lobbies", {
-        query: {
-          select: "id,round_id,game_number,lobby_number",
-          round_id: `eq.${tournament.current_round_id}`,
->>>>>>> 67350be (Added multi-round support)
->>>>>>> 1300bff (Added multi-round support)
-=======
->>>>>>> 7cff729 (fixed merge conflict)
           order: "game_number.asc,lobby_number.asc",
         },
       })
@@ -448,24 +399,6 @@ export async function getTournamentDetail(
       mapTournamentParticipantRow(participant),
     ]),
   );
-<<<<<<< HEAD
-<<<<<<< HEAD
-<<<<<<< HEAD
-  const roundSeedByParticipantRound = new Map(
-    scores.map((score) => [
-      `${String(score.round_id)}:${score.participant_id}`,
-      score.round_seed_number,
-    ]),
-<<<<<<< HEAD
->>>>>>> 67350be (Added multi-round support)
-=======
-=======
-  const lobbyById = new Map(
-    allLobbies.map((lobby) => [String(lobby.id), lobby]),
->>>>>>> ca21f53 (Added multiple games per round support)
-=======
-=======
->>>>>>> 7cff729 (fixed merge conflict)
   const lobbyById = new Map(
     allLobbies.map((lobby) => [String(lobby.id), lobby]),
   );
@@ -474,11 +407,6 @@ export async function getTournamentDetail(
       `${String(score.round_id)}:${score.participant_id}`,
       score.round_seed_number,
     ]),
-<<<<<<< HEAD
->>>>>>> 67350be (Added multi-round support)
->>>>>>> 1300bff (Added multi-round support)
-=======
->>>>>>> 7cff729 (fixed merge conflict)
   );
   const lobbyParticipantsByLobbyId = new Map<
     string,
@@ -511,37 +439,6 @@ export async function getTournamentDetail(
     lobbyParticipantsByLobbyId.set(lobbyId, assignedParticipants);
   }
 
-<<<<<<< HEAD
-<<<<<<< HEAD
-<<<<<<< HEAD
-  const mappedLobbies = lobbies.map((lobby) => ({
-    id: String(lobby.id),
-    roundId: String(lobby.round_id),
-    gameNumber: lobby.game_number,
-    lobbyNumber: lobby.lobby_number,
-    participants: lobbyParticipantsByLobbyId.get(String(lobby.id)) ?? [],
-  }));
-  const currentFormatRound = getConfiguredRound(
-    tournament.format_config,
-    currentRound?.format_round_id,
-  );
-  const roundProgress = getRoundProgress(mappedLobbies, currentFormatRound);
-  const nextRound = getNextRoundMetadata(
-    currentRound ?? null,
-    currentFormatRound,
-    tournament.format_config,
-  );
-  const progressionAction: TournamentProgressionAction =
-    tournament.status === "in_progress" && roundProgress?.isComplete
-      ? nextRound
-        ? "create_next_round"
-        : "complete_tournament"
-      : null;
-=======
-=======
->>>>>>> 1300bff (Added multi-round support)
-=======
->>>>>>> 7cff729 (fixed merge conflict)
   const gameScores = lobbyParticipants
     .map((lobbyParticipant) => {
       const participant = participantById.get(lobbyParticipant.participant_id);
@@ -565,13 +462,6 @@ export async function getTournamentDetail(
       };
     })
     .filter((score): score is TournamentGameScore => score !== null);
-<<<<<<< HEAD
-<<<<<<< HEAD
->>>>>>> ca21f53 (Added multiple games per round support)
-=======
-=======
-=======
->>>>>>> 7cff729 (fixed merge conflict)
   const mappedLobbies = lobbies.map((lobby) => ({
     id: String(lobby.id),
     roundId: String(lobby.round_id),
@@ -595,50 +485,18 @@ export async function getTournamentDetail(
         ? "create_next_round"
         : "complete_tournament"
       : null;
-<<<<<<< HEAD
->>>>>>> 67350be (Added multi-round support)
->>>>>>> 1300bff (Added multi-round support)
-=======
->>>>>>> 7cff729 (fixed merge conflict)
 
   return {
     ...mapTournamentRow(tournament),
     currentRoundNumber: currentRound?.round_number ?? null,
     registrations: registrations.map(mapTournamentRegistrationRow),
     participants: participants.map(mapTournamentParticipantRow),
-<<<<<<< HEAD
-<<<<<<< HEAD
-<<<<<<< HEAD
-    lobbies: mappedLobbies,
-=======
-=======
->>>>>>> 1300bff (Added multi-round support)
-=======
->>>>>>> 7cff729 (fixed merge conflict)
     rounds: rounds.map((round) => ({
       id: String(round.id),
       roundNumber: round.round_number,
     })),
-<<<<<<< HEAD
-    lobbies: lobbies.map((lobby) => ({
-      id: String(lobby.id),
-      roundId: String(lobby.round_id),
-      gameNumber: lobby.game_number,
-      lobbyNumber: lobby.lobby_number,
-      participants: lobbyParticipantsByLobbyId.get(String(lobby.id)) ?? [],
-    })),
-    gameScores,
-<<<<<<< HEAD
->>>>>>> ca21f53 (Added multiple games per round support)
-=======
-=======
-    lobbies: mappedLobbies,
->>>>>>> 67350be (Added multi-round support)
->>>>>>> 1300bff (Added multi-round support)
-=======
     lobbies: mappedLobbies,
     gameScores,
->>>>>>> 7cff729 (fixed merge conflict)
     scores: scores
       .map((score) => {
         const participant = participantById.get(score.participant_id);

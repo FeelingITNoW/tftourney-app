@@ -34,16 +34,11 @@ export default async function LobbyScoresPage({
   searchParams: LobbyPageSearchParams;
 }) {
   const { tournamentId, lobbyId } = await params;
-  const currentRoundPath = `/tournaments/${tournamentId}/rounds/current`;
-  const currentRoundPath = `/tournaments/${tournamentId}/rounds/current`;
   const query = await searchParams;
   const returnGame = getSearchValue(query.game);
   const returnPage = getSearchValue(query.page);
   const scoreError = getSearchValue(query.scoreError);
   const saved = getSearchValue(query.saved) === "true";
-  let tournament:
-    | Awaited<ReturnType<typeof getTournamentDetail>>
-    | undefined;
   let tournament:
     | Awaited<ReturnType<typeof getTournamentDetail>>
     | undefined;
@@ -98,21 +93,6 @@ export default async function LobbyScoresPage({
           </div>
           <Link
             className="rounded-md border border-zinc-200 bg-white px-3 py-2 text-sm font-medium text-zinc-600 shadow-sm hover:bg-zinc-50"
-<<<<<<< HEAD
-<<<<<<< HEAD
-            href={backToTournamentHref}
-          >
-            Back to lobby browser
-=======
-            href={currentRoundPath}
-          >
-            Back to current round
->>>>>>> ca21f53 (Added multiple games per round support)
-=======
-            href={currentRoundPath}
-          >
-            Back to current round
-=======
             href={backToTournamentHref}
           >
             Back to lobby browser
@@ -144,12 +124,6 @@ export default async function LobbyScoresPage({
                     {tournament.currentRoundNumber
                       ? `Round ${tournament.currentRoundNumber}`
                       : lobby.roundId}
-                  </dd>
-                </div>
-                <div className="border-l-4 border-sky-600 bg-white px-4 py-3 shadow-sm">
-                  <dt className="text-zinc-500">Game</dt>
-                  <dd className="mt-1 font-semibold text-zinc-950">
-                    Game {lobby.gameNumber}
                   </dd>
                 </div>
                 <div className="border-l-4 border-sky-600 bg-white px-4 py-3 shadow-sm">
@@ -209,18 +183,15 @@ export default async function LobbyScoresPage({
                 <input name="returnPage" type="hidden" value={returnPage} />
                 <div className="overflow-x-auto rounded-lg border border-zinc-200 bg-white shadow-sm">
                   <table className="w-full min-w-[32rem] border-collapse text-left text-sm">
-                  <table className="w-full min-w-[32rem] border-collapse text-left text-sm">
                     <thead className="bg-zinc-50 text-zinc-600">
                       <tr>
                         <th className="w-20 px-4 py-3 font-medium">Slot</th>
                         <th className="px-4 py-3 font-medium">Player</th>
                         <th className="w-32 px-4 py-3 font-medium">Placement</th>
-                        <th className="w-32 px-4 py-3 font-medium">
-                          Round total
-                        </th>
+                        <th className="w-32 px-4 py-3 font-medium">Round total</th>
                       </tr>
                     </thead>
-                    <tbody className="divide-y divide-zinc-200">
+                    <tbody className="divide-y divide-zinc-100">
                       {lobby.participants.map((participant) => (
                         <tr key={participant.id}>
                           <td className="px-4 py-3 text-zinc-500">
@@ -267,18 +238,7 @@ export default async function LobbyScoresPage({
                 <div className="mt-5 flex flex-col-reverse gap-3 sm:flex-row sm:items-center sm:justify-end">
                   <Link
                     className="flex h-11 items-center justify-center rounded-md border border-zinc-300 bg-white px-5 text-sm font-semibold text-zinc-700 transition hover:bg-zinc-50"
-<<<<<<< HEAD
-<<<<<<< HEAD
                     href={backToTournamentHref}
-=======
-                    href={currentRoundPath}
->>>>>>> ca21f53 (Added multiple games per round support)
-=======
-                    href={currentRoundPath}
-=======
-                    href={backToTournamentHref}
->>>>>>> 67350be (Added multi-round support)
->>>>>>> 1300bff (Added multi-round support)
                   >
                     Cancel
                   </Link>

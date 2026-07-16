@@ -123,13 +123,6 @@ test("default tournament format specifies six-game rounds with reseeding", () =>
 
   const [openingRound, finalRound] = format.rounds;
   assert.equal(openingRound.lobbySeeding, "snake");
-<<<<<<< HEAD
-<<<<<<< HEAD
-<<<<<<< HEAD
-  assert.equal(openingRound.games, 2);
-=======
-=======
->>>>>>> 60dbee6 (Added multiple games per round support)
   assert.equal(openingRound.games, 6);
   assert.equal(openingRound.reseed, 2);
   assert.deepEqual(openingRound.standings.tieBreakers, [
@@ -137,30 +130,6 @@ test("default tournament format specifies six-game rounds with reseeding", () =>
     { rankingMetric: "round_entry_seed", sortDirection: "asc" },
   ]);
   assert.equal(openingRound.reseedStandings.rankingMetric, "tournament_points");
-<<<<<<< HEAD
->>>>>>> 67350be (Added multi-round support)
-=======
-=======
-  assert.equal(openingRound.games, 2);
->>>>>>> ca21f53 (Added multiple games per round support)
->>>>>>> 60dbee6 (Added multiple games per round support)
-=======
-  assert.equal(openingRound.games, 2);
-=======
-=======
->>>>>>> 7cff729 (fixed merge conflict)
-  assert.equal(openingRound.games, 6);
-  assert.equal(openingRound.reseed, 2);
-  assert.deepEqual(openingRound.standings.tieBreakers, [
-    { rankingMetric: "current_round_firsts", sortDirection: "desc" },
-    { rankingMetric: "round_entry_seed", sortDirection: "asc" },
-  ]);
-  assert.equal(openingRound.reseedStandings.rankingMetric, "tournament_points");
-<<<<<<< HEAD
->>>>>>> 67350be (Added multi-round support)
->>>>>>> 1300bff (Added multi-round support)
-=======
->>>>>>> 7cff729 (fixed merge conflict)
   assert.deepEqual(openingRound.advancement, {
     type: "top_n",
     count: 8,
