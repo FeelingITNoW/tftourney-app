@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import {
+  aggregateParticipantScores,
   sortScoresHighestFirst,
   validateLobbyResults,
 } from "../lib/tournament/scoring/api";
@@ -73,4 +74,43 @@ test("sorts scores from highest to lowest with stable tournament tie-breakers", 
     { displayName: "Third", score: 4, seedNumber: 3 },
   ]);
   assert.equal(scores[0]?.displayName, "Third");
+});
+
+test("aggregates participant scores across rounds and sorts overall totals", () => {
+  const scores = [
+    {
+      participantId: "player-1",
+      displayName: "First",
+      score: 4,
+      seedNumber: 1,
+    },
+    {
+      participantId: "player-2",
+      displayName: "Second",
+      score: 8,
+      seedNumber: 2,
+    },
+    {
+      participantId: "player-1",
+      displayName: "First",
+      score: 6,
+      seedNumber: 1,
+    },
+  ];
+
+  assert.deepEqual(aggregateParticipantScores(scores), [
+    {
+      participantId: "player-1",
+      displayName: "First",
+      score: 10,
+      seedNumber: 1,
+    },
+    {
+      participantId: "player-2",
+      displayName: "Second",
+      score: 8,
+      seedNumber: 2,
+    },
+  ]);
+  assert.equal(scores[0]?.score, 4);
 });

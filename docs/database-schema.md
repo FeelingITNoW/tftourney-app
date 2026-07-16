@@ -75,6 +75,7 @@ CREATE TABLE public.tournament_participants (
 CREATE TABLE public.lobbies (
   id bigint GENERATED ALWAYS AS IDENTITY NOT NULL,
   round_id bigint NOT NULL,
+  game_number integer NOT NULL DEFAULT 1 CHECK (game_number > 0),
   lobby_number integer NOT NULL CHECK (lobby_number > 0),
   created_at timestamptz NOT NULL DEFAULT now(),
   updated_at timestamptz NOT NULL DEFAULT now(),
@@ -122,7 +123,7 @@ CREATE TABLE public.participant_round_scores (
 -- tournament_participants(tournament_id, registration_id)
 -- tournament_participants(tournament_id, seed_number)
 -- rounds(tournament_id, round_number)
--- lobbies(round_id, lobby_number)
+-- lobbies(round_id, game_number, lobby_number)
 -- lobby_participants(lobby_id, participant_id)
 -- participant_round_scores(participant_id, round_id)
 
@@ -135,14 +136,18 @@ Every object in `format_config.rounds` declares a `lobbySeeding` strategy:
 - `"random"` shuffles the round participants before distributing them evenly
   across lobbies.
 
+Every configured round also declares a positive integer `games` count. Lobby
+assignments are repeated for each game in the round. The built-in default format
+currently uses two games per round.
+
 The top-level `format_config.placementPoints` object maps finishing placements
 to awarded points. The default format awards 8 points for first place, 7 for
 second, continuing down to 1 point for eighth place.
 
-Starting a tournament creates round 1, its score rows, and its lobbies in one
-database transaction. `generate_round_lobbies(round_id)` can also be reused when
-later rounds are created; it uses that round's score rows as its participant
-roster and the matching format round's `lobbySeeding` value as its strategy.
+Starting a tournament creates round 1, its score rows, and every game lobby in
+one database transaction. `generate_round_lobbies(round_id)` can also be reused
+when later rounds are created; it uses that round's score rows as its participant
+roster and the matching format round's `lobbySeeding` and `games` values.
 
 ## Lobby results and round totals
 

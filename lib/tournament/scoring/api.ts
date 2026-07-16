@@ -1,6 +1,7 @@
 import type {
   LobbyResultFormEntry,
   LobbyResultValidation,
+  ParticipantScoreStanding,
   ScoredStanding,
 } from "./types";
 
@@ -74,4 +75,23 @@ export function sortScoresHighestFirst<TScore extends ScoredStanding>(
       firstScore.seedNumber - secondScore.seedNumber ||
       firstScore.displayName.localeCompare(secondScore.displayName),
   );
+}
+
+export function aggregateParticipantScores(
+  scores: ParticipantScoreStanding[],
+): ParticipantScoreStanding[] {
+  const totalsByParticipantId = new Map<string, ParticipantScoreStanding>();
+
+  for (const score of scores) {
+    const currentTotal = totalsByParticipantId.get(score.participantId);
+
+    if (currentTotal) {
+      currentTotal.score += score.score;
+      continue;
+    }
+
+    totalsByParticipantId.set(score.participantId, { ...score });
+  }
+
+  return sortScoresHighestFirst([...totalsByParticipantId.values()]);
 }

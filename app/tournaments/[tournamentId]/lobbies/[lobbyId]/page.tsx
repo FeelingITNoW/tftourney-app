@@ -31,10 +31,13 @@ export default async function LobbyScoresPage({
   searchParams: LobbyPageSearchParams;
 }) {
   const { tournamentId, lobbyId } = await params;
+  const currentRoundPath = `/tournaments/${tournamentId}/rounds/current`;
   const query = await searchParams;
   const scoreError = getSearchValue(query.scoreError);
   const saved = getSearchValue(query.saved) === "true";
-  let tournament;
+  let tournament:
+    | Awaited<ReturnType<typeof getTournamentDetail>>
+    | undefined;
   let databaseError = "";
 
   try {
@@ -52,11 +55,6 @@ export default async function LobbyScoresPage({
     notFound();
   }
 
-  const lobbyScoreTotal =
-    lobby?.participants.reduce(
-      (total, participant) => total + (participant.points ?? 0),
-      0,
-    ) ?? 0;
   const roundScoresByParticipantId = new Map(
     tournament?.scores
       .filter((score) => score.roundId === lobby?.roundId)
@@ -80,9 +78,9 @@ export default async function LobbyScoresPage({
           </div>
           <Link
             className="rounded-md border border-zinc-200 bg-white px-3 py-2 text-sm font-medium text-zinc-600 shadow-sm hover:bg-zinc-50"
-            href={`/tournaments/${tournamentId}`}
+            href={currentRoundPath}
           >
-            Back to tournament
+            Back to current round
           </Link>
         </header>
 
@@ -102,7 +100,7 @@ export default async function LobbyScoresPage({
                 {tournament.name}
               </p>
               <h1 className="mt-3 text-4xl font-semibold tracking-normal text-zinc-950">
-                Lobby {lobby.lobbyNumber} results
+                Game {lobby.gameNumber} · Lobby {lobby.lobbyNumber} results
               </h1>
               <dl className="mt-5 grid gap-3 text-sm sm:grid-cols-3">
                 <div className="border-l-4 border-zinc-800 bg-white px-4 py-3 shadow-sm">
@@ -113,16 +111,16 @@ export default async function LobbyScoresPage({
                       : lobby.roundId}
                   </dd>
                 </div>
+                <div className="border-l-4 border-sky-600 bg-white px-4 py-3 shadow-sm">
+                  <dt className="text-zinc-500">Game</dt>
+                  <dd className="mt-1 font-semibold text-zinc-950">
+                    Game {lobby.gameNumber}
+                  </dd>
+                </div>
                 <div className="border-l-4 border-emerald-600 bg-white px-4 py-3 shadow-sm">
                   <dt className="text-zinc-500">Players</dt>
                   <dd className="mt-1 font-semibold text-zinc-950">
                     {lobby.participants.length}
-                  </dd>
-                </div>
-                <div className="border-l-4 border-amber-500 bg-white px-4 py-3 shadow-sm">
-                  <dt className="text-zinc-500">Lobby score total</dt>
-                  <dd className="mt-1 font-semibold text-zinc-950">
-                    {lobbyScoreTotal}
                   </dd>
                 </div>
               </dl>
@@ -161,12 +159,11 @@ export default async function LobbyScoresPage({
                 <input name="tournamentId" type="hidden" value={tournament.id} />
                 <input name="lobbyId" type="hidden" value={lobby.id} />
                 <div className="overflow-x-auto rounded-lg border border-zinc-200 bg-white shadow-sm">
-                  <table className="w-full min-w-[38rem] border-collapse text-left text-sm">
+                  <table className="w-full min-w-[32rem] border-collapse text-left text-sm">
                     <thead className="bg-zinc-50 text-zinc-600">
                       <tr>
                         <th className="w-20 px-4 py-3 font-medium">Slot</th>
                         <th className="px-4 py-3 font-medium">Player</th>
-                        <th className="w-24 px-4 py-3 font-medium">Seed</th>
                         <th className="w-32 px-4 py-3 font-medium">Placement</th>
                         <th className="w-32 px-4 py-3 font-medium">
                           Round total
@@ -186,9 +183,6 @@ export default async function LobbyScoresPage({
                               type="hidden"
                               value={participant.id}
                             />
-                          </td>
-                          <td className="px-4 py-3 text-zinc-600">
-                            {participant.seedNumber}
                           </td>
                           <td className="px-4 py-3">
                             <label
@@ -222,7 +216,7 @@ export default async function LobbyScoresPage({
                 <div className="mt-5 flex flex-col-reverse gap-3 sm:flex-row sm:items-center sm:justify-end">
                   <Link
                     className="flex h-11 items-center justify-center rounded-md border border-zinc-300 bg-white px-5 text-sm font-semibold text-zinc-700 transition hover:bg-zinc-50"
-                    href={`/tournaments/${tournament.id}`}
+                    href={currentRoundPath}
                   >
                     Cancel
                   </Link>

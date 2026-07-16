@@ -99,7 +99,7 @@ test("rejects invalid Riot IDs for player registration", () => {
   }
 });
 
-test("default tournament format uses a qualifier into a six-game final", () => {
+test("default tournament format specifies two games for every round", () => {
   const format = JSON.parse(
     readFileSync(
       join(process.cwd(), "lib/tournament/formats/default.json"),
@@ -122,7 +122,7 @@ test("default tournament format uses a qualifier into a six-game final", () => {
 
   const [openingRound, finalRound] = format.rounds;
   assert.equal(openingRound.lobbySeeding, "snake");
-  assert.equal(openingRound.games, 6);
+  assert.equal(openingRound.games, 2);
   assert.deepEqual(openingRound.advancement, {
     type: "top_n",
     count: 8,
@@ -131,10 +131,10 @@ test("default tournament format uses a qualifier into a six-game final", () => {
   });
 
   assert.equal(finalRound.lobbySeeding, "random");
-  assert.equal(finalRound.games, 6);
+  assert.equal(finalRound.games, 2);
   assert.deepEqual(finalRound.winCondition, {
     type: "highest_points_after_games",
-    games: 6,
+    games: 2,
     rankingMetric: "points",
   });
 });

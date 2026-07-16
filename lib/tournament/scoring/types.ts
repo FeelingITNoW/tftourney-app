@@ -23,3 +23,7 @@ export type ScoredStanding = {
   score: number;
   seedNumber: number;
 };
+
+export type ParticipantScoreStanding = ScoredStanding & {
+  participantId: string;
+};
