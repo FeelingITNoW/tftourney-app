@@ -53,7 +53,7 @@ begin
           "type": "qualifier",
           "participants": "all_registered_players",
           "lobbySeeding": "snake",
-          "games": 6,
+          "games": 2,
           "standings": {
             "rankingMetric": "points",
             "sortDirection": "desc"
@@ -71,14 +71,14 @@ begin
           "type": "final",
           "participants": "advanced_from_opening-round",
           "lobbySeeding": "random",
-          "games": 6,
+          "games": 2,
           "standings": {
             "rankingMetric": "points",
             "sortDirection": "desc"
           },
           "winCondition": {
             "type": "highest_points_after_games",
-            "games": 6,
+            "games": 2,
             "rankingMetric": "points"
           }
         }

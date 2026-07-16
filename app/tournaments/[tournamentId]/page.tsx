@@ -5,7 +5,6 @@ import {
   registerPlayerAction,
   startTournamentAction,
 } from "@/app/actions";
-import { Scoresheet } from "@/components/tournaments/scoresheet";
 import {
   getTournamentDetail,
   TOURNAMENT_STATUS_ACCEPTING_PLAYERS,
@@ -44,7 +43,9 @@ export default async function TournamentPage({
   const registrationError = getSearchValue(query.registrationError);
   const startError = getSearchValue(query.startError);
   const deleteError = getSearchValue(query.deleteError);
-  let tournament;
+  let tournament:
+    | Awaited<ReturnType<typeof getTournamentDetail>>
+    | undefined;
   let databaseError = "";
 
   try {
@@ -75,13 +76,6 @@ export default async function TournamentPage({
     tournament?.participants.map((participant) => participant.registrationId) ??
       [],
   );
-  const currentRoundScores =
-    tournament?.scores.filter(
-      (score) => score.roundId === tournament.currentRoundId,
-    ) ?? [];
-  const scoresheetVersion = currentRoundScores
-    .map((score) => `${score.id}:${score.score}`)
-    .join("|");
 
   return (
     <main className="min-h-screen bg-stone-50 text-zinc-950">
@@ -162,7 +156,7 @@ export default async function TournamentPage({
               <div className="space-y-4">
                 <div className="rounded-lg border border-zinc-200 bg-white p-5 shadow-sm">
                   <h2 className="text-lg font-semibold text-zinc-950">
-                    Start tournament
+                    {isAcceptingPlayers ? "Start tournament" : "Current round"}
                   </h2>
                   {isAcceptingPlayers ? (
                     <>
@@ -191,9 +185,17 @@ export default async function TournamentPage({
                       </form>
                     </>
                   ) : (
-                    <p className="mt-2 text-sm font-medium text-emerald-800">
-                      Tournament is in progress.
-                    </p>
+                    <>
+                      <p className="mt-2 text-sm font-medium text-emerald-800">
+                        Tournament has started.
+                      </p>
+                      <Link
+                        className="mt-4 flex h-11 w-full items-center justify-center rounded-md bg-emerald-700 px-4 text-sm font-semibold text-white transition hover:bg-emerald-800 focus:outline-none focus:ring-2 focus:ring-emerald-600 focus:ring-offset-2"
+                        href={`/tournaments/${tournament.id}/rounds/current`}
+                      >
+                        Open current round
+                      </Link>
+                    </>
                   )}
                   {startError ? (
                     <p className="mt-3 text-sm font-medium text-red-700">
@@ -300,93 +302,6 @@ export default async function TournamentPage({
                 </div>
               </div>
             </section>
-
-            {tournament.hasStarted ? (
-              <>
-                <section className="border-t border-zinc-200 py-8">
-                  <div>
-                    <h2 className="text-2xl font-semibold text-zinc-950">
-                      Current round lobbies
-                    </h2>
-                    <p className="mt-1 text-sm text-zinc-500">
-                      Players are assigned when the round starts.
-                    </p>
-                  </div>
-
-                  {tournament.lobbies.length === 0 ? (
-                    <div className="mt-5 rounded-md border border-zinc-200 bg-white p-5 text-sm text-zinc-500">
-                      No lobbies were generated for the current round.
-                    </div>
-                  ) : (
-                    <div className="mt-5 grid gap-5 md:grid-cols-2">
-                      {tournament.lobbies.map((lobby) => (
-                        <article
-                          className="overflow-hidden rounded-lg border border-zinc-200 bg-white shadow-sm"
-                          key={lobby.id}
-                        >
-                          <div className="flex items-center justify-between gap-4 border-b border-zinc-200 bg-zinc-50 px-4 py-3">
-                            <h3 className="font-semibold text-zinc-950">
-                              Lobby {lobby.lobbyNumber}
-                            </h3>
-                            <Link
-                              className="rounded-md bg-zinc-950 px-3 py-2 text-sm font-semibold text-white transition hover:bg-zinc-800 focus:outline-none focus:ring-2 focus:ring-emerald-600 focus:ring-offset-2"
-                              href={`/tournaments/${tournament.id}/lobbies/${lobby.id}`}
-                            >
-                              Input scores
-                            </Link>
-                          </div>
-                          <ol className="divide-y divide-zinc-100">
-                            {lobby.participants.map((participant) => (
-                              <li
-                                className="flex items-center gap-3 px-4 py-3 text-sm"
-                                key={participant.id}
-                              >
-                                <span className="w-6 text-zinc-400">
-                                  {participant.slotNumber}
-                                </span>
-                                <span className="flex-1 font-medium text-zinc-950">
-                                  {participant.displayName}
-                                </span>
-                                <span className="text-zinc-500">
-                                  Seed {participant.seedNumber}
-                                </span>
-                                <span className="w-16 text-right font-semibold text-zinc-950">
-                                  {participant.points === null
-                                    ? "Pending"
-                                    : `${participant.points} pts`}
-                                </span>
-                              </li>
-                            ))}
-                          </ol>
-                          <div className="flex items-center justify-between border-t border-zinc-200 bg-zinc-50 px-4 py-3 text-sm">
-                            <span className="font-medium text-zinc-600">
-                              Lobby score total
-                            </span>
-                            <span className="font-semibold text-zinc-950">
-                              {lobby.participants.reduce(
-                                (total, participant) =>
-                                  total + (participant.points ?? 0),
-                                0,
-                              )}
-                            </span>
-                          </div>
-                        </article>
-                      ))}
-                    </div>
-                  )}
-                </section>
-
-                <Scoresheet
-                  key={scoresheetVersion}
-                  roundLabel={
-                    tournament.currentRoundNumber
-                      ? `Round ${tournament.currentRoundNumber}`
-                      : "the current round"
-                  }
-                  scores={currentRoundScores}
-                />
-              </>
-            ) : null}
 
             <section className="border-t border-zinc-200 py-8">
               <div className="flex items-end justify-between gap-4">

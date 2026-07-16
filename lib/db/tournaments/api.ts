@@ -9,6 +9,7 @@ import type {
   StartTournamentInput,
   StartTournamentResult,
   TournamentDetail,
+  TournamentGameScore,
   TournamentLobby,
   TournamentLobbyParticipantRow,
   TournamentLobbyRow,
@@ -236,27 +237,30 @@ export async function getTournamentDetail(
           },
         },
   );
-  const currentRound = tournament.current_round_id
-    ? (
-        await supabaseRestRequest<TournamentRoundRow[]>("rounds", {
-          query: {
-            select: "id,round_number",
-            id: `eq.${tournament.current_round_id}`,
-            limit: "1",
-          },
-        })
-      )[0]
-    : null;
-  const lobbies = tournament.current_round_id
+  const rounds = await supabaseRestRequest<TournamentRoundRow[]>("rounds", {
+    query: {
+      select: "id,round_number",
+      tournament_id: `eq.${tournamentId}`,
+      order: "round_number.asc",
+    },
+  });
+  const currentRound = rounds.find(
+    (round) => String(round.id) === String(tournament.current_round_id),
+  );
+  const roundIds = rounds.map((round) => round.id);
+  const allLobbies = roundIds.length
     ? await supabaseRestRequest<TournamentLobbyRow[]>("lobbies", {
         query: {
-          select: "id,round_id,lobby_number",
-          round_id: `eq.${tournament.current_round_id}`,
-          order: "lobby_number.asc",
+          select: "id,round_id,game_number,lobby_number",
+          round_id: `in.(${roundIds.join(",")})`,
+          order: "game_number.asc,lobby_number.asc",
         },
       })
     : [];
-  const lobbyIds = lobbies.map((lobby) => lobby.id);
+  const lobbies = allLobbies.filter(
+    (lobby) => String(lobby.round_id) === String(tournament.current_round_id),
+  );
+  const lobbyIds = allLobbies.map((lobby) => lobby.id);
   const lobbyParticipants = lobbyIds.length
     ? await supabaseRestRequest<TournamentLobbyParticipantRow[]>(
         "lobby_participants",
@@ -275,6 +279,9 @@ export async function getTournamentDetail(
       participant.id,
       mapTournamentParticipantRow(participant),
     ]),
+  );
+  const lobbyById = new Map(
+    allLobbies.map((lobby) => [String(lobby.id), lobby]),
   );
   const lobbyParticipantsByLobbyId = new Map<
     string,
@@ -303,17 +310,47 @@ export async function getTournamentDetail(
     lobbyParticipantsByLobbyId.set(lobbyId, assignedParticipants);
   }
 
+  const gameScores = lobbyParticipants
+    .map((lobbyParticipant) => {
+      const participant = participantById.get(lobbyParticipant.participant_id);
+      const lobby = lobbyById.get(String(lobbyParticipant.lobby_id));
+
+      if (!participant || !lobby) {
+        return null;
+      }
+
+      return {
+        participantId: participant.id,
+        displayName: participant.displayName,
+        seedNumber: participant.seedNumber,
+        roundId: String(lobby.round_id),
+        gameNumber: lobby.game_number,
+        score:
+          lobbyParticipant.result_status === "confirmed" ||
+          lobbyParticipant.result_status === "corrected"
+            ? lobbyParticipant.points
+            : null,
+      };
+    })
+    .filter((score): score is TournamentGameScore => score !== null);
+
   return {
     ...mapTournamentRow(tournament),
     currentRoundNumber: currentRound?.round_number ?? null,
     registrations: registrations.map(mapTournamentRegistrationRow),
     participants: participants.map(mapTournamentParticipantRow),
+    rounds: rounds.map((round) => ({
+      id: String(round.id),
+      roundNumber: round.round_number,
+    })),
     lobbies: lobbies.map((lobby) => ({
       id: String(lobby.id),
       roundId: String(lobby.round_id),
+      gameNumber: lobby.game_number,
       lobbyNumber: lobby.lobby_number,
       participants: lobbyParticipantsByLobbyId.get(String(lobby.id)) ?? [],
     })),
+    gameScores,
     scores: scores
       .map((score) => {
         const participant = participantById.get(score.participant_id);
