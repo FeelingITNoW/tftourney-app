@@ -16,5 +16,6 @@ export type TournamentFormat = {
   id: string;
   name: string;
   isDefault?: boolean;
+  placementPoints: Record<string, number>;
   rounds: TournamentRoundFormat[];
 };

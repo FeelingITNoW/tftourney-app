@@ -48,6 +48,9 @@ export type TournamentLobbyParticipant = {
   displayName: string;
   seedNumber: number;
   slotNumber: number;
+  placement: number | null;
+  points: number | null;
+  resultStatus: "pending" | "confirmed" | "corrected" | "disputed";
 };
 
 export type TournamentLobby = {
@@ -118,6 +121,9 @@ export type TournamentLobbyParticipantRow = {
   lobby_id: string | number;
   participant_id: string;
   slot_number: number;
+  placement: number | null;
+  points: number | null;
+  result_status: "pending" | "confirmed" | "corrected" | "disputed";
 };
 
 export type StartTournamentResult = {
@@ -145,4 +151,20 @@ export type RegisterTournamentPlayerInput = {
 
 export type StartTournamentInput = {
   tournamentId: string;
+};
+
+export type LobbyResultInput = {
+  participantId: string;
+  placement: number;
+};
+
+export type UpdateLobbyResultsInput = {
+  tournamentId: string;
+  lobbyId: string;
+  results: LobbyResultInput[];
+};
+
+export type UpdateLobbyResultsResult = {
+  updated_lobby_id: string;
+  updated_participant_count: number;
 };

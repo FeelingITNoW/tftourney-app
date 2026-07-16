@@ -21,6 +21,8 @@ import type {
   TournamentScoreRow,
   TournamentRow,
   TournamentSummary,
+  UpdateLobbyResultsInput,
+  UpdateLobbyResultsResult,
 } from "./types";
 
 export const TOURNAMENT_STATUS_ACCEPTING_PLAYERS = "accepting_players";
@@ -260,7 +262,8 @@ export async function getTournamentDetail(
         "lobby_participants",
         {
           query: {
-            select: "id,lobby_id,participant_id,slot_number",
+            select:
+              "id,lobby_id,participant_id,slot_number,placement,points,result_status",
             lobby_id: `in.(${lobbyIds.join(",")})`,
             order: "slot_number.asc",
           },
@@ -293,6 +296,9 @@ export async function getTournamentDetail(
       displayName: participant.displayName,
       seedNumber: participant.seedNumber,
       slotNumber: lobbyParticipant.slot_number,
+      placement: lobbyParticipant.placement,
+      points: lobbyParticipant.points,
+      resultStatus: lobbyParticipant.result_status,
     });
     lobbyParticipantsByLobbyId.set(lobbyId, assignedParticipants);
   }
@@ -404,6 +410,32 @@ export async function startTournament(
 
   if (!result) {
     throw new Error("Database did not return the started tournament.");
+  }
+
+  return result;
+}
+
+export async function updateLobbyResults(
+  input: UpdateLobbyResultsInput,
+): Promise<UpdateLobbyResultsResult> {
+  const rows = await supabaseRestRequest<UpdateLobbyResultsResult[]>(
+    "rpc/update_lobby_results",
+    {
+      method: "POST",
+      body: {
+        p_tournament_id: input.tournamentId,
+        p_lobby_id: input.lobbyId,
+        p_results: input.results.map((result) => ({
+          participantId: result.participantId,
+          placement: result.placement,
+        })),
+      },
+    },
+  );
+  const result = rows[0];
+
+  if (!result) {
+    throw new Error("Database did not return the updated lobby.");
   }
 
   return result;

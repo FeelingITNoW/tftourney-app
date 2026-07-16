@@ -135,7 +135,21 @@ Every object in `format_config.rounds` declares a `lobbySeeding` strategy:
 - `"random"` shuffles the round participants before distributing them evenly
   across lobbies.
 
+The top-level `format_config.placementPoints` object maps finishing placements
+to awarded points. The default format awards 8 points for first place, 7 for
+second, continuing down to 1 point for eighth place.
+
 Starting a tournament creates round 1, its score rows, and its lobbies in one
 database transaction. `generate_round_lobbies(round_id)` can also be reused when
 later rounds are created; it uses that round's score rows as its participant
 roster and the matching format round's `lobbySeeding` value as its strategy.
+
+## Lobby results and round totals
+
+`update_lobby_results(tournament_id, lobby_id, results)` records the placement
+for every player in a lobby and derives awarded points from the tournament's
+`format_config.placementPoints` mapping. The function requires a complete roster
+with unique placements, marks first-time results as `confirmed` and later edits
+as `corrected`, then recalculates `participant_round_scores.score` from all
+confirmed or corrected lobby points in that round. The lobby results and round
+score totals are therefore updated in one database transaction.

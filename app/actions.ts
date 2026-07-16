@@ -8,15 +8,23 @@ import {
   deleteTournament,
   registerTournamentPlayer,
   startTournament,
+  updateLobbyResults,
 } from "@/lib/db/tournaments/api";
 import { getRiotAccountByRiotId } from "@/lib/riot/accounts/api";
 import { validatePlayerRegistration } from "@/lib/tournament/players/api";
+import { validateLobbyResults } from "@/lib/tournament/scoring/api";
 import { validateTournamentCreation } from "@/lib/tournament/validation/api";
 
 function getFormString(formData: FormData, fieldName: string): string {
   const value = formData.get(fieldName);
 
   return typeof value === "string" ? value : "";
+}
+
+function getFormStrings(formData: FormData, fieldName: string): string[] {
+  return formData
+    .getAll(fieldName)
+    .map((value) => (typeof value === "string" ? value : ""));
 }
 
 function redirectWithParams(path: string, params: Record<string, string>): never {
@@ -171,4 +179,58 @@ export async function deleteTournamentAction(formData: FormData) {
   revalidatePath("/");
   revalidatePath(detailPath);
   redirect("/");
+}
+
+export async function updateLobbyScoresAction(formData: FormData) {
+  const tournamentId = getFormString(formData, "tournamentId");
+  const lobbyId = getFormString(formData, "lobbyId");
+  const detailPath = `/tournaments/${tournamentId}`;
+  const lobbyPath = `${detailPath}/lobbies/${lobbyId}`;
+
+  if (!tournamentId || !lobbyId) {
+    redirectWithParams(detailPath, {
+      scoreError: "Lobby was not found.",
+    });
+  }
+
+  const participantIds = getFormStrings(formData, "participantId");
+  const placements = getFormStrings(formData, "placement");
+
+  if (participantIds.length !== placements.length) {
+    redirectWithParams(lobbyPath, {
+      scoreError: "Submit one placement for every lobby player.",
+    });
+  }
+
+  const validation = validateLobbyResults(
+    participantIds.map((participantId, index) => ({
+      participantId,
+      placement: placements[index] ?? "",
+    })),
+  );
+
+  if (!validation.success) {
+    redirectWithParams(lobbyPath, {
+      scoreError: validation.error,
+    });
+  }
+
+  try {
+    await updateLobbyResults({
+      tournamentId,
+      lobbyId,
+      results: validation.data,
+    });
+  } catch (error) {
+    redirectWithParams(lobbyPath, {
+      scoreError:
+        error instanceof Error
+          ? error.message
+          : "Lobby scores could not be updated.",
+    });
+  }
+
+  revalidatePath(detailPath);
+  revalidatePath(lobbyPath);
+  redirectWithParams(lobbyPath, { saved: "true" });
 }

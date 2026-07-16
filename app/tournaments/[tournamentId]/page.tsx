@@ -5,6 +5,7 @@ import {
   registerPlayerAction,
   startTournamentAction,
 } from "@/app/actions";
+import { Scoresheet } from "@/components/tournaments/scoresheet";
 import {
   getTournamentDetail,
   TOURNAMENT_STATUS_ACCEPTING_PLAYERS,
@@ -74,6 +75,13 @@ export default async function TournamentPage({
     tournament?.participants.map((participant) => participant.registrationId) ??
       [],
   );
+  const currentRoundScores =
+    tournament?.scores.filter(
+      (score) => score.roundId === tournament.currentRoundId,
+    ) ?? [];
+  const scoresheetVersion = currentRoundScores
+    .map((score) => `${score.id}:${score.score}`)
+    .join("|");
 
   return (
     <main className="min-h-screen bg-stone-50 text-zinc-950">
@@ -316,9 +324,17 @@ export default async function TournamentPage({
                           className="overflow-hidden rounded-lg border border-zinc-200 bg-white shadow-sm"
                           key={lobby.id}
                         >
-                          <h3 className="border-b border-zinc-200 bg-zinc-50 px-4 py-3 font-semibold text-zinc-950">
-                            Lobby {lobby.lobbyNumber}
-                          </h3>
+                          <div className="flex items-center justify-between gap-4 border-b border-zinc-200 bg-zinc-50 px-4 py-3">
+                            <h3 className="font-semibold text-zinc-950">
+                              Lobby {lobby.lobbyNumber}
+                            </h3>
+                            <Link
+                              className="rounded-md bg-zinc-950 px-3 py-2 text-sm font-semibold text-white transition hover:bg-zinc-800 focus:outline-none focus:ring-2 focus:ring-emerald-600 focus:ring-offset-2"
+                              href={`/tournaments/${tournament.id}/lobbies/${lobby.id}`}
+                            >
+                              Input scores
+                            </Link>
+                          </div>
                           <ol className="divide-y divide-zinc-100">
                             {lobby.participants.map((participant) => (
                               <li
@@ -334,67 +350,41 @@ export default async function TournamentPage({
                                 <span className="text-zinc-500">
                                   Seed {participant.seedNumber}
                                 </span>
+                                <span className="w-16 text-right font-semibold text-zinc-950">
+                                  {participant.points === null
+                                    ? "Pending"
+                                    : `${participant.points} pts`}
+                                </span>
                               </li>
                             ))}
                           </ol>
+                          <div className="flex items-center justify-between border-t border-zinc-200 bg-zinc-50 px-4 py-3 text-sm">
+                            <span className="font-medium text-zinc-600">
+                              Lobby score total
+                            </span>
+                            <span className="font-semibold text-zinc-950">
+                              {lobby.participants.reduce(
+                                (total, participant) =>
+                                  total + (participant.points ?? 0),
+                                0,
+                              )}
+                            </span>
+                          </div>
                         </article>
                       ))}
                     </div>
                   )}
                 </section>
 
-                <section className="border-t border-zinc-200 py-8">
-                  <div className="flex items-end justify-between gap-4">
-                    <div>
-                      <h2 className="text-2xl font-semibold text-zinc-950">
-                        Scoresheet
-                      </h2>
-                      <p className="mt-1 text-sm text-zinc-500">
-                        Official entrants and current scores for{" "}
-                        {tournament.currentRoundId ?? "the current round"}.
-                      </p>
-                    </div>
-                  </div>
-
-                  {tournament.scores.length === 0 ? (
-                    <div className="mt-5 rounded-md border border-zinc-200 bg-white p-5 text-sm text-zinc-500">
-                      No score rows were created for this tournament.
-                    </div>
-                  ) : (
-                    <div className="mt-5 overflow-hidden rounded-lg border border-zinc-200 bg-white shadow-sm">
-                      <table className="w-full border-collapse text-left text-sm">
-                        <thead className="bg-zinc-50 text-zinc-600">
-                          <tr>
-                            <th className="w-20 px-4 py-3 font-medium">Seed</th>
-                            <th className="px-4 py-3 font-medium">Player</th>
-                            <th className="px-4 py-3 font-medium">Round</th>
-                            <th className="w-24 px-4 py-3 text-right font-medium">
-                              Score
-                            </th>
-                          </tr>
-                        </thead>
-                        <tbody className="divide-y divide-zinc-200">
-                          {tournament.scores.map((score) => (
-                            <tr key={score.id}>
-                              <td className="px-4 py-3 text-zinc-500">
-                                {score.seedNumber}
-                              </td>
-                              <td className="px-4 py-3 font-medium text-zinc-950">
-                                {score.displayName}
-                              </td>
-                              <td className="px-4 py-3 text-zinc-600">
-                                {score.roundId}
-                              </td>
-                              <td className="px-4 py-3 text-right font-semibold text-zinc-950">
-                                {score.score}
-                              </td>
-                            </tr>
-                          ))}
-                        </tbody>
-                      </table>
-                    </div>
-                  )}
-                </section>
+                <Scoresheet
+                  key={scoresheetVersion}
+                  roundLabel={
+                    tournament.currentRoundNumber
+                      ? `Round ${tournament.currentRoundNumber}`
+                      : "the current round"
+                  }
+                  scores={currentRoundScores}
+                />
               </>
             ) : null}
 
