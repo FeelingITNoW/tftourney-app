@@ -99,6 +99,7 @@ export default async function LobbyScoresPage({
           <Link
             className="rounded-md border border-zinc-200 bg-white px-3 py-2 text-sm font-medium text-zinc-600 shadow-sm hover:bg-zinc-50"
 <<<<<<< HEAD
+<<<<<<< HEAD
             href={backToTournamentHref}
           >
             Back to lobby browser
@@ -107,6 +108,16 @@ export default async function LobbyScoresPage({
           >
             Back to current round
 >>>>>>> ca21f53 (Added multiple games per round support)
+=======
+            href={currentRoundPath}
+          >
+            Back to current round
+=======
+            href={backToTournamentHref}
+          >
+            Back to lobby browser
+>>>>>>> 67350be (Added multi-round support)
+>>>>>>> 1300bff (Added multi-round support)
           </Link>
         </header>
 
@@ -259,10 +270,17 @@ export default async function LobbyScoresPage({
                   <Link
                     className="flex h-11 items-center justify-center rounded-md border border-zinc-300 bg-white px-5 text-sm font-semibold text-zinc-700 transition hover:bg-zinc-50"
 <<<<<<< HEAD
+<<<<<<< HEAD
                     href={backToTournamentHref}
 =======
                     href={currentRoundPath}
 >>>>>>> ca21f53 (Added multiple games per round support)
+=======
+                    href={currentRoundPath}
+=======
+                    href={backToTournamentHref}
+>>>>>>> 67350be (Added multi-round support)
+>>>>>>> 1300bff (Added multi-round support)
                   >
                     Cancel
                   </Link>

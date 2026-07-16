@@ -7,7 +7,10 @@ import {
   registerPlayerAction,
   startTournamentAction,
 } from "@/app/actions";
+<<<<<<< HEAD
 import { Scoresheet } from "@/components/tournaments/scoresheet";
+=======
+>>>>>>> 1300bff (Added multi-round support)
 import { LobbyBrowser } from "@/components/tournaments/lobby-browser";
 import { RoundTabs } from "@/components/tournaments/round-tabs";
 import { TournamentDetails } from "@/components/tournaments/tournament-details";

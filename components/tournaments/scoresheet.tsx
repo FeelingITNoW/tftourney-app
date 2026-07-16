@@ -299,7 +299,38 @@ export function Scoresheet({ gameScores, rounds, scores }: ScoresheetProps) {
 
   if (!activeTab) {
     return null;
+<<<<<<< HEAD
 >>>>>>> ca21f53 (Added multiple games per round support)
+=======
+=======
+  TournamentLobby,
+  TournamentScore,
+} from "@/lib/db/tournaments/types";
+import { sortScoresHighestFirst } from "@/lib/tournament/scoring/api";
+
+type ScoresheetProps = {
+  lobbies: TournamentLobby[];
+  roundLabel: string;
+  scores: TournamentScore[];
+};
+
+export function Scoresheet({ lobbies, roundLabel, scores }: ScoresheetProps) {
+  const [sortedScores] = useState(() => sortScoresHighestFirst(scores));
+  const gameNumbers = [...new Set(lobbies.map((lobby) => lobby.gameNumber))].sort(
+    (firstGame, secondGame) => firstGame - secondGame,
+  );
+  const pointsByGame = new Map<number, Map<string, number | null>>();
+
+  for (const lobby of lobbies) {
+    const gamePoints = pointsByGame.get(lobby.gameNumber) ?? new Map();
+
+    for (const participant of lobby.participants) {
+      gamePoints.set(participant.id, participant.points);
+    }
+
+    pointsByGame.set(lobby.gameNumber, gamePoints);
+>>>>>>> 67350be (Added multi-round support)
+>>>>>>> 1300bff (Added multi-round support)
 >>>>>>> 60dbee6 (Added multiple games per round support)
   }
 
@@ -323,11 +354,20 @@ export function Scoresheet({ gameScores, rounds, scores }: ScoresheetProps) {
             Official entrants and points by game for {roundLabel}, ranked by
             total points.
 =======
+=======
+>>>>>>> 1300bff (Added multi-round support)
             {activeTab.id === OVERALL_TAB_ID
               ? "Combined standings across every round"
               : `${activeTab.label} game-by-game standings`}
             , ranked from highest to lowest points.
+<<<<<<< HEAD
 >>>>>>> ca21f53 (Added multiple games per round support)
+=======
+=======
+            Official entrants and points by game for {roundLabel}, ranked by
+            total points.
+>>>>>>> 67350be (Added multi-round support)
+>>>>>>> 1300bff (Added multi-round support)
 >>>>>>> 60dbee6 (Added multiple games per round support)
           </p>
         </div>
@@ -508,6 +548,7 @@ export function Scoresheet({ gameScores, rounds, scores }: ScoresheetProps) {
                   >
                     Total
                   </th>
+<<<<<<< HEAD
 >>>>>>> ca21f53 (Added multiple games per round support)
 >>>>>>> 60dbee6 (Added multiple games per round support)
                 </tr>
