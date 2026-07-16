@@ -2,6 +2,7 @@
 
 import { useState } from "react";
 import type {
+<<<<<<< HEAD
   TournamentGameScore,
   TournamentRound,
   TournamentScore,
@@ -133,6 +134,34 @@ export function Scoresheet({ gameScores, rounds, scores }: ScoresheetProps) {
 
   if (!activeTab) {
     return null;
+=======
+  TournamentLobby,
+  TournamentScore,
+} from "@/lib/db/tournaments/types";
+import { sortScoresHighestFirst } from "@/lib/tournament/scoring/api";
+
+type ScoresheetProps = {
+  lobbies: TournamentLobby[];
+  roundLabel: string;
+  scores: TournamentScore[];
+};
+
+export function Scoresheet({ lobbies, roundLabel, scores }: ScoresheetProps) {
+  const [sortedScores] = useState(() => sortScoresHighestFirst(scores));
+  const gameNumbers = [...new Set(lobbies.map((lobby) => lobby.gameNumber))].sort(
+    (firstGame, secondGame) => firstGame - secondGame,
+  );
+  const pointsByGame = new Map<number, Map<string, number | null>>();
+
+  for (const lobby of lobbies) {
+    const gamePoints = pointsByGame.get(lobby.gameNumber) ?? new Map();
+
+    for (const participant of lobby.participants) {
+      gamePoints.set(participant.id, participant.points);
+    }
+
+    pointsByGame.set(lobby.gameNumber, gamePoints);
+>>>>>>> 67350be (Added multi-round support)
   }
 
   return (
@@ -141,14 +170,20 @@ export function Scoresheet({ gameScores, rounds, scores }: ScoresheetProps) {
         <div>
           <h2 className="text-2xl font-semibold text-zinc-950">Scoresheet</h2>
           <p className="mt-1 text-sm text-zinc-500">
+<<<<<<< HEAD
             {activeTab.id === OVERALL_TAB_ID
               ? "Combined standings across every round"
               : `${activeTab.label} game-by-game standings`}
             , ranked from highest to lowest points.
+=======
+            Official entrants and points by game for {roundLabel}, ranked by
+            total points.
+>>>>>>> 67350be (Added multi-round support)
           </p>
         </div>
       </div>
 
+<<<<<<< HEAD
       <div
         aria-label="Scoresheet views"
         className="mt-5 flex gap-1 overflow-x-auto border-b border-zinc-200"
@@ -207,6 +242,58 @@ export function Scoresheet({ gameScores, rounds, scores }: ScoresheetProps) {
                   >
                     Total
                   </th>
+=======
+      {sortedScores.length === 0 ? (
+        <div className="mt-5 rounded-md border border-zinc-200 bg-white p-5 text-sm text-zinc-500">
+          No score rows were created for this tournament.
+        </div>
+      ) : (
+        <div className="mt-5 overflow-hidden rounded-lg border border-zinc-200 bg-white shadow-sm">
+          <table className="w-full min-w-[42rem] border-collapse text-left text-sm">
+            <thead className="bg-zinc-50 text-zinc-600">
+              <tr>
+                <th className="w-20 px-4 py-3 font-medium">Round seed</th>
+                <th className="px-4 py-3 font-medium">Player</th>
+                {gameNumbers.map((gameNumber) => (
+                  <th className="w-24 px-4 py-3 text-right font-medium" key={gameNumber}>
+                    Game {gameNumber}
+                  </th>
+                ))}
+                <th
+                  aria-sort="descending"
+                  className="w-24 border-l border-zinc-200 px-4 py-3 text-right font-medium"
+                >
+                  Total
+                </th>
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-zinc-200">
+              {sortedScores.map((score) => (
+                <tr key={score.id}>
+                  <td className="px-4 py-3 text-zinc-500">
+                    {score.roundSeedNumber}
+                  </td>
+                  <td className="px-4 py-3 font-medium text-zinc-950">
+                    {score.displayName}
+                  </td>
+                  {gameNumbers.map((gameNumber) => {
+                    const points = pointsByGame
+                      .get(gameNumber)
+                      ?.get(score.participantId);
+
+                    return (
+                      <td
+                        className="px-4 py-3 text-right font-medium text-zinc-700"
+                        key={gameNumber}
+                      >
+                        {points ?? "—"}
+                      </td>
+                    );
+                  })}
+                  <td className="border-l border-zinc-200 px-4 py-3 text-right font-semibold text-zinc-950">
+                    {score.score}
+                  </td>
+>>>>>>> 67350be (Added multi-round support)
                 </tr>
               </thead>
               <tbody className="divide-y divide-zinc-200">

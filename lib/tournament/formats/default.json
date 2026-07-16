@@ -19,10 +19,39 @@
       "type": "qualifier",
       "participants": "all_registered_players",
       "lobbySeeding": "snake",
+<<<<<<< HEAD
       "games": 2,
+=======
+      "games": 6,
+      "reseed": 2,
+>>>>>>> 67350be (Added multi-round support)
       "standings": {
         "rankingMetric": "points",
-        "sortDirection": "desc"
+        "sortDirection": "desc",
+        "tieBreakers": [
+          {
+            "rankingMetric": "current_round_firsts",
+            "sortDirection": "desc"
+          },
+          {
+            "rankingMetric": "round_entry_seed",
+            "sortDirection": "asc"
+          }
+        ]
+      },
+      "reseedStandings": {
+        "rankingMetric": "tournament_points",
+        "sortDirection": "desc",
+        "tieBreakers": [
+          {
+            "rankingMetric": "current_round_firsts",
+            "sortDirection": "desc"
+          },
+          {
+            "rankingMetric": "round_entry_seed",
+            "sortDirection": "asc"
+          }
+        ]
       },
       "advancement": {
         "type": "top_n",
@@ -37,10 +66,39 @@
       "type": "final",
       "participants": "advanced_from_opening-round",
       "lobbySeeding": "random",
+<<<<<<< HEAD
       "games": 2,
+=======
+      "games": 6,
+      "reseed": 2,
+>>>>>>> 67350be (Added multi-round support)
       "standings": {
         "rankingMetric": "points",
-        "sortDirection": "desc"
+        "sortDirection": "desc",
+        "tieBreakers": [
+          {
+            "rankingMetric": "current_round_firsts",
+            "sortDirection": "desc"
+          },
+          {
+            "rankingMetric": "round_entry_seed",
+            "sortDirection": "asc"
+          }
+        ]
+      },
+      "reseedStandings": {
+        "rankingMetric": "tournament_points",
+        "sortDirection": "desc",
+        "tieBreakers": [
+          {
+            "rankingMetric": "current_round_firsts",
+            "sortDirection": "desc"
+          },
+          {
+            "rankingMetric": "round_entry_seed",
+            "sortDirection": "asc"
+          }
+        ]
       },
       "winCondition": {
         "type": "highest_points_after_games",

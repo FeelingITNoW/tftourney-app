@@ -2,9 +2,15 @@ import Link from "next/link";
 import { notFound } from "next/navigation";
 import {
   deleteTournamentAction,
+  progressTournamentRoundAction,
+  randomizeAllLobbyResultsAction,
   registerPlayerAction,
   startTournamentAction,
 } from "@/app/actions";
+import { Scoresheet } from "@/components/tournaments/scoresheet";
+import { LobbyBrowser } from "@/components/tournaments/lobby-browser";
+import { RoundTabs } from "@/components/tournaments/round-tabs";
+import { TournamentDetails } from "@/components/tournaments/tournament-details";
 import {
   getTournamentDetail,
   TOURNAMENT_STATUS_ACCEPTING_PLAYERS,
@@ -18,8 +24,13 @@ type TournamentPageParams = Promise<{
 }>;
 
 type TournamentPageSearchParams = Promise<{
+  game?: string | string[];
+  page?: string | string[];
+  randomized?: string | string[];
   registrationError?: string | string[];
   startError?: string | string[];
+  progressionError?: string | string[];
+  progressed?: string | string[];
   deleteError?: string | string[];
 }>;
 
@@ -40,12 +51,15 @@ export default async function TournamentPage({
 }) {
   const { tournamentId } = await params;
   const query = await searchParams;
+  const requestedGame = Number.parseInt(getSearchValue(query.game), 10);
+  const requestedPage = Number.parseInt(getSearchValue(query.page), 10);
+  const randomized = getSearchValue(query.randomized) === "true";
   const registrationError = getSearchValue(query.registrationError);
   const startError = getSearchValue(query.startError);
+  const progressionError = getSearchValue(query.progressionError);
+  const progressed = getSearchValue(query.progressed) === "true";
   const deleteError = getSearchValue(query.deleteError);
-  let tournament:
-    | Awaited<ReturnType<typeof getTournamentDetail>>
-    | undefined;
+  let tournament;
   let databaseError = "";
 
   try {
@@ -76,6 +90,14 @@ export default async function TournamentPage({
     tournament?.participants.map((participant) => participant.registrationId) ??
       [],
   );
+  const currentRoundScores =
+    tournament?.scores.filter(
+      (score) => score.roundId === tournament.currentRoundId,
+    ) ?? [];
+  const scoresheetVersion = currentRoundScores
+    .map((score) => `${score.id}:${score.score}`)
+    .join("|");
+  const isTournamentCompleted = tournament?.status === "completed";
 
   return (
     <main className="min-h-screen bg-stone-50 text-zinc-950">
@@ -111,7 +133,8 @@ export default async function TournamentPage({
           </section>
         ) : tournament ? (
           <>
-            <section className="grid gap-5 py-8 md:grid-cols-[1fr_19rem]">
+            {!tournament.hasStarted ? (
+              <section className="grid gap-5 py-8 md:grid-cols-[1fr_19rem]">
               <div>
                 <p className="text-sm font-semibold uppercase tracking-[0.12em] text-amber-700">
                   Tournament
@@ -156,7 +179,7 @@ export default async function TournamentPage({
               <div className="space-y-4">
                 <div className="rounded-lg border border-zinc-200 bg-white p-5 shadow-sm">
                   <h2 className="text-lg font-semibold text-zinc-950">
-                    {isAcceptingPlayers ? "Start tournament" : "Current round"}
+                    Start tournament
                   </h2>
                   {isAcceptingPlayers ? (
                     <>
@@ -185,17 +208,11 @@ export default async function TournamentPage({
                       </form>
                     </>
                   ) : (
-                    <>
-                      <p className="mt-2 text-sm font-medium text-emerald-800">
-                        Tournament has started.
-                      </p>
-                      <Link
-                        className="mt-4 flex h-11 w-full items-center justify-center rounded-md bg-emerald-700 px-4 text-sm font-semibold text-white transition hover:bg-emerald-800 focus:outline-none focus:ring-2 focus:ring-emerald-600 focus:ring-offset-2"
-                        href={`/tournaments/${tournament.id}/rounds/current`}
-                      >
-                        Open current round
-                      </Link>
-                    </>
+                    <p className="mt-2 text-sm font-medium text-emerald-800">
+                      {isTournamentCompleted
+                        ? "Tournament is complete."
+                        : "Tournament is in progress."}
+                    </p>
                   )}
                   {startError ? (
                     <p className="mt-3 text-sm font-medium text-red-700">
@@ -301,9 +318,151 @@ export default async function TournamentPage({
                   ) : null}
                 </div>
               </div>
-            </section>
+              </section>
+            ) : null}
 
-            <section className="border-t border-zinc-200 py-8">
+            {tournament.hasStarted ? (
+              <>
+                {progressed ? (
+                  <div
+                    className="mb-5 rounded-md border border-emerald-200 bg-emerald-50 p-4 text-sm font-medium text-emerald-900"
+                    role="status"
+                  >
+                    {isTournamentCompleted
+                      ? "Tournament completed. Final standings are shown below."
+                      : "The next round is active and its first game block is ready."}
+                  </div>
+                ) : null}
+                <RoundTabs
+                  details={
+                    <TournamentDetails
+                      currentRoundLabel={currentRoundLabel}
+                      deleteError={deleteError}
+                      enteredRegistrationIds={enteredRegistrationIds}
+                      potentialEntrantCount={potentialEntrantCount}
+                      registrationError={registrationError}
+                      startError={startError}
+                      tournament={tournament}
+                    />
+                  }
+                  lobbies={
+                    <div className="pt-6">
+                      <div>
+                        <div className="flex flex-col gap-4 sm:flex-row sm:items-end sm:justify-between">
+                          <div>
+                            <h2 className="text-2xl font-semibold text-zinc-950">
+                              Current round lobbies
+                            </h2>
+                            <p className="mt-1 text-sm text-zinc-500">
+                              {tournament.roundProgress
+                                ? `${tournament.roundProgress.completedGames} of ${tournament.roundProgress.configuredGames} games complete.`
+                                : "Players are assigned when the round starts."}
+                            </p>
+                          </div>
+                          <form
+                            action={randomizeAllLobbyResultsAction}
+                            className="flex flex-col items-stretch gap-2 sm:items-end"
+                          >
+                            <input name="tournamentId" type="hidden" value={tournament.id} />
+                            <input
+                              name="game"
+                              type="hidden"
+                              value={Number.isInteger(requestedGame) ? requestedGame : ""}
+                            />
+                            <input
+                              name="page"
+                              type="hidden"
+                              value={Number.isInteger(requestedPage) && requestedPage > 0 ? requestedPage : ""}
+                            />
+                            <button
+                              className="rounded-md border border-amber-300 bg-amber-50 px-3 py-2 text-sm font-semibold text-amber-900 transition hover:bg-amber-100 focus:outline-none focus:ring-2 focus:ring-amber-600 focus:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-40"
+                              disabled={isTournamentCompleted}
+                              title="Temporary testing helper"
+                              type="submit"
+                            >
+                              Randomize all lobbies (test)
+                            </button>
+                            <span className="text-xs text-zinc-500">
+                              Saves random unique placements for every current-round lobby.
+                            </span>
+                          </form>
+                        </div>
+                      </div>
+
+                      {randomized ? (
+                        <div
+                          className="mt-4 rounded-md border border-emerald-200 bg-emerald-50 p-4 text-sm font-medium text-emerald-900"
+                          role="status"
+                        >
+                          All current-round lobby results were randomized and saved for testing.
+                        </div>
+                      ) : null}
+
+                      {tournament.roundProgress?.nextReseedGame ? (
+                        <p className="mt-3 text-sm font-medium text-cyan-800">
+                          Automatic reseed begins at Game {tournament.roundProgress.nextReseedGame} after
+                          the current block is complete.
+                        </p>
+                      ) : null}
+
+                      {tournament.progressionAction ? (
+                        <div className="mt-5 rounded-lg border border-amber-200 bg-amber-50 p-5">
+                          <h3 className="text-lg font-semibold text-amber-950">
+                            {tournament.progressionAction === "complete_tournament"
+                              ? "Complete tournament"
+                              : `Create Round ${tournament.nextRound?.roundNumber}`}
+                          </h3>
+                          <p className="mt-2 text-sm text-amber-900">
+                            {tournament.progressionAction === "complete_tournament"
+                              ? "All configured games are scored. This final action locks the tournament."
+                              : `${tournament.nextRound?.advancementCount} player${tournament.nextRound?.advancementCount === 1 ? "" : "s"} advance to ${tournament.nextRound?.roundName}.`}
+                          </p>
+                          <form action={progressTournamentRoundAction} className="mt-4">
+                            <input name="tournamentId" type="hidden" value={tournament.id} />
+                            <button
+                              className="flex h-11 w-full items-center justify-center rounded-md bg-amber-700 px-4 text-sm font-semibold text-white transition hover:bg-amber-800 focus:outline-none focus:ring-2 focus:ring-amber-600 focus:ring-offset-2 sm:w-auto"
+                              type="submit"
+                            >
+                              {tournament.progressionAction === "complete_tournament"
+                                ? "Complete tournament"
+                                : `Create Round ${tournament.nextRound?.roundNumber} — Top ${tournament.nextRound?.advancementCount} advance`}
+                            </button>
+                          </form>
+                        </div>
+                      ) : null}
+
+                      {progressionError ? (
+                        <p className="mt-3 text-sm font-medium text-red-700" role="alert">
+                          {progressionError}
+                        </p>
+                      ) : null}
+
+                      <LobbyBrowser
+                        initialGameNumber={Number.isInteger(requestedGame) ? requestedGame : null}
+                        initialPage={Number.isInteger(requestedPage) && requestedPage > 0 ? requestedPage : 1}
+                        lobbies={tournament.lobbies}
+                        tournamentId={tournament.id}
+                      />
+                    </div>
+                  }
+                  scoresheet={
+                    <Scoresheet
+                      key={scoresheetVersion}
+                      roundLabel={
+                        tournament.currentRoundNumber
+                          ? `Round ${tournament.currentRoundNumber}`
+                          : "the current round"
+                      }
+                      lobbies={tournament.lobbies}
+                      scores={currentRoundScores}
+                    />
+                  }
+                />
+              </>
+            ) : null}
+
+            {!tournament.hasStarted ? (
+              <section className="border-t border-zinc-200 py-8">
               <div className="flex items-end justify-between gap-4">
                 <div>
                   <h2 className="text-2xl font-semibold text-zinc-950">
@@ -357,7 +516,8 @@ export default async function TournamentPage({
                   </table>
                 </div>
               )}
-            </section>
+              </section>
+            ) : null}
           </>
         ) : null}
       </div>

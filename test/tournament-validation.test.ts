@@ -9,6 +9,7 @@ import {
   validateTournamentCreation,
 } from "../lib/tournament/validation/api";
 import { selectTournamentEntrants } from "../lib/tournament/start/api";
+import { validateTournamentFormat } from "../lib/tournament/formats/api";
 
 test("accepts tournament player counts that divide exactly into TFT lobbies", () => {
   for (const playerCount of [8, 16, 32, 64, 512]) {
@@ -122,7 +123,17 @@ test("default tournament format specifies two games for every round", () => {
 
   const [openingRound, finalRound] = format.rounds;
   assert.equal(openingRound.lobbySeeding, "snake");
+<<<<<<< HEAD
   assert.equal(openingRound.games, 2);
+=======
+  assert.equal(openingRound.games, 6);
+  assert.equal(openingRound.reseed, 2);
+  assert.deepEqual(openingRound.standings.tieBreakers, [
+    { rankingMetric: "current_round_firsts", sortDirection: "desc" },
+    { rankingMetric: "round_entry_seed", sortDirection: "asc" },
+  ]);
+  assert.equal(openingRound.reseedStandings.rankingMetric, "tournament_points");
+>>>>>>> 67350be (Added multi-round support)
   assert.deepEqual(openingRound.advancement, {
     type: "top_n",
     count: 8,
@@ -137,6 +148,22 @@ test("default tournament format specifies two games for every round", () => {
     games: 2,
     rankingMetric: "points",
   });
+});
+
+test("validates game blocks, reseed bounds, destinations, and tie-breakers", () => {
+  const format = JSON.parse(
+    readFileSync(
+      join(process.cwd(), "lib/tournament/formats/default.json"),
+      "utf8",
+    ),
+  );
+  const valid = validateTournamentFormat(format);
+  assert.equal(valid.success, true);
+
+  format.rounds[0].reseed = format.rounds[0].games + 1;
+  const invalid = validateTournamentFormat(format);
+  assert.equal(invalid.success, false);
+  assert.match(invalid.errors.join(" "), /reseed must be between 0 and games/);
 });
 
 test("selects the earliest registered players when starting a tournament", () => {

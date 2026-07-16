@@ -1,6 +1,7 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import { updateLobbyScoresAction } from "@/app/actions";
+import { RandomizeLobbyScoresButton } from "@/components/tournaments/randomize-lobby-scores-button";
 import { getTournamentDetail } from "@/lib/db/tournaments/api";
 
 export const dynamic = "force-dynamic";
@@ -11,6 +12,8 @@ type LobbyPageParams = Promise<{
 }>;
 
 type LobbyPageSearchParams = Promise<{
+  game?: string | string[];
+  page?: string | string[];
   scoreError?: string | string[];
   saved?: string | string[];
 }>;
@@ -33,6 +36,8 @@ export default async function LobbyScoresPage({
   const { tournamentId, lobbyId } = await params;
   const currentRoundPath = `/tournaments/${tournamentId}/rounds/current`;
   const query = await searchParams;
+  const returnGame = getSearchValue(query.game);
+  const returnPage = getSearchValue(query.page);
   const scoreError = getSearchValue(query.scoreError);
   const saved = getSearchValue(query.saved) === "true";
   let tournament:
@@ -60,6 +65,17 @@ export default async function LobbyScoresPage({
       .filter((score) => score.roundId === lobby?.roundId)
       .map((score) => [score.participantId, score.score]) ?? [],
   );
+  const isReadOnly = tournament?.status === "completed";
+  const backQuery = new URLSearchParams();
+  if (returnGame) {
+    backQuery.set("game", returnGame);
+  }
+  if (returnPage) {
+    backQuery.set("page", returnPage);
+  }
+  const backToTournamentHref = `/tournaments/${tournamentId}${
+    backQuery.toString() ? `?${backQuery.toString()}` : ""
+  }`;
 
   return (
     <main className="min-h-screen bg-stone-50 text-zinc-950">
@@ -78,9 +94,15 @@ export default async function LobbyScoresPage({
           </div>
           <Link
             className="rounded-md border border-zinc-200 bg-white px-3 py-2 text-sm font-medium text-zinc-600 shadow-sm hover:bg-zinc-50"
+<<<<<<< HEAD
             href={currentRoundPath}
           >
             Back to current round
+=======
+            href={backToTournamentHref}
+          >
+            Back to lobby browser
+>>>>>>> 67350be (Added multi-round support)
           </Link>
         </header>
 
@@ -102,7 +124,7 @@ export default async function LobbyScoresPage({
               <h1 className="mt-3 text-4xl font-semibold tracking-normal text-zinc-950">
                 Game {lobby.gameNumber} · Lobby {lobby.lobbyNumber} results
               </h1>
-              <dl className="mt-5 grid gap-3 text-sm sm:grid-cols-3">
+              <dl className="mt-5 grid gap-3 text-sm sm:grid-cols-2">
                 <div className="border-l-4 border-zinc-800 bg-white px-4 py-3 shadow-sm">
                   <dt className="text-zinc-500">Round</dt>
                   <dd className="mt-1 font-semibold text-zinc-950">
@@ -144,6 +166,12 @@ export default async function LobbyScoresPage({
               </div>
             ) : null}
 
+            {isReadOnly ? (
+              <div className="mb-5 rounded-md border border-zinc-200 bg-zinc-100 p-4 text-sm font-medium text-zinc-700">
+                This tournament is complete. Results are read-only.
+              </div>
+            ) : null}
+
             <section className="pb-10">
               <div>
                 <h2 className="text-2xl font-semibold text-zinc-950">
@@ -158,6 +186,8 @@ export default async function LobbyScoresPage({
               <form action={updateLobbyScoresAction} className="mt-5">
                 <input name="tournamentId" type="hidden" value={tournament.id} />
                 <input name="lobbyId" type="hidden" value={lobby.id} />
+                <input name="returnGame" type="hidden" value={returnGame} />
+                <input name="returnPage" type="hidden" value={returnPage} />
                 <div className="overflow-x-auto rounded-lg border border-zinc-200 bg-white shadow-sm">
                   <table className="w-full min-w-[32rem] border-collapse text-left text-sm">
                     <thead className="bg-zinc-50 text-zinc-600">
@@ -202,6 +232,7 @@ export default async function LobbyScoresPage({
                               required
                               step={1}
                               type="number"
+                              disabled={isReadOnly}
                             />
                           </td>
                           <td className="px-4 py-3 font-semibold text-zinc-950">
@@ -216,12 +247,18 @@ export default async function LobbyScoresPage({
                 <div className="mt-5 flex flex-col-reverse gap-3 sm:flex-row sm:items-center sm:justify-end">
                   <Link
                     className="flex h-11 items-center justify-center rounded-md border border-zinc-300 bg-white px-5 text-sm font-semibold text-zinc-700 transition hover:bg-zinc-50"
+<<<<<<< HEAD
                     href={currentRoundPath}
+=======
+                    href={backToTournamentHref}
+>>>>>>> 67350be (Added multi-round support)
                   >
                     Cancel
                   </Link>
+                  <RandomizeLobbyScoresButton disabled={isReadOnly} />
                   <button
-                    className="flex h-11 items-center justify-center rounded-md bg-emerald-700 px-5 text-sm font-semibold text-white transition hover:bg-emerald-800 focus:outline-none focus:ring-2 focus:ring-emerald-600 focus:ring-offset-2"
+                    className="flex h-11 items-center justify-center rounded-md bg-emerald-700 px-5 text-sm font-semibold text-white transition hover:bg-emerald-800 focus:outline-none focus:ring-2 focus:ring-emerald-600 focus:ring-offset-2 disabled:cursor-not-allowed disabled:bg-zinc-300 disabled:text-zinc-500"
+                    disabled={isReadOnly}
                     type="submit"
                   >
                     Save lobby results
