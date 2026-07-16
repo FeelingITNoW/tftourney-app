@@ -43,12 +43,27 @@ export type TournamentScore = {
   createdAt: string;
 };
 
+export type TournamentLobbyParticipant = {
+  id: string;
+  displayName: string;
+  seedNumber: number;
+  slotNumber: number;
+};
+
+export type TournamentLobby = {
+  id: string;
+  roundId: string;
+  lobbyNumber: number;
+  participants: TournamentLobbyParticipant[];
+};
+
 export type TournamentDetail = Omit<
   TournamentSummary,
   "registeredPlayerCount"
 > & {
   registrations: TournamentRegistration[];
   participants: TournamentParticipant[];
+  lobbies: TournamentLobby[];
   scores: TournamentScore[];
 };
 
@@ -90,6 +105,19 @@ export type TournamentScoreRow = {
 export type TournamentRoundRow = {
   id: string | number;
   round_number: number;
+};
+
+export type TournamentLobbyRow = {
+  id: string | number;
+  round_id: string | number;
+  lobby_number: number;
+};
+
+export type TournamentLobbyParticipantRow = {
+  id: string | number;
+  lobby_id: string | number;
+  participant_id: string;
+  slot_number: number;
 };
 
 export type StartTournamentResult = {

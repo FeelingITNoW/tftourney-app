@@ -294,58 +294,108 @@ export default async function TournamentPage({
             </section>
 
             {tournament.hasStarted ? (
-              <section className="border-t border-zinc-200 py-8">
-                <div className="flex items-end justify-between gap-4">
+              <>
+                <section className="border-t border-zinc-200 py-8">
                   <div>
                     <h2 className="text-2xl font-semibold text-zinc-950">
-                      Scoresheet
+                      Current round lobbies
                     </h2>
                     <p className="mt-1 text-sm text-zinc-500">
-                      Official entrants and current scores for{" "}
-                      {tournament.currentRoundId ?? "the current round"}.
+                      Players are assigned when the round starts.
                     </p>
                   </div>
-                </div>
 
-                {tournament.scores.length === 0 ? (
-                  <div className="mt-5 rounded-md border border-zinc-200 bg-white p-5 text-sm text-zinc-500">
-                    No score rows were created for this tournament.
+                  {tournament.lobbies.length === 0 ? (
+                    <div className="mt-5 rounded-md border border-zinc-200 bg-white p-5 text-sm text-zinc-500">
+                      No lobbies were generated for the current round.
+                    </div>
+                  ) : (
+                    <div className="mt-5 grid gap-5 md:grid-cols-2">
+                      {tournament.lobbies.map((lobby) => (
+                        <article
+                          className="overflow-hidden rounded-lg border border-zinc-200 bg-white shadow-sm"
+                          key={lobby.id}
+                        >
+                          <h3 className="border-b border-zinc-200 bg-zinc-50 px-4 py-3 font-semibold text-zinc-950">
+                            Lobby {lobby.lobbyNumber}
+                          </h3>
+                          <ol className="divide-y divide-zinc-100">
+                            {lobby.participants.map((participant) => (
+                              <li
+                                className="flex items-center gap-3 px-4 py-3 text-sm"
+                                key={participant.id}
+                              >
+                                <span className="w-6 text-zinc-400">
+                                  {participant.slotNumber}
+                                </span>
+                                <span className="flex-1 font-medium text-zinc-950">
+                                  {participant.displayName}
+                                </span>
+                                <span className="text-zinc-500">
+                                  Seed {participant.seedNumber}
+                                </span>
+                              </li>
+                            ))}
+                          </ol>
+                        </article>
+                      ))}
+                    </div>
+                  )}
+                </section>
+
+                <section className="border-t border-zinc-200 py-8">
+                  <div className="flex items-end justify-between gap-4">
+                    <div>
+                      <h2 className="text-2xl font-semibold text-zinc-950">
+                        Scoresheet
+                      </h2>
+                      <p className="mt-1 text-sm text-zinc-500">
+                        Official entrants and current scores for{" "}
+                        {tournament.currentRoundId ?? "the current round"}.
+                      </p>
+                    </div>
                   </div>
-                ) : (
-                  <div className="mt-5 overflow-hidden rounded-lg border border-zinc-200 bg-white shadow-sm">
-                    <table className="w-full border-collapse text-left text-sm">
-                      <thead className="bg-zinc-50 text-zinc-600">
-                        <tr>
-                          <th className="w-20 px-4 py-3 font-medium">Seed</th>
-                          <th className="px-4 py-3 font-medium">Player</th>
-                          <th className="px-4 py-3 font-medium">Round</th>
-                          <th className="w-24 px-4 py-3 text-right font-medium">
-                            Score
-                          </th>
-                        </tr>
-                      </thead>
-                      <tbody className="divide-y divide-zinc-200">
-                        {tournament.scores.map((score) => (
-                          <tr key={score.id}>
-                            <td className="px-4 py-3 text-zinc-500">
-                              {score.seedNumber}
-                            </td>
-                            <td className="px-4 py-3 font-medium text-zinc-950">
-                              {score.displayName}
-                            </td>
-                            <td className="px-4 py-3 text-zinc-600">
-                              {score.roundId}
-                            </td>
-                            <td className="px-4 py-3 text-right font-semibold text-zinc-950">
-                              {score.score}
-                            </td>
+
+                  {tournament.scores.length === 0 ? (
+                    <div className="mt-5 rounded-md border border-zinc-200 bg-white p-5 text-sm text-zinc-500">
+                      No score rows were created for this tournament.
+                    </div>
+                  ) : (
+                    <div className="mt-5 overflow-hidden rounded-lg border border-zinc-200 bg-white shadow-sm">
+                      <table className="w-full border-collapse text-left text-sm">
+                        <thead className="bg-zinc-50 text-zinc-600">
+                          <tr>
+                            <th className="w-20 px-4 py-3 font-medium">Seed</th>
+                            <th className="px-4 py-3 font-medium">Player</th>
+                            <th className="px-4 py-3 font-medium">Round</th>
+                            <th className="w-24 px-4 py-3 text-right font-medium">
+                              Score
+                            </th>
                           </tr>
-                        ))}
-                      </tbody>
-                    </table>
-                  </div>
-                )}
-              </section>
+                        </thead>
+                        <tbody className="divide-y divide-zinc-200">
+                          {tournament.scores.map((score) => (
+                            <tr key={score.id}>
+                              <td className="px-4 py-3 text-zinc-500">
+                                {score.seedNumber}
+                              </td>
+                              <td className="px-4 py-3 font-medium text-zinc-950">
+                                {score.displayName}
+                              </td>
+                              <td className="px-4 py-3 text-zinc-600">
+                                {score.roundId}
+                              </td>
+                              <td className="px-4 py-3 text-right font-semibold text-zinc-950">
+                                {score.score}
+                              </td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+                  )}
+                </section>
+              </>
             ) : null}
 
             <section className="border-t border-zinc-200 py-8">

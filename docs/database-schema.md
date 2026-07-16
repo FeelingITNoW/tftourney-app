@@ -125,3 +125,17 @@ CREATE TABLE public.participant_round_scores (
 -- lobbies(round_id, lobby_number)
 -- lobby_participants(lobby_id, participant_id)
 -- participant_round_scores(participant_id, round_id)
+
+## Lobby seeding in tournament formats
+
+Every object in `format_config.rounds` declares a `lobbySeeding` strategy:
+
+- `"snake"` assigns seeded players across lobbies in alternating directions.
+  For two lobbies, seeds 1–4 are distributed 1, 2, 2, 1.
+- `"random"` shuffles the round participants before distributing them evenly
+  across lobbies.
+
+Starting a tournament creates round 1, its score rows, and its lobbies in one
+database transaction. `generate_round_lobbies(round_id)` can also be reused when
+later rounds are created; it uses that round's score rows as its participant
+roster and the matching format round's `lobbySeeding` value as its strategy.
