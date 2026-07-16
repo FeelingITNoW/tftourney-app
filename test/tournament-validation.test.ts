@@ -111,6 +111,7 @@ test("default tournament format uses a qualifier into a six-game final", () => {
   assert.equal(format.rounds.length, 2);
 
   const [openingRound, finalRound] = format.rounds;
+  assert.equal(openingRound.lobbySeeding, "snake");
   assert.equal(openingRound.games, 6);
   assert.deepEqual(openingRound.advancement, {
     type: "top_n",
@@ -119,6 +120,7 @@ test("default tournament format uses a qualifier into a six-game final", () => {
     destinationRoundId: "final-round",
   });
 
+  assert.equal(finalRound.lobbySeeding, "random");
   assert.equal(finalRound.games, 6);
   assert.deepEqual(finalRound.winCondition, {
     type: "highest_points_after_games",

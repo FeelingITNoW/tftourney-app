@@ -42,6 +42,7 @@ begin
           "name": "Opening Round",
           "type": "qualifier",
           "participants": "all_registered_players",
+          "lobbySeeding": "snake",
           "games": 6,
           "standings": {
             "rankingMetric": "points",
@@ -59,6 +60,7 @@ begin
           "name": "Final Round",
           "type": "final",
           "participants": "advanced_from_opening-round",
+          "lobbySeeding": "random",
           "games": 6,
           "standings": {
             "rankingMetric": "points",
