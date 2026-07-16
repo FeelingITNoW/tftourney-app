@@ -55,11 +55,19 @@ begin
           "participants": "all_registered_players",
           "lobbySeeding": "snake",
 <<<<<<< HEAD
+<<<<<<< HEAD
           "games": 2,
 =======
           "games": 6,
           "reseed": 2,
 >>>>>>> 67350be (Added multi-round support)
+=======
+          "games": 6,
+          "reseed": 2,
+=======
+          "games": 2,
+>>>>>>> ca21f53 (Added multiple games per round support)
+>>>>>>> 60dbee6 (Added multiple games per round support)
           "standings": {
             "rankingMetric": "points",
             "sortDirection": "desc",
@@ -102,11 +110,19 @@ begin
           "participants": "advanced_from_opening-round",
           "lobbySeeding": "random",
 <<<<<<< HEAD
+<<<<<<< HEAD
           "games": 2,
 =======
           "games": 6,
           "reseed": 2,
 >>>>>>> 67350be (Added multi-round support)
+=======
+          "games": 6,
+          "reseed": 2,
+=======
+          "games": 2,
+>>>>>>> ca21f53 (Added multiple games per round support)
+>>>>>>> 60dbee6 (Added multiple games per round support)
           "standings": {
             "rankingMetric": "points",
             "sortDirection": "desc",

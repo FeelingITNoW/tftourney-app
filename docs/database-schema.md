@@ -152,17 +152,29 @@ to awarded points. The default format awards 8 points for first place, 7 for
 second, continuing down to 1 point for eighth place.
 
 <<<<<<< HEAD
+<<<<<<< HEAD
 Starting a tournament creates round 1, its score rows, and every game lobby in
 one database transaction. `generate_round_lobbies(round_id)` can also be reused
 when later rounds are created; it uses that round's score rows as its participant
 roster and the matching format round's `lobbySeeding` and `games` values.
 =======
+=======
+>>>>>>> 60dbee6 (Added multiple games per round support)
 Starting a tournament creates round 1, its round-seeded score rows, and its
 first game block in one database transaction. `generate_round_lobbies(round_id)`
 is idempotent and creates the next block only after the current block is fully
 scored. It uses tournament totals, current-round firsts, and the round seed for
 reseeding; random assignments are persisted in `lobby_participants`.
+<<<<<<< HEAD
 >>>>>>> 67350be (Added multi-round support)
+=======
+=======
+Starting a tournament creates round 1, its score rows, and every game lobby in
+one database transaction. `generate_round_lobbies(round_id)` can also be reused
+when later rounds are created; it uses that round's score rows as its participant
+roster and the matching format round's `lobbySeeding` and `games` values.
+>>>>>>> ca21f53 (Added multiple games per round support)
+>>>>>>> 60dbee6 (Added multiple games per round support)
 
 ## Lobby results and round totals
 

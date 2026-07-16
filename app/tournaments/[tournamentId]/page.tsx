@@ -59,7 +59,9 @@ export default async function TournamentPage({
   const progressionError = getSearchValue(query.progressionError);
   const progressed = getSearchValue(query.progressed) === "true";
   const deleteError = getSearchValue(query.deleteError);
-  let tournament;
+  let tournament:
+    | Awaited<ReturnType<typeof getTournamentDetail>>
+    | undefined;
   let databaseError = "";
 
   try {
@@ -179,7 +181,7 @@ export default async function TournamentPage({
               <div className="space-y-4">
                 <div className="rounded-lg border border-zinc-200 bg-white p-5 shadow-sm">
                   <h2 className="text-lg font-semibold text-zinc-950">
-                    Start tournament
+                    {isAcceptingPlayers ? "Start tournament" : "Current round"}
                   </h2>
                   {isAcceptingPlayers ? (
                     <>

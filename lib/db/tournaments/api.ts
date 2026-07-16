@@ -357,6 +357,7 @@ export async function getTournamentDetail(
         },
   );
 <<<<<<< HEAD
+<<<<<<< HEAD
   const rounds = await supabaseRestRequest<TournamentRoundRow[]>("rounds", {
     query: {
       select: "id,round_number",
@@ -374,6 +375,8 @@ export async function getTournamentDetail(
           select: "id,round_id,game_number,lobby_number",
           round_id: `in.(${roundIds.join(",")})`,
 =======
+=======
+>>>>>>> 60dbee6 (Added multiple games per round support)
   const currentRound = tournament.current_round_id
     ? (
         await supabaseRestRequest<TournamentRoundRow[]>("rounds", {
@@ -390,7 +393,28 @@ export async function getTournamentDetail(
         query: {
           select: "id,round_id,game_number,lobby_number",
           round_id: `eq.${tournament.current_round_id}`,
+<<<<<<< HEAD
 >>>>>>> 67350be (Added multi-round support)
+=======
+=======
+  const rounds = await supabaseRestRequest<TournamentRoundRow[]>("rounds", {
+    query: {
+      select: "id,round_number",
+      tournament_id: `eq.${tournamentId}`,
+      order: "round_number.asc",
+    },
+  });
+  const currentRound = rounds.find(
+    (round) => String(round.id) === String(tournament.current_round_id),
+  );
+  const roundIds = rounds.map((round) => round.id);
+  const allLobbies = roundIds.length
+    ? await supabaseRestRequest<TournamentLobbyRow[]>("lobbies", {
+        query: {
+          select: "id,round_id,game_number,lobby_number",
+          round_id: `in.(${roundIds.join(",")})`,
+>>>>>>> ca21f53 (Added multiple games per round support)
+>>>>>>> 60dbee6 (Added multiple games per round support)
           order: "game_number.asc,lobby_number.asc",
         },
       })
@@ -419,15 +443,25 @@ export async function getTournamentDetail(
     ]),
   );
 <<<<<<< HEAD
+<<<<<<< HEAD
   const lobbyById = new Map(
     allLobbies.map((lobby) => [String(lobby.id), lobby]),
 =======
+=======
+>>>>>>> 60dbee6 (Added multiple games per round support)
   const roundSeedByParticipantRound = new Map(
     scores.map((score) => [
       `${String(score.round_id)}:${score.participant_id}`,
       score.round_seed_number,
     ]),
+<<<<<<< HEAD
 >>>>>>> 67350be (Added multi-round support)
+=======
+=======
+  const lobbyById = new Map(
+    allLobbies.map((lobby) => [String(lobby.id), lobby]),
+>>>>>>> ca21f53 (Added multiple games per round support)
+>>>>>>> 60dbee6 (Added multiple games per round support)
   );
   const lobbyParticipantsByLobbyId = new Map<
     string,
@@ -461,6 +495,7 @@ export async function getTournamentDetail(
   }
 
 <<<<<<< HEAD
+<<<<<<< HEAD
   const gameScores = lobbyParticipants
     .map((lobbyParticipant) => {
       const participant = participantById.get(lobbyParticipant.participant_id);
@@ -485,6 +520,8 @@ export async function getTournamentDetail(
     })
     .filter((score): score is TournamentGameScore => score !== null);
 =======
+=======
+>>>>>>> 60dbee6 (Added multiple games per round support)
   const mappedLobbies = lobbies.map((lobby) => ({
     id: String(lobby.id),
     roundId: String(lobby.round_id),
@@ -508,13 +545,42 @@ export async function getTournamentDetail(
         ? "create_next_round"
         : "complete_tournament"
       : null;
+<<<<<<< HEAD
 >>>>>>> 67350be (Added multi-round support)
+=======
+=======
+  const gameScores = lobbyParticipants
+    .map((lobbyParticipant) => {
+      const participant = participantById.get(lobbyParticipant.participant_id);
+      const lobby = lobbyById.get(String(lobbyParticipant.lobby_id));
+
+      if (!participant || !lobby) {
+        return null;
+      }
+
+      return {
+        participantId: participant.id,
+        displayName: participant.displayName,
+        seedNumber: participant.seedNumber,
+        roundId: String(lobby.round_id),
+        gameNumber: lobby.game_number,
+        score:
+          lobbyParticipant.result_status === "confirmed" ||
+          lobbyParticipant.result_status === "corrected"
+            ? lobbyParticipant.points
+            : null,
+      };
+    })
+    .filter((score): score is TournamentGameScore => score !== null);
+>>>>>>> ca21f53 (Added multiple games per round support)
+>>>>>>> 60dbee6 (Added multiple games per round support)
 
   return {
     ...mapTournamentRow(tournament),
     currentRoundNumber: currentRound?.round_number ?? null,
     registrations: registrations.map(mapTournamentRegistrationRow),
     participants: participants.map(mapTournamentParticipantRow),
+<<<<<<< HEAD
 <<<<<<< HEAD
     rounds: rounds.map((round) => ({
       id: String(round.id),
@@ -531,6 +597,23 @@ export async function getTournamentDetail(
 =======
     lobbies: mappedLobbies,
 >>>>>>> 67350be (Added multi-round support)
+=======
+    lobbies: mappedLobbies,
+=======
+    rounds: rounds.map((round) => ({
+      id: String(round.id),
+      roundNumber: round.round_number,
+    })),
+    lobbies: lobbies.map((lobby) => ({
+      id: String(lobby.id),
+      roundId: String(lobby.round_id),
+      gameNumber: lobby.game_number,
+      lobbyNumber: lobby.lobby_number,
+      participants: lobbyParticipantsByLobbyId.get(String(lobby.id)) ?? [],
+    })),
+    gameScores,
+>>>>>>> ca21f53 (Added multiple games per round support)
+>>>>>>> 60dbee6 (Added multiple games per round support)
     scores: scores
       .map((score) => {
         const participant = participantById.get(score.participant_id);
