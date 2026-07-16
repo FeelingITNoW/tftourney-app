@@ -6,6 +6,27 @@ export type TournamentStatus =
   | "completed"
   | "cancelled";
 
+export type TournamentProgressionAction =
+  | "create_next_round"
+  | "complete_tournament"
+  | null;
+
+export type TournamentRoundProgress = {
+  completedGames: number;
+  configuredGames: number;
+  currentBlockStartGame: number | null;
+  currentBlockEndGame: number | null;
+  nextReseedGame: number | null;
+  isComplete: boolean;
+};
+
+export type TournamentNextRoundMetadata = {
+  roundNumber: number;
+  roundName: string;
+  destinationRoundId: string;
+  advancementCount: number;
+};
+
 export type TournamentSummary = {
   id: string;
   name: string;
@@ -38,6 +59,7 @@ export type TournamentScore = {
   participantId: string;
   displayName: string;
   seedNumber: number;
+  roundSeedNumber: number;
   roundId: string;
   score: number;
   createdAt: string;
@@ -61,6 +83,7 @@ export type TournamentLobbyParticipant = {
   id: string;
   displayName: string;
   seedNumber: number;
+  roundSeedNumber: number;
   slotNumber: number;
   placement: number | null;
   points: number | null;
@@ -85,6 +108,9 @@ export type TournamentDetail = Omit<
   lobbies: TournamentLobby[];
   gameScores: TournamentGameScore[];
   scores: TournamentScore[];
+  roundProgress: TournamentRoundProgress | null;
+  nextRound: TournamentNextRoundMetadata | null;
+  progressionAction: TournamentProgressionAction;
 };
 
 export type TournamentRow = {
@@ -94,6 +120,7 @@ export type TournamentRow = {
   format_id: string;
   status: TournamentStatus;
   current_round_id: string | number | null;
+  format_config: unknown;
   created_at: string;
 };
 
@@ -118,6 +145,7 @@ export type TournamentScoreRow = {
   id: string;
   participant_id: string;
   round_id: string | number;
+  round_seed_number: number;
   score: number;
   created_at: string;
 };
@@ -125,6 +153,8 @@ export type TournamentScoreRow = {
 export type TournamentRoundRow = {
   id: string | number;
   round_number: number;
+  format_round_id: string | null;
+  status: "pending" | "active" | "completed" | "cancelled";
 };
 
 export type TournamentLobbyRow = {
@@ -185,4 +215,15 @@ export type UpdateLobbyResultsInput = {
 export type UpdateLobbyResultsResult = {
   updated_lobby_id: string;
   updated_participant_count: number;
+};
+
+export type ProgressTournamentRoundInput = {
+  tournamentId: string;
+};
+
+export type ProgressTournamentRoundResult = {
+  transition_type: "round_created" | "tournament_completed";
+  completed_round_id: string;
+  new_round_id: string | null;
+  advanced_player_count: number;
 };

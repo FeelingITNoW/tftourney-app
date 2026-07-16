@@ -107,6 +107,7 @@ CREATE TABLE public.participant_round_scores (
   id uuid NOT NULL DEFAULT gen_random_uuid(),
   participant_id uuid NOT NULL,
   round_id bigint NOT NULL,
+  round_seed_number integer NOT NULL CHECK (round_seed_number > 0),
   score integer NOT NULL DEFAULT 0,
   created_at timestamptz NOT NULL DEFAULT now(),
   updated_at timestamptz NOT NULL DEFAULT now(),
@@ -126,8 +127,14 @@ CREATE TABLE public.participant_round_scores (
 -- lobbies(round_id, game_number, lobby_number)
 -- lobby_participants(lobby_id, participant_id)
 -- participant_round_scores(participant_id, round_id)
+-- participant_round_scores(round_id, round_seed_number)
 
 ## Lobby seeding in tournament formats
+
+Every object in `format_config.rounds` declares `games`, `reseed`, a
+`lobbySeeding` strategy, and standings tie-breakers. `reseed: 0` disables
+automatic reseeding for the round. The built-in format uses six games and
+reseed blocks of two games.
 
 Every object in `format_config.rounds` declares a `lobbySeeding` strategy:
 
@@ -138,16 +145,17 @@ Every object in `format_config.rounds` declares a `lobbySeeding` strategy:
 
 Every configured round also declares a positive integer `games` count. Lobby
 assignments are repeated for each game in the round. The built-in default format
-currently uses two games per round.
+currently uses six games per round with reseed blocks of two.
 
 The top-level `format_config.placementPoints` object maps finishing placements
 to awarded points. The default format awards 8 points for first place, 7 for
 second, continuing down to 1 point for eighth place.
 
-Starting a tournament creates round 1, its score rows, and every game lobby in
-one database transaction. `generate_round_lobbies(round_id)` can also be reused
-when later rounds are created; it uses that round's score rows as its participant
-roster and the matching format round's `lobbySeeding` and `games` values.
+Starting a tournament creates round 1, its round-seeded score rows, and its
+first game block in one database transaction. `generate_round_lobbies(round_id)`
+is idempotent and creates the next block only after the current block is fully
+scored. It uses tournament totals, current-round firsts, and the round seed for
+reseeding; random assignments are persisted in `lobby_participants`.
 
 ## Lobby results and round totals
 
@@ -158,3 +166,9 @@ with unique placements, marks first-time results as `confirmed` and later edits
 as `corrected`, then recalculates `participant_round_scores.score` from all
 confirmed or corrected lobby points in that round. The lobby results and round
 score totals are therefore updated in one database transaction.
+
+When the last result in a block is saved, the same transaction creates the next
+game block. `progress_tournament_round(tournament_id)` locks the tournament and
+active round, verifies every configured game and result, advances the
+format-defined count to the destination round, or completes the tournament if
+the active round is final. Completed rounds are read-only.

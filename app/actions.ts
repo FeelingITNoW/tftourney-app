@@ -6,7 +6,9 @@ import defaultTournamentFormat from "@/lib/tournament/formats/default.json";
 import {
   createTournament,
   deleteTournament,
+  getTournamentDetail,
   registerTournamentPlayer,
+  progressTournamentRound,
   startTournament,
   updateLobbyResults,
 } from "@/lib/db/tournaments/api";
@@ -196,10 +198,17 @@ export async function updateLobbyScoresAction(formData: FormData) {
 
   const participantIds = getFormStrings(formData, "participantId");
   const placements = getFormStrings(formData, "placement");
+  const returnGame = getFormString(formData, "returnGame");
+  const returnPage = getFormString(formData, "returnPage");
+  const returnParams = {
+    game: returnGame,
+    page: returnPage,
+  };
 
   if (participantIds.length !== placements.length) {
     redirectWithParams(lobbyPath, {
       scoreError: "Submit one placement for every lobby player.",
+      ...returnParams,
     });
   }
 
@@ -213,6 +222,7 @@ export async function updateLobbyScoresAction(formData: FormData) {
   if (!validation.success) {
     redirectWithParams(lobbyPath, {
       scoreError: validation.error,
+      ...returnParams,
     });
   }
 
@@ -228,11 +238,118 @@ export async function updateLobbyScoresAction(formData: FormData) {
         error instanceof Error
           ? error.message
           : "Lobby scores could not be updated.",
+      ...returnParams,
     });
   }
 
   revalidatePath(detailPath);
   revalidatePath(currentRoundPath);
   revalidatePath(lobbyPath);
-  redirectWithParams(lobbyPath, { saved: "true" });
+  revalidatePath(`${detailPath}/lobbies`, "layout");
+  redirectWithParams(lobbyPath, { saved: "true", ...returnParams });
+}
+
+export async function randomizeAllLobbyResultsAction(formData: FormData) {
+  const tournamentId = getFormString(formData, "tournamentId");
+  const returnGame = getFormString(formData, "game");
+  const returnPage = getFormString(formData, "page");
+  const detailPath = `/tournaments/${tournamentId}`;
+  const returnParams = {
+    game: returnGame,
+    page: returnPage,
+  };
+
+  if (!tournamentId) {
+    redirectWithParams("/", {
+      createError: "Tournament was not found.",
+    });
+  }
+
+  try {
+    const tournament = await getTournamentDetail(tournamentId);
+
+    if (!tournament) {
+      throw new Error("Tournament was not found.");
+    }
+
+    if (tournament.status === "completed") {
+      throw new Error("Completed tournaments are read-only.");
+    }
+
+    if (tournament.lobbies.length === 0) {
+      throw new Error("No lobbies were generated for the current round.");
+    }
+
+    for (const lobby of tournament.lobbies) {
+      const placements = Array.from(
+        { length: lobby.participants.length },
+        (_, index) => index + 1,
+      );
+
+      for (let index = placements.length - 1; index > 0; index -= 1) {
+        const randomIndex = Math.floor(Math.random() * (index + 1));
+        [placements[index], placements[randomIndex]] = [
+          placements[randomIndex],
+          placements[index],
+        ];
+      }
+
+      const validation = validateLobbyResults(
+        lobby.participants.map((participant, index) => ({
+          participantId: participant.id,
+          placement: String(placements[index]),
+        })),
+      );
+
+      if (!validation.success) {
+        throw new Error(validation.error);
+      }
+
+      await updateLobbyResults({
+        tournamentId,
+        lobbyId: lobby.id,
+        results: validation.data,
+      });
+    }
+  } catch (error) {
+    redirectWithParams(detailPath, {
+      progressionError:
+        error instanceof Error
+          ? error.message
+          : "Lobby results could not be randomized.",
+      ...returnParams,
+    });
+  }
+
+  revalidatePath("/");
+  revalidatePath(detailPath);
+  revalidatePath(`${detailPath}/lobbies`, "layout");
+  redirectWithParams(detailPath, { randomized: "true", ...returnParams });
+}
+
+export async function progressTournamentRoundAction(formData: FormData) {
+  const tournamentId = getFormString(formData, "tournamentId");
+  const detailPath = `/tournaments/${tournamentId}`;
+
+  if (!tournamentId) {
+    redirectWithParams("/", {
+      createError: "Tournament was not found.",
+    });
+  }
+
+  try {
+    await progressTournamentRound({ tournamentId });
+  } catch (error) {
+    redirectWithParams(detailPath, {
+      progressionError:
+        error instanceof Error
+          ? error.message
+          : "The tournament round could not be progressed.",
+    });
+  }
+
+  revalidatePath("/");
+  revalidatePath(detailPath);
+  revalidatePath(`${detailPath}/lobbies`, "layout");
+  redirectWithParams(detailPath, { progressed: "true" });
 }

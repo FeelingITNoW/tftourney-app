@@ -22,6 +22,7 @@ export type ScoredStanding = {
   displayName: string;
   score: number;
   seedNumber: number;
+  roundSeedNumber?: number;
 };
 
 export type ParticipantScoreStanding = ScoredStanding & {

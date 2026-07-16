@@ -9,6 +9,7 @@ import {
   validateTournamentCreation,
 } from "../lib/tournament/validation/api";
 import { selectTournamentEntrants } from "../lib/tournament/start/api";
+import { validateTournamentFormat } from "../lib/tournament/formats/api";
 
 test("accepts tournament player counts that divide exactly into TFT lobbies", () => {
   for (const playerCount of [8, 16, 32, 64, 512]) {
@@ -99,7 +100,7 @@ test("rejects invalid Riot IDs for player registration", () => {
   }
 });
 
-test("default tournament format specifies two games for every round", () => {
+test("default tournament format specifies six-game rounds with reseeding", () => {
   const format = JSON.parse(
     readFileSync(
       join(process.cwd(), "lib/tournament/formats/default.json"),
@@ -122,7 +123,13 @@ test("default tournament format specifies two games for every round", () => {
 
   const [openingRound, finalRound] = format.rounds;
   assert.equal(openingRound.lobbySeeding, "snake");
-  assert.equal(openingRound.games, 2);
+  assert.equal(openingRound.games, 6);
+  assert.equal(openingRound.reseed, 2);
+  assert.deepEqual(openingRound.standings.tieBreakers, [
+    { rankingMetric: "current_round_firsts", sortDirection: "desc" },
+    { rankingMetric: "round_entry_seed", sortDirection: "asc" },
+  ]);
+  assert.equal(openingRound.reseedStandings.rankingMetric, "tournament_points");
   assert.deepEqual(openingRound.advancement, {
     type: "top_n",
     count: 8,
@@ -131,12 +138,29 @@ test("default tournament format specifies two games for every round", () => {
   });
 
   assert.equal(finalRound.lobbySeeding, "random");
-  assert.equal(finalRound.games, 2);
+  assert.equal(finalRound.games, 6);
+  assert.equal(finalRound.reseed, 2);
   assert.deepEqual(finalRound.winCondition, {
     type: "highest_points_after_games",
-    games: 2,
+    games: 6,
     rankingMetric: "points",
   });
+});
+
+test("validates game blocks, reseed bounds, destinations, and tie-breakers", () => {
+  const format = JSON.parse(
+    readFileSync(
+      join(process.cwd(), "lib/tournament/formats/default.json"),
+      "utf8",
+    ),
+  );
+  const valid = validateTournamentFormat(format);
+  assert.equal(valid.success, true);
+
+  format.rounds[0].reseed = format.rounds[0].games + 1;
+  const invalid = validateTournamentFormat(format);
+  assert.equal(invalid.success, false);
+  assert.match(invalid.errors.join(" "), /reseed must be between 0 and games/);
 });
 
 test("selects the earliest registered players when starting a tournament", () => {

@@ -72,7 +72,8 @@ export function sortScoresHighestFirst<TScore extends ScoredStanding>(
   return [...scores].sort(
     (firstScore, secondScore) =>
       secondScore.score - firstScore.score ||
-      firstScore.seedNumber - secondScore.seedNumber ||
+      (firstScore.roundSeedNumber ?? firstScore.seedNumber) -
+        (secondScore.roundSeedNumber ?? secondScore.seedNumber) ||
       firstScore.displayName.localeCompare(secondScore.displayName),
   );
 }

@@ -22,16 +22,135 @@ import type {
   TournamentScoreRow,
   TournamentRow,
   TournamentSummary,
+  ProgressTournamentRoundInput,
+  ProgressTournamentRoundResult,
+  TournamentNextRoundMetadata,
+  TournamentRoundProgress,
+  TournamentProgressionAction,
   UpdateLobbyResultsInput,
   UpdateLobbyResultsResult,
 } from "./types";
+import type { TournamentRoundFormat } from "@/lib/tournament/formats/types";
 
 export const TOURNAMENT_STATUS_ACCEPTING_PLAYERS = "accepting_players";
 
 const STANDARD_HOST_USER_ID = 1;
 
 const tournamentSelect =
-  "id,name,max_players,format_id,status,current_round_id,created_at";
+  "id,name,max_players,format_id,status,current_round_id,format_config,created_at";
+
+type StoredTournamentFormat = {
+  rounds?: Array<Record<string, unknown>>;
+};
+
+function getConfiguredRound(
+  formatConfig: unknown,
+  formatRoundId: string | null | undefined,
+): TournamentRoundFormat | null {
+  if (
+    !formatRoundId ||
+    typeof formatConfig !== "object" ||
+    formatConfig === null
+  ) {
+    return null;
+  }
+
+  const rounds = (formatConfig as StoredTournamentFormat).rounds;
+  const configuredRound = rounds?.find((round) => round.id === formatRoundId);
+
+  if (!configuredRound) {
+    return null;
+  }
+
+  return {
+    ...configuredRound,
+    games: Number(configuredRound.games ?? 6),
+    reseed: Number(configuredRound.reseed ?? 0),
+  } as unknown as TournamentRoundFormat;
+}
+
+function getRoundProgress(
+  lobbies: TournamentLobby[],
+  configuredRound: TournamentRoundFormat | null,
+): TournamentRoundProgress | null {
+  if (!configuredRound) {
+    return null;
+  }
+
+  const games = new Map<number, TournamentLobby[]>();
+  for (const lobby of lobbies) {
+    games.set(lobby.gameNumber, [...(games.get(lobby.gameNumber) ?? []), lobby]);
+  }
+
+  const completedGameNumbers = new Set(
+    [...games.entries()]
+      .filter(
+        ([, gameLobbies]) =>
+          gameLobbies.length > 0 &&
+          gameLobbies.every(
+            (lobby) =>
+              lobby.participants.length > 0 &&
+              lobby.participants.every(
+                (participant) =>
+                  participant.resultStatus === "confirmed" ||
+                  participant.resultStatus === "corrected",
+              ),
+          ),
+      )
+      .map(([gameNumber]) => gameNumber),
+  );
+  const allGamesComplete = Array.from(
+    { length: configuredRound.games },
+    (_, index) => index + 1,
+  ).every((gameNumber) => completedGameNumbers.has(gameNumber));
+  const maxGameNumber = Math.max(...games.keys(), 0);
+  const blockSize =
+    configuredRound.reseed > 0 ? configuredRound.reseed : configuredRound.games;
+  const currentBlockStartGame = maxGameNumber
+    ? Math.floor((maxGameNumber - 1) / blockSize) * blockSize + 1
+    : null;
+  const currentBlockEndGame = currentBlockStartGame
+    ? Math.min(currentBlockStartGame + blockSize - 1, configuredRound.games)
+    : null;
+
+  return {
+    completedGames: completedGameNumbers.size,
+    configuredGames: configuredRound.games,
+    currentBlockStartGame,
+    currentBlockEndGame,
+    nextReseedGame:
+      currentBlockEndGame && currentBlockEndGame < configuredRound.games
+        ? currentBlockEndGame + 1
+        : null,
+    isComplete: allGamesComplete,
+  };
+}
+
+function getNextRoundMetadata(
+  currentRound: TournamentRoundRow | null,
+  currentFormatRound: TournamentRoundFormat | null,
+  formatConfig: unknown,
+): TournamentNextRoundMetadata | null {
+  const advancement = currentFormatRound?.advancement;
+  if (!currentRound || !advancement) {
+    return null;
+  }
+
+  const destinationRound = getConfiguredRound(
+    formatConfig,
+    advancement.destinationRoundId,
+  );
+  if (!destinationRound) {
+    return null;
+  }
+
+  return {
+    roundNumber: currentRound.round_number + 1,
+    roundName: destinationRound.name,
+    destinationRoundId: advancement.destinationRoundId,
+    advancementCount: advancement.count,
+  };
+}
 
 function mapTournamentRow(row: TournamentRow): Omit<
   TournamentSummary,
@@ -160,7 +279,7 @@ export async function listTournaments(): Promise<TournamentSummary[]> {
     .filter((roundId): roundId is string | number => roundId !== null)
     .map(String);
   const rounds = currentRoundIds.length
-    ? await supabaseRestRequest<TournamentRoundRow[]>("rounds", {
+    ? await supabaseRestRequest<Pick<TournamentRoundRow, "id" | "round_number">[]>("rounds", {
         query: {
           select: "id,round_number",
           id: `in.(${currentRoundIds.join(",")})`,
@@ -226,20 +345,20 @@ export async function getTournamentDetail(
     participantIds.length
       ? {
           query: {
-            select: "id,participant_id,round_id,score,created_at",
+            select: "id,participant_id,round_id,round_seed_number,score,created_at",
             participant_id: `in.(${participantIds.join(",")})`,
           },
         }
       : {
           query: {
-            select: "id,participant_id,round_id,score,created_at",
+            select: "id,participant_id,round_id,round_seed_number,score,created_at",
             limit: "0",
           },
         },
   );
   const rounds = await supabaseRestRequest<TournamentRoundRow[]>("rounds", {
     query: {
-      select: "id,round_number",
+      select: "id,round_number,format_round_id,status",
       tournament_id: `eq.${tournamentId}`,
       order: "round_number.asc",
     },
@@ -283,6 +402,12 @@ export async function getTournamentDetail(
   const lobbyById = new Map(
     allLobbies.map((lobby) => [String(lobby.id), lobby]),
   );
+  const roundSeedByParticipantRound = new Map(
+    scores.map((score) => [
+      `${String(score.round_id)}:${score.participant_id}`,
+      score.round_seed_number,
+    ]),
+  );
   const lobbyParticipantsByLobbyId = new Map<
     string,
     TournamentLobby["participants"]
@@ -302,6 +427,10 @@ export async function getTournamentDetail(
       id: participant.id,
       displayName: participant.displayName,
       seedNumber: participant.seedNumber,
+      roundSeedNumber:
+        roundSeedByParticipantRound.get(
+          `${String(lobbyById.get(lobbyId)?.round_id ?? tournament.current_round_id)}:${participant.id}`,
+        ) ?? participant.seedNumber,
       slotNumber: lobbyParticipant.slot_number,
       placement: lobbyParticipant.placement,
       points: lobbyParticipant.points,
@@ -333,6 +462,29 @@ export async function getTournamentDetail(
       };
     })
     .filter((score): score is TournamentGameScore => score !== null);
+  const mappedLobbies = lobbies.map((lobby) => ({
+    id: String(lobby.id),
+    roundId: String(lobby.round_id),
+    gameNumber: lobby.game_number,
+    lobbyNumber: lobby.lobby_number,
+    participants: lobbyParticipantsByLobbyId.get(String(lobby.id)) ?? [],
+  }));
+  const currentFormatRound = getConfiguredRound(
+    tournament.format_config,
+    currentRound?.format_round_id,
+  );
+  const roundProgress = getRoundProgress(mappedLobbies, currentFormatRound);
+  const nextRound = getNextRoundMetadata(
+    currentRound ?? null,
+    currentFormatRound,
+    tournament.format_config,
+  );
+  const progressionAction: TournamentProgressionAction =
+    tournament.status === "in_progress" && roundProgress?.isComplete
+      ? nextRound
+        ? "create_next_round"
+        : "complete_tournament"
+      : null;
 
   return {
     ...mapTournamentRow(tournament),
@@ -343,13 +495,7 @@ export async function getTournamentDetail(
       id: String(round.id),
       roundNumber: round.round_number,
     })),
-    lobbies: lobbies.map((lobby) => ({
-      id: String(lobby.id),
-      roundId: String(lobby.round_id),
-      gameNumber: lobby.game_number,
-      lobbyNumber: lobby.lobby_number,
-      participants: lobbyParticipantsByLobbyId.get(String(lobby.id)) ?? [],
-    })),
+    lobbies: mappedLobbies,
     gameScores,
     scores: scores
       .map((score) => {
@@ -365,12 +511,16 @@ export async function getTournamentDetail(
           displayName: participant.displayName,
           seedNumber: participant.seedNumber,
           roundId: String(score.round_id),
+          roundSeedNumber: score.round_seed_number,
           score: score.score,
           createdAt: score.created_at,
         };
       })
       .filter((score): score is TournamentScore => score !== null)
       .sort((a, b) => a.seedNumber - b.seedNumber),
+    roundProgress,
+    nextRound,
+    progressionAction,
   };
 }
 
@@ -473,6 +623,27 @@ export async function updateLobbyResults(
 
   if (!result) {
     throw new Error("Database did not return the updated lobby.");
+  }
+
+  return result;
+}
+
+export async function progressTournamentRound(
+  input: ProgressTournamentRoundInput,
+): Promise<ProgressTournamentRoundResult> {
+  const rows = await supabaseRestRequest<ProgressTournamentRoundResult[]>(
+    "rpc/progress_tournament_round",
+    {
+      method: "POST",
+      body: {
+        p_tournament_id: input.tournamentId,
+      },
+    },
+  );
+  const result = rows[0];
+
+  if (!result) {
+    throw new Error("Database did not return the round transition.");
   }
 
   return result;
