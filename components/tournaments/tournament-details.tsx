@@ -9,6 +9,7 @@ type TournamentDetailsProps = {
   tournament: TournamentDetail;
   currentRoundLabel: string;
   potentialEntrantCount: number;
+  startRequirement: TournamentDetail["startRequirement"];
   enteredRegistrationIds: Set<string>;
   registrationError: string;
   startError: string;
@@ -19,6 +20,7 @@ export function TournamentDetails({
   tournament,
   currentRoundLabel,
   potentialEntrantCount,
+  startRequirement,
   enteredRegistrationIds,
   registrationError,
   startError,
@@ -26,6 +28,10 @@ export function TournamentDetails({
 }: TournamentDetailsProps) {
   const isAcceptingPlayers = tournament.status === "accepting_players";
   const isTournamentCompleted = tournament.status === "completed";
+  const meetsStartRequirement =
+    startRequirement.exactEntrants !== null
+      ? potentialEntrantCount === startRequirement.exactEntrants
+      : potentialEntrantCount >= startRequirement.minimumEntrants;
 
   return (
     <>
@@ -82,15 +88,22 @@ export function TournamentDetails({
                   {potentialEntrantCount} player
                   {potentialEntrantCount === 1 ? "" : "s"} will enter round 1.
                 </p>
+                {!meetsStartRequirement ? (
+                  <p className="mt-2 text-sm font-medium text-amber-800">
+                    {startRequirement.exactEntrants !== null
+                      ? `This format requires exactly ${startRequirement.exactEntrants} entrants to start.`
+                      : `Register at least ${startRequirement.minimumEntrants} entrants to start.`}
+                  </p>
+                ) : null}
                 <form action={startTournamentAction} className="mt-4">
                   <input name="tournamentId" type="hidden" value={tournament.id} />
                   <button
                     className={`flex h-11 w-full items-center justify-center rounded-md px-4 text-sm font-semibold transition focus:outline-none focus:ring-2 focus:ring-emerald-600 focus:ring-offset-2 ${
-                      tournament.registrations.length === 0
+                      tournament.registrations.length === 0 || !meetsStartRequirement
                         ? "cursor-not-allowed bg-zinc-200 text-zinc-500"
                         : "bg-emerald-700 text-white hover:bg-emerald-800"
                     }`}
-                    disabled={tournament.registrations.length === 0}
+                    disabled={tournament.registrations.length === 0 || !meetsStartRequirement}
                     type="submit"
                   >
                     Start tournament

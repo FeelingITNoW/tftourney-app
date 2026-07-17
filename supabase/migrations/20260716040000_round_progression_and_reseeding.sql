@@ -135,6 +135,35 @@ begin
   end loop;
 end $$;
 
+drop function if exists public.checkmate_decisive_game(bigint, integer);
+
+create or replace function public.checkmate_decisive_game(
+  p_round_id text,
+  p_threshold integer
+)
+returns integer
+language sql
+stable
+as $$
+  select min(lobbies.game_number)::integer
+  from public.lobbies lobbies
+  join public.lobby_participants winners
+    on winners.lobby_id = lobbies.id
+   and winners.placement = 1
+   and winners.result_status in ('confirmed', 'corrected')
+  where lobbies.round_id::text = p_round_id
+    and coalesce((
+      select sum(previous_participants.points)::integer
+      from public.lobbies previous_lobbies
+      join public.lobby_participants previous_participants
+        on previous_participants.lobby_id = previous_lobbies.id
+       and previous_participants.participant_id = winners.participant_id
+       and previous_participants.result_status in ('confirmed', 'corrected')
+      where previous_lobbies.round_id::text = p_round_id
+        and previous_lobbies.game_number < lobbies.game_number
+    ), 0) > p_threshold;
+$$;
+
 create or replace function public.generate_round_lobbies(p_round_id text)
 returns table (
   generated_lobby_count integer,
@@ -155,6 +184,9 @@ declare
   v_participant_count integer;
   v_lobby_count integer;
   v_block_game_count integer;
+  v_is_checkmate boolean := false;
+  v_checkmate_threshold integer;
+  v_max_games integer;
 begin
   select r.*
   into v_round
@@ -185,9 +217,21 @@ begin
       coalesce(v_round.format_round_id, v_round.round_number::text);
   end if;
 
+  v_is_checkmate := v_round_config -> 'winCondition' ->> 'type' = 'checkmate';
+  v_checkmate_threshold := case
+    when v_round_config -> 'winCondition' ->> 'threshold' ~ '^\d+$'
+      then (v_round_config -> 'winCondition' ->> 'threshold')::integer
+    else 0
+  end;
+  v_max_games := case
+    when v_round_config -> 'winCondition' ->> 'maxGames' ~ '^\d+$'
+      then (v_round_config -> 'winCondition' ->> 'maxGames')::integer
+    else null
+  end;
   v_games := case
     when v_round_config ->> 'games' ~ '^\d+$'
       then (v_round_config ->> 'games')::integer
+    when v_is_checkmate and v_max_games is not null then v_max_games
     else 6
   end;
   v_reseed := case
@@ -197,8 +241,12 @@ begin
   end;
   v_lobby_seeding := v_round_config ->> 'lobbySeeding';
 
-  if v_games <= 0 then
+  if not v_is_checkmate and v_games <= 0 then
     raise exception 'Round games must be positive.';
+  end if;
+
+  if v_is_checkmate and v_reseed <> 0 then
+    raise exception 'Checkmate rounds must use reseed zero.';
   end if;
 
   if v_reseed < 0 or v_reseed > v_games then
@@ -216,6 +264,24 @@ begin
   into v_current_max_game
   from public.lobbies lobbies
   where lobbies.round_id = v_round.id;
+
+  if v_is_checkmate then
+    if (
+      select count(*) from public.participant_round_scores scores
+      where scores.round_id = v_round.id
+    ) <> 8 then
+      raise exception 'Checkmate rounds require exactly eight participants.';
+    end if;
+
+    if public.checkmate_decisive_game(v_round.id::text, v_checkmate_threshold) is not null
+      or (v_max_games is not null and v_current_max_game >= v_max_games) then
+      return query select 0, 0;
+      return;
+    end if;
+
+    v_games := greatest(coalesce(v_max_games, v_current_max_game + 1), v_current_max_game + 1);
+    v_block_size := 1;
+  end if;
 
   if v_current_max_game = 0 then
     v_next_game := 1;
@@ -527,6 +593,9 @@ declare
   v_placement_points jsonb;
   v_participant_count integer;
   v_result_count integer;
+  v_is_checkmate boolean := false;
+  v_checkmate_threshold integer := 0;
+  v_decisive_game integer;
 begin
   select tournaments.*
   into v_tournament
@@ -572,6 +641,20 @@ begin
   into v_placement_points
   from public.tournaments tournaments
   where tournaments.id = v_tournament.id;
+
+  select
+    configured_round.value -> 'winCondition' ->> 'type' = 'checkmate',
+    case
+      when configured_round.value -> 'winCondition' ->> 'threshold' ~ '^\d+$'
+        then (configured_round.value -> 'winCondition' ->> 'threshold')::integer
+      else 0
+    end
+  into v_is_checkmate, v_checkmate_threshold
+  from jsonb_array_elements(v_tournament.format_config -> 'rounds') configured_round(value)
+  where configured_round.value ->> 'id' = v_round.format_round_id
+  limit 1;
+
+  v_is_checkmate := coalesce(v_is_checkmate, false);
 
   if jsonb_typeof(v_placement_points) <> 'object' then
     raise exception 'Tournament format does not define placement points.';
@@ -673,6 +756,13 @@ begin
   where lobby_participants.lobby_id = v_lobby.id
     and lobby_participants.participant_id::text = parsed_results.participant_id;
 
+  if v_is_checkmate then
+    v_decisive_game := public.checkmate_decisive_game(
+      v_round.id::text,
+      v_checkmate_threshold
+    );
+  end if;
+
   update public.participant_round_scores scores
   set score = coalesce((
         select sum(lobby_participants.points)
@@ -682,6 +772,11 @@ begin
         where lobbies.round_id = scores.round_id
           and lobby_participants.participant_id = scores.participant_id
           and lobby_participants.result_status in ('confirmed', 'corrected')
+          and (
+            not v_is_checkmate
+            or v_decisive_game is null
+            or lobbies.game_number <= v_decisive_game
+          )
       ), 0),
       updated_at = now()
   where scores.round_id = v_round.id;
@@ -719,6 +814,11 @@ declare
   v_games integer;
   v_advance_count integer;
   v_available_count integer;
+  v_is_checkmate boolean := false;
+  v_checkmate_threshold integer := 0;
+  v_max_games integer;
+  v_decisive_game integer;
+  v_required_game integer;
 begin
   select *
   into v_tournament
@@ -770,13 +870,68 @@ begin
     raise exception 'Tournament format configuration for the active round was not found.';
   end if;
 
+  v_is_checkmate := v_round_config -> 'winCondition' ->> 'type' = 'checkmate';
+  v_checkmate_threshold := coalesce((v_round_config -> 'winCondition' ->> 'threshold')::integer, 0);
+  v_max_games := case
+    when v_round_config -> 'winCondition' ->> 'maxGames' ~ '^\d+$'
+      then (v_round_config -> 'winCondition' ->> 'maxGames')::integer
+    else null
+  end;
   v_games := case
     when v_round_config ->> 'games' ~ '^\d+$'
       then (v_round_config ->> 'games')::integer
+    when v_is_checkmate and v_max_games is not null then v_max_games
     else 6
   end;
 
-  if exists (
+  if v_is_checkmate then
+    if (
+      select count(*) from public.participant_round_scores scores
+      where scores.round_id = v_round.id
+    ) <> 8 then
+      raise exception 'Checkmate rounds require exactly eight participants.';
+    end if;
+
+    v_decisive_game := public.checkmate_decisive_game(v_round.id::text, v_checkmate_threshold);
+    select max(lobbies.game_number)::integer
+    into v_required_game
+    from public.lobbies lobbies
+    where lobbies.round_id = v_round.id;
+
+    if v_decisive_game is not null then
+      v_required_game := v_decisive_game;
+    elsif v_max_games is not null and v_required_game >= v_max_games then
+      v_required_game := v_max_games;
+    else
+      raise exception 'Checkmate has not been achieved and the configured game limit has not been reached.';
+    end if;
+
+    if exists (
+      select 1
+      from generate_series(1, v_required_game) expected_game(game_number)
+      where not exists (
+        select 1 from public.lobbies lobbies
+        where lobbies.round_id = v_round.id
+          and lobbies.game_number = expected_game.game_number
+      )
+    ) then
+      raise exception 'Complete every checkmate game before progressing the tournament.';
+    end if;
+
+    if exists (
+      select 1
+      from public.lobbies lobbies
+      join public.lobby_participants lobby_participants
+        on lobby_participants.lobby_id = lobbies.id
+      where lobbies.round_id = v_round.id
+        and lobbies.game_number <= v_required_game
+        and lobby_participants.result_status not in ('confirmed', 'corrected')
+    ) then
+      raise exception 'Complete every checkmate game before progressing the tournament.';
+    end if;
+  end if;
+
+  if not v_is_checkmate and exists (
     select 1
     from generate_series(1, v_games) as expected_game(game_number)
     where not exists (
@@ -789,7 +944,7 @@ begin
     raise exception 'Complete every configured game before progressing the tournament.';
   end if;
 
-  if exists (
+  if not v_is_checkmate and exists (
     select 1
     from public.lobbies lobbies
     left join public.lobby_participants lobby_participants
@@ -894,6 +1049,20 @@ begin
       scores.participant_id,
       row_number() over (
         order by
+          case
+            when v_is_checkmate and exists (
+              select 1
+              from public.lobbies decisive_lobbies
+              join public.lobby_participants decisive_participants
+                on decisive_participants.lobby_id = decisive_lobbies.id
+              where decisive_lobbies.round_id = v_round.id
+                and decisive_lobbies.game_number = v_decisive_game
+                and decisive_participants.participant_id = scores.participant_id
+                and decisive_participants.placement = 1
+                and decisive_participants.result_status in ('confirmed', 'corrected')
+            ) then 0
+            else 1
+          end asc,
           scores.score desc,
           count(*) filter (
             where lobby_participants.placement = 1
@@ -911,6 +1080,10 @@ begin
     left join public.lobby_participants lobby_participants
       on lobby_participants.lobby_id = lobbies.id
         and lobby_participants.participant_id = scores.participant_id
+        and (
+          not v_is_checkmate
+          or lobbies.game_number <= v_required_game
+        )
     where scores.round_id = v_round.id
     group by
       scores.participant_id,
@@ -949,6 +1122,7 @@ begin
     v_new_round_id::text,
     v_advance_count;
 end;
+
 $$;
 
 notify pgrst, 'reload schema';

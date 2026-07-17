@@ -97,8 +97,7 @@ begin
           "type": "final",
           "participants": "advanced_from_opening-round",
           "lobbySeeding": "random",
-          "games": 6,
-          "reseed": 2,
+          "reseed": 0,
           "standings": {
             "rankingMetric": "points",
             "sortDirection": "desc",
@@ -128,8 +127,8 @@ begin
             ]
           },
           "winCondition": {
-            "type": "highest_points_after_games",
-            "games": 6,
+            "type": "checkmate",
+            "threshold": 18,
             "rankingMetric": "points"
           }
         }

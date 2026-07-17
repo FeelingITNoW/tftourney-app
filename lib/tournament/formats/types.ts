@@ -5,6 +5,11 @@ export type TournamentFormatOption = {
   name: string;
 };
 
+export type TournamentStartRequirement = {
+  minimumEntrants: number;
+  exactEntrants: number | null;
+};
+
 export type TournamentRankingMetric =
   | "points"
   | "tournament_points"
@@ -31,20 +36,36 @@ export type TournamentAdvancementFormat = {
   destinationRoundId: string;
 };
 
+export type TournamentRoundType = "qualifier" | "final";
+
+export type TournamentFixedGamesWinCondition = {
+  type: "highest_points_after_games";
+  games: number;
+  rankingMetric: "points";
+};
+
+export type TournamentCheckmateWinCondition = {
+  type: "checkmate";
+  threshold: number;
+  rankingMetric: "points";
+  maxGames?: number;
+};
+
+export type TournamentRoundWinCondition =
+  | TournamentFixedGamesWinCondition
+  | TournamentCheckmateWinCondition;
+
 export type TournamentRoundFormat = {
   id: string;
   name: string;
+  type?: TournamentRoundType;
   lobbySeeding: LobbySeedingStrategy;
-  games: number;
+  games?: number;
   reseed: number;
   standings: TournamentStandingsFormat;
   reseedStandings: TournamentStandingsFormat;
   advancement?: TournamentAdvancementFormat;
-  winCondition?: {
-    type: "highest_points_after_games";
-    games: number;
-    rankingMetric: "points";
-  };
+  winCondition?: TournamentRoundWinCondition;
 };
 
 export type TournamentFormat = {

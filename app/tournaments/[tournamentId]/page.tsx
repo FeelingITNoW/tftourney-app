@@ -88,6 +88,11 @@ export default async function TournamentPage({
         tournament.playerCount,
       ).length
     : 0;
+  const meetsStartRequirement = tournament
+    ? tournament.startRequirement.exactEntrants !== null
+      ? potentialEntrantCount === tournament.startRequirement.exactEntrants
+      : potentialEntrantCount >= tournament.startRequirement.minimumEntrants
+    : false;
   const enteredRegistrationIds = new Set(
     tournament?.participants.map((participant) => participant.registrationId) ??
       [],
@@ -97,7 +102,7 @@ export default async function TournamentPage({
     .concat(
       tournament?.gameScores.map(
         (score) =>
-          `${score.participantId}:${score.roundId}:game-${score.gameNumber}:${score.score ?? "pending"}`,
+          `${score.participantId}:${score.roundId}:game-${score.gameNumber}:${score.placement ?? "pending"}:${score.score ?? "pending"}`,
       ) ?? [],
     )
     .concat(
@@ -105,6 +110,9 @@ export default async function TournamentPage({
         (round) => `${round.id}:round-${round.roundNumber}`,
       ) ?? [],
     )
+    .concat([
+      `checkmate:${tournament?.roundProgress?.winnerParticipantId ?? "none"}:${tournament?.roundProgress?.decisiveGame ?? "none"}`,
+    ])
     .join("|");
   const isTournamentCompleted = tournament?.status === "completed";
 
@@ -197,6 +205,13 @@ export default async function TournamentPage({
                         {potentialEntrantCount === 1 ? "" : "s"} will enter
                         round 1.
                       </p>
+                      {!meetsStartRequirement ? (
+                        <p className="mt-2 text-sm font-medium text-amber-800">
+                          {tournament.startRequirement.exactEntrants !== null
+                            ? `This format requires exactly ${tournament.startRequirement.exactEntrants} entrants to start.`
+                            : `Register at least ${tournament.startRequirement.minimumEntrants} entrants to start.`}
+                        </p>
+                      ) : null}
                       <form action={startTournamentAction} className="mt-4">
                         <input
                           name="tournamentId"
@@ -205,11 +220,11 @@ export default async function TournamentPage({
                         />
                         <button
                           className={`flex h-11 w-full items-center justify-center rounded-md px-4 text-sm font-semibold transition focus:outline-none focus:ring-2 focus:ring-emerald-600 focus:ring-offset-2 ${
-                            tournament.registrations.length === 0
+                            tournament.registrations.length === 0 || !meetsStartRequirement
                               ? "cursor-not-allowed bg-zinc-200 text-zinc-500"
                               : "bg-emerald-700 text-white hover:bg-emerald-800"
                           }`}
-                          disabled={tournament.registrations.length === 0}
+                          disabled={tournament.registrations.length === 0 || !meetsStartRequirement}
                           type="submit"
                         >
                           Start tournament
@@ -349,6 +364,7 @@ export default async function TournamentPage({
                       deleteError={deleteError}
                       enteredRegistrationIds={enteredRegistrationIds}
                       potentialEntrantCount={potentialEntrantCount}
+                      startRequirement={tournament.startRequirement}
                       registrationError={registrationError}
                       startError={startError}
                       tournament={tournament}
@@ -363,8 +379,10 @@ export default async function TournamentPage({
                               Current round lobbies
                             </h2>
                             <p className="mt-1 text-sm text-zinc-500">
-                              {tournament.roundProgress
-                                ? `${tournament.roundProgress.completedGames} of ${tournament.roundProgress.configuredGames} games complete.`
+                              {tournament.roundProgress?.roundFormat === "checkmate"
+                                ? `${tournament.roundProgress.completedGames} game${tournament.roundProgress.completedGames === 1 ? "" : "s"} complete${tournament.roundProgress.maxGames ? ` of ${tournament.roundProgress.maxGames}` : ""}.`
+                                : tournament.roundProgress
+                                  ? `${tournament.roundProgress.completedGames} of ${tournament.roundProgress.configuredGames} games complete.`
                                 : "Players are assigned when the round starts."}
                             </p>
                           </div>
@@ -414,6 +432,17 @@ export default async function TournamentPage({
                         </p>
                       ) : null}
 
+                      {tournament.roundProgress?.roundFormat === "checkmate" ? (
+                        <p className="mt-3 text-sm font-medium text-violet-800">
+                          Checkmate threshold: above {tournament.roundProgress.checkmateThreshold} points before a game.
+                          {tournament.roundProgress.winnerParticipantId
+                            ? ` Decisive game: ${tournament.roundProgress.decisiveGame}.`
+                            : tournament.roundProgress.maxGames
+                              ? ` The round falls back to points after ${tournament.roundProgress.maxGames} games.`
+                              : " Games continue until an eligible first place is recorded."}
+                        </p>
+                      ) : null}
+
                       {tournament.progressionAction ? (
                         <div className="mt-5 rounded-lg border border-amber-200 bg-amber-50 p-5">
                           <h3 className="text-lg font-semibold text-amber-950">
@@ -458,6 +487,8 @@ export default async function TournamentPage({
                     <Scoresheet
                       gameScores={tournament.gameScores}
                       key={scoresheetVersion}
+                      currentRoundId={tournament.currentRoundId}
+                      currentRoundWinnerId={tournament.roundProgress?.winnerParticipantId}
                       rounds={tournament.rounds}
                       scores={tournament.scores}
                     />

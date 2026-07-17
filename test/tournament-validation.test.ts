@@ -9,7 +9,10 @@ import {
   validateTournamentCreation,
 } from "../lib/tournament/validation/api";
 import { selectTournamentEntrants } from "../lib/tournament/start/api";
-import { validateTournamentFormat } from "../lib/tournament/formats/api";
+import {
+  getTournamentStartRequirement,
+  validateTournamentFormat,
+} from "../lib/tournament/formats/api";
 
 test("accepts tournament player counts that divide exactly into TFT lobbies", () => {
   for (const playerCount of [8, 16, 32, 64, 512]) {
@@ -100,7 +103,7 @@ test("rejects invalid Riot IDs for player registration", () => {
   }
 });
 
-test("default tournament format specifies six-game rounds with reseeding", () => {
+test("default tournament format specifies fixed-game opening and checkmate final rounds", () => {
   const format = JSON.parse(
     readFileSync(
       join(process.cwd(), "lib/tournament/formats/default.json"),
@@ -138,11 +141,11 @@ test("default tournament format specifies six-game rounds with reseeding", () =>
   });
 
   assert.equal(finalRound.lobbySeeding, "random");
-  assert.equal(finalRound.games, 6);
-  assert.equal(finalRound.reseed, 2);
+  assert.equal(finalRound.games, undefined);
+  assert.equal(finalRound.reseed, 0);
   assert.deepEqual(finalRound.winCondition, {
-    type: "highest_points_after_games",
-    games: 6,
+    type: "checkmate",
+    threshold: 18,
     rankingMetric: "points",
   });
 });
@@ -161,6 +164,46 @@ test("validates game blocks, reseed bounds, destinations, and tie-breakers", () 
   const invalid = validateTournamentFormat(format);
   assert.equal(invalid.success, false);
   assert.match(invalid.errors.join(" "), /reseed must be between 0 and games/);
+});
+
+test("requires eight entrants when a format includes checkmate", () => {
+  assert.deepEqual(
+    getTournamentStartRequirement({
+      rounds: [
+        { winCondition: { type: "highest_points_after_games" } },
+        { winCondition: { type: "checkmate" } },
+      ],
+    }),
+    { minimumEntrants: 8, exactEntrants: null },
+  );
+
+  assert.deepEqual(
+    getTournamentStartRequirement({
+      rounds: [{ winCondition: { type: "checkmate" } }],
+    }),
+    { minimumEntrants: 8, exactEntrants: 8 },
+  );
+});
+
+test("rejects non-final checkmate rounds without an eight-player destination", () => {
+  const format = JSON.parse(
+    readFileSync(
+      join(process.cwd(), "lib/tournament/formats/default.json"),
+      "utf8",
+    ),
+  );
+  format.rounds[0].games = undefined;
+  format.rounds[0].reseed = 0;
+  format.rounds[0].winCondition = {
+    type: "checkmate",
+    threshold: 18,
+    rankingMetric: "points",
+  };
+
+  const result = validateTournamentFormat(format);
+
+  assert.equal(result.success, false);
+  assert.match(result.errors.join(" "), /requires an eight-player round or final round/);
 });
 
 test("selects the earliest registered players when starting a tournament", () => {

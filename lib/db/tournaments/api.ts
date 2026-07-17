@@ -31,6 +31,8 @@ import type {
   UpdateLobbyResultsResult,
 } from "./types";
 import type { TournamentRoundFormat } from "@/lib/tournament/formats/types";
+import { getTournamentStartRequirement } from "../../tournament/formats/api";
+import { resolveCheckmateOutcome } from "../../tournament/checkmate/api";
 
 export const TOURNAMENT_STATUS_ACCEPTING_PLAYERS = "accepting_players";
 
@@ -64,7 +66,9 @@ function getConfiguredRound(
 
   return {
     ...configuredRound,
-    games: Number(configuredRound.games ?? 6),
+    ...(configuredRound.games === undefined
+      ? {}
+      : { games: Number(configuredRound.games) }),
     reseed: Number(configuredRound.reseed ?? 0),
   } as unknown as TournamentRoundFormat;
 }
@@ -77,6 +81,7 @@ function getRoundProgress(
     return null;
   }
 
+  const checkmate = currentCheckmateCondition(configuredRound);
   const games = new Map<number, TournamentLobby[]>();
   for (const lobby of lobbies) {
     games.set(lobby.gameNumber, [...(games.get(lobby.gameNumber) ?? []), lobby]);
@@ -100,30 +105,79 @@ function getRoundProgress(
       .map(([gameNumber]) => gameNumber),
   );
   const allGamesComplete = Array.from(
-    { length: configuredRound.games },
+    { length: configuredRound.games ?? 0 },
     (_, index) => index + 1,
   ).every((gameNumber) => completedGameNumbers.has(gameNumber));
   const maxGameNumber = Math.max(...games.keys(), 0);
+
+  if (checkmate) {
+    const playerMap = new Map<string, { id: string; displayName: string; roundEntrySeed: number }>();
+    const results = lobbies.flatMap((lobby) =>
+      lobby.participants
+        .filter((participant) => participant.placement !== null && participant.points !== null)
+        .map((participant) => {
+          playerMap.set(participant.id, {
+            id: participant.id,
+            displayName: participant.displayName,
+            roundEntrySeed: participant.roundSeedNumber,
+          });
+          return {
+            participantId: participant.id,
+            gameNumber: lobby.gameNumber,
+            placement: participant.placement as number,
+            points: participant.points as number,
+          };
+        }),
+    );
+    const outcome = resolveCheckmateOutcome([...playerMap.values()], results, checkmate);
+    const blockStart = maxGameNumber || null;
+    return {
+      roundFormat: "checkmate",
+      completedGames: outcome.completedGames,
+      configuredGames: checkmate.maxGames ?? null,
+      checkmateThreshold: checkmate.threshold,
+      maxGames: checkmate.maxGames ?? null,
+      decisiveGame: outcome.decisiveGame,
+      winnerParticipantId: outcome.winnerId,
+      currentBlockStartGame: blockStart,
+      currentBlockEndGame: blockStart,
+      nextReseedGame: null,
+      isComplete: outcome.isComplete,
+    };
+  }
   const blockSize =
-    configuredRound.reseed > 0 ? configuredRound.reseed : configuredRound.games;
+    configuredRound.reseed > 0 ? configuredRound.reseed : (configuredRound.games ?? 1);
   const currentBlockStartGame = maxGameNumber
     ? Math.floor((maxGameNumber - 1) / blockSize) * blockSize + 1
     : null;
   const currentBlockEndGame = currentBlockStartGame
-    ? Math.min(currentBlockStartGame + blockSize - 1, configuredRound.games)
+    ? Math.min(currentBlockStartGame + blockSize - 1, configuredRound.games ?? 0)
     : null;
 
   return {
+    roundFormat: "fixed_games",
     completedGames: completedGameNumbers.size,
-    configuredGames: configuredRound.games,
+    configuredGames: configuredRound.games ?? 0,
+    checkmateThreshold: null,
+    maxGames: null,
+    decisiveGame: null,
+    winnerParticipantId: null,
     currentBlockStartGame,
     currentBlockEndGame,
     nextReseedGame:
-      currentBlockEndGame && currentBlockEndGame < configuredRound.games
+      currentBlockEndGame && currentBlockEndGame < (configuredRound.games ?? 0)
         ? currentBlockEndGame + 1
         : null,
     isComplete: allGamesComplete,
   };
+}
+
+function currentCheckmateCondition(
+  configuredRound: TournamentRoundFormat,
+): Extract<NonNullable<TournamentRoundFormat["winCondition"]>, { type: "checkmate" }> | null {
+  return configuredRound.winCondition?.type === "checkmate"
+    ? configuredRound.winCondition
+    : null;
 }
 
 function getNextRoundMetadata(
@@ -454,6 +508,7 @@ export async function getTournamentDetail(
         seedNumber: participant.seedNumber,
         roundId: String(lobby.round_id),
         gameNumber: lobby.game_number,
+        placement: lobbyParticipant.placement,
         score:
           lobbyParticipant.result_status === "confirmed" ||
           lobbyParticipant.result_status === "corrected"
@@ -488,6 +543,7 @@ export async function getTournamentDetail(
 
   return {
     ...mapTournamentRow(tournament),
+    startRequirement: getTournamentStartRequirement(tournament.format_config),
     currentRoundNumber: currentRound?.round_number ?? null,
     registrations: registrations.map(mapTournamentRegistrationRow),
     participants: participants.map(mapTournamentParticipantRow),
