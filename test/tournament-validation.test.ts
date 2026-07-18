@@ -150,6 +150,29 @@ test("default tournament format specifies fixed-game opening and checkmate final
   });
 });
 
+test("three-round 128-player format advances 128 to 64 to an eight-player checkmate final", () => {
+  const format = JSON.parse(
+    readFileSync(
+      join(
+        process.cwd(),
+        "lib/tournament/formats/three-round-128.json",
+      ),
+      "utf8",
+    ),
+  );
+
+  const validation = validateTournamentFormat(format);
+  assert.equal(validation.success, true, validation.errors.join(" "));
+  assert.equal(format.rounds.length, 3);
+  assert.equal(format.rounds[0].games, 6);
+  assert.equal(format.rounds[0].advancement.count, 64);
+  assert.equal(format.rounds[0].advancement.destinationRoundId, "second-round");
+  assert.equal(format.rounds[1].games, 6);
+  assert.equal(format.rounds[1].advancement.count, 8);
+  assert.equal(format.rounds[1].advancement.destinationRoundId, "final-round");
+  assert.equal(format.rounds[2].winCondition.type, "checkmate");
+});
+
 test("validates game blocks, reseed bounds, destinations, and tie-breakers", () => {
   const format = JSON.parse(
     readFileSync(

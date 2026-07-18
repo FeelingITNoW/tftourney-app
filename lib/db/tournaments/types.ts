@@ -225,6 +225,11 @@ export type UpdateLobbyResultsResult = {
   updated_participant_count: number;
 };
 
+export type RandomizePendingLobbyResultsResult = {
+  randomized_lobby_count: number;
+  randomized_participant_count: number;
+};
+
 export type ProgressTournamentRoundInput = {
   tournamentId: string;
 };

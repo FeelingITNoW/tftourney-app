@@ -2,17 +2,19 @@
 -- Machine-readable snapshot: https://tft.tools/leaderboards/ranked/sea
 -- Snapshot: 2026-07-16, top 128 SEA ranked players.
 --
--- This seed is intentionally limited to a tournament and its registrations.
+-- This seed is intentionally limited to tournaments and their registrations.
 -- It does not create participants, rounds, lobbies, or scores, so the
--- tournament remains open and has not started.
+-- tournaments remain open and have not started.
 do $$
 declare
   seed_tournament_name constant text := 'SEA Leaderboard Invitational';
+  three_round_tournament_name constant text := 'SEA Three-Round Checkmate Championship';
   seed_tournament_id public.tournaments.id%type;
+  three_round_tournament_id public.tournaments.id%type;
   seeded_at constant timestamptz := '2026-07-16 00:00:00+00';
 begin
   delete from public.tournaments
-  where name = seed_tournament_name;
+  where name in (seed_tournament_name, three_round_tournament_name);
 
   insert into public.tournaments (
     host_user_id,
@@ -289,5 +291,206 @@ begin
       (128, 'Rochiester#1313')
   ) as leaderboard(rank, display_name)
   order by leaderboard.rank;
+
+  -- Keep this snapshot aligned with
+  -- lib/tournament/formats/three-round-128.json.
+  insert into public.tournaments (
+    host_user_id,
+    name,
+    status,
+    max_players,
+    format_id,
+    format_config,
+    current_round_id,
+    started_at,
+    created_at,
+    updated_at
+  )
+  values (
+    1,
+    three_round_tournament_name,
+    'accepting_players',
+    128,
+    'three-round-128-checkmate',
+    $three_round_format$
+    {
+      "id": "three-round-128-checkmate",
+      "name": "128-Player Three-Round Checkmate",
+      "placementPoints": {
+        "1": 8,
+        "2": 7,
+        "3": 6,
+        "4": 5,
+        "5": 4,
+        "6": 3,
+        "7": 2,
+        "8": 1
+      },
+      "rounds": [
+        {
+          "id": "opening-round",
+          "name": "Opening Round",
+          "type": "qualifier",
+          "participants": "all_registered_players",
+          "lobbySeeding": "snake",
+          "games": 6,
+          "reseed": 2,
+          "standings": {
+            "rankingMetric": "points",
+            "sortDirection": "desc",
+            "tieBreakers": [
+              {
+                "rankingMetric": "current_round_firsts",
+                "sortDirection": "desc"
+              },
+              {
+                "rankingMetric": "round_entry_seed",
+                "sortDirection": "asc"
+              }
+            ]
+          },
+          "reseedStandings": {
+            "rankingMetric": "tournament_points",
+            "sortDirection": "desc",
+            "tieBreakers": [
+              {
+                "rankingMetric": "current_round_firsts",
+                "sortDirection": "desc"
+              },
+              {
+                "rankingMetric": "round_entry_seed",
+                "sortDirection": "asc"
+              }
+            ]
+          },
+          "advancement": {
+            "type": "top_n",
+            "count": 64,
+            "rankingMetric": "points",
+            "destinationRoundId": "second-round"
+          },
+          "winCondition": {
+            "type": "highest_points_after_games",
+            "games": 6,
+            "rankingMetric": "points"
+          }
+        },
+        {
+          "id": "second-round",
+          "name": "Second Round",
+          "type": "qualifier",
+          "participants": "advanced_from_opening-round",
+          "lobbySeeding": "snake",
+          "games": 6,
+          "reseed": 2,
+          "standings": {
+            "rankingMetric": "points",
+            "sortDirection": "desc",
+            "tieBreakers": [
+              {
+                "rankingMetric": "current_round_firsts",
+                "sortDirection": "desc"
+              },
+              {
+                "rankingMetric": "round_entry_seed",
+                "sortDirection": "asc"
+              }
+            ]
+          },
+          "reseedStandings": {
+            "rankingMetric": "tournament_points",
+            "sortDirection": "desc",
+            "tieBreakers": [
+              {
+                "rankingMetric": "current_round_firsts",
+                "sortDirection": "desc"
+              },
+              {
+                "rankingMetric": "round_entry_seed",
+                "sortDirection": "asc"
+              }
+            ]
+          },
+          "advancement": {
+            "type": "top_n",
+            "count": 8,
+            "rankingMetric": "points",
+            "destinationRoundId": "final-round"
+          },
+          "winCondition": {
+            "type": "highest_points_after_games",
+            "games": 6,
+            "rankingMetric": "points"
+          }
+        },
+        {
+          "id": "final-round",
+          "name": "Checkmate Final",
+          "type": "final",
+          "participants": "advanced_from_second-round",
+          "lobbySeeding": "random",
+          "reseed": 0,
+          "standings": {
+            "rankingMetric": "points",
+            "sortDirection": "desc",
+            "tieBreakers": [
+              {
+                "rankingMetric": "current_round_firsts",
+                "sortDirection": "desc"
+              },
+              {
+                "rankingMetric": "round_entry_seed",
+                "sortDirection": "asc"
+              }
+            ]
+          },
+          "reseedStandings": {
+            "rankingMetric": "tournament_points",
+            "sortDirection": "desc",
+            "tieBreakers": [
+              {
+                "rankingMetric": "current_round_firsts",
+                "sortDirection": "desc"
+              },
+              {
+                "rankingMetric": "round_entry_seed",
+                "sortDirection": "asc"
+              }
+            ]
+          },
+          "winCondition": {
+            "type": "checkmate",
+            "threshold": 18,
+            "rankingMetric": "points"
+          }
+        }
+      ]
+    }
+    $three_round_format$::jsonb,
+    null,
+    null,
+    seeded_at + interval '1 minute',
+    seeded_at + interval '1 minute'
+  )
+  returning id into three_round_tournament_id;
+
+  insert into public.tournament_registrations (
+    tournament_id,
+    registration_status,
+    display_name,
+    riot_puuid,
+    created_at,
+    updated_at
+  )
+  select
+    three_round_tournament_id,
+    'registered',
+    registrations.display_name,
+    registrations.riot_puuid,
+    registrations.created_at,
+    registrations.updated_at
+  from public.tournament_registrations registrations
+  where registrations.tournament_id = seed_tournament_id
+  order by registrations.created_at, registrations.id;
 end;
 $$;

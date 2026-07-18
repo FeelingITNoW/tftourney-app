@@ -3,7 +3,7 @@ import { notFound } from "next/navigation";
 import {
   deleteTournamentAction,
   progressTournamentRoundAction,
-  randomizeAllLobbyResultsAction,
+  randomizePendingLobbyResultsAction,
   registerPlayerAction,
   startTournamentAction,
 } from "@/app/actions";
@@ -97,6 +97,14 @@ export default async function TournamentPage({
     tournament?.participants.map((participant) => participant.registrationId) ??
       [],
   );
+  const hasPendingCurrentRoundLobby =
+    tournament?.lobbies.some(
+      (lobby) =>
+        lobby.participants.length > 0 &&
+        lobby.participants.every(
+          (participant) => participant.resultStatus === "pending",
+        ),
+    ) ?? false;
   const scoresheetVersion = (tournament?.scores ?? [])
     .map((score) => `${score.id}:${score.roundId}:${score.score}`)
     .concat(
@@ -387,7 +395,7 @@ export default async function TournamentPage({
                             </p>
                           </div>
                           <form
-                            action={randomizeAllLobbyResultsAction}
+                            action={randomizePendingLobbyResultsAction}
                             className="flex flex-col items-stretch gap-2 sm:items-end"
                           >
                             <input name="tournamentId" type="hidden" value={tournament.id} />
@@ -403,14 +411,16 @@ export default async function TournamentPage({
                             />
                             <button
                               className="rounded-md border border-amber-300 bg-amber-50 px-3 py-2 text-sm font-semibold text-amber-900 transition hover:bg-amber-100 focus:outline-none focus:ring-2 focus:ring-amber-600 focus:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-40"
-                              disabled={isTournamentCompleted}
+                              disabled={
+                                isTournamentCompleted || !hasPendingCurrentRoundLobby
+                              }
                               title="Temporary testing helper"
                               type="submit"
                             >
-                              Randomize all lobbies (test)
+                              Randomize pending block (test)
                             </button>
                             <span className="text-xs text-zinc-500">
-                              Saves random unique placements for every current-round lobby.
+                              Saves random placements for pending lobbies in the active block; existing results are preserved.
                             </span>
                           </form>
                         </div>
@@ -421,7 +431,7 @@ export default async function TournamentPage({
                           className="mt-4 rounded-md border border-emerald-200 bg-emerald-50 p-4 text-sm font-medium text-emerald-900"
                           role="status"
                         >
-                          All current-round lobby results were randomized and saved for testing.
+                          Pending lobbies in the active block were randomized and saved for testing. Existing results were preserved.
                         </div>
                       ) : null}
 

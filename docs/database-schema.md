@@ -183,3 +183,9 @@ tournament and active round, verifies the decisive game (or `maxGames`
 fallback), ranks the checkmate winner first and the remaining players by points,
 then advances the format-defined count or completes the tournament. Completed
 rounds are read-only.
+
+The testing RPC `randomize_pending_lobby_results(tournament_id)` randomizes only
+pending lobbies in the active game block and runs the updates in one transaction.
+Existing results are preserved. Once a later reseeded block exists, result edits
+to earlier blocks are rejected so persisted lobby assignments cannot diverge from
+the standings that produced them.

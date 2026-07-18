@@ -27,6 +27,7 @@ import type {
   TournamentNextRoundMetadata,
   TournamentRoundProgress,
   TournamentProgressionAction,
+  RandomizePendingLobbyResultsResult,
   UpdateLobbyResultsInput,
   UpdateLobbyResultsResult,
 } from "./types";
@@ -41,9 +42,44 @@ const STANDARD_HOST_USER_ID = 1;
 const tournamentSelect =
   "id,name,max_players,format_id,status,current_round_id,format_config,created_at";
 
+const LOBBY_PARTICIPANT_BATCH_SIZE = 64;
+
 type StoredTournamentFormat = {
   rounds?: Array<Record<string, unknown>>;
 };
+
+function splitIntoBatches<T>(values: T[], batchSize: number): T[][] {
+  const batches: T[][] = [];
+
+  for (let index = 0; index < values.length; index += batchSize) {
+    batches.push(values.slice(index, index + batchSize));
+  }
+
+  return batches;
+}
+
+async function fetchLobbyParticipants(
+  lobbyIds: Array<string | number>,
+): Promise<TournamentLobbyParticipantRow[]> {
+  const batches = splitIntoBatches(lobbyIds, LOBBY_PARTICIPANT_BATCH_SIZE);
+  const participantBatches = await Promise.all(
+    batches.map((batch) =>
+      supabaseRestRequest<TournamentLobbyParticipantRow[]>(
+        "lobby_participants",
+        {
+          query: {
+            select:
+              "id,lobby_id,participant_id,slot_number,placement,points,result_status",
+            lobby_id: `in.(${batch.join(",")})`,
+            order: "lobby_id.asc,slot_number.asc,id.asc",
+          },
+        },
+      ),
+    ),
+  );
+
+  return participantBatches.flat();
+}
 
 function getConfiguredRound(
   formatConfig: unknown,
@@ -435,17 +471,7 @@ export async function getTournamentDetail(
   );
   const lobbyIds = allLobbies.map((lobby) => lobby.id);
   const lobbyParticipants = lobbyIds.length
-    ? await supabaseRestRequest<TournamentLobbyParticipantRow[]>(
-        "lobby_participants",
-        {
-          query: {
-            select:
-              "id,lobby_id,participant_id,slot_number,placement,points,result_status",
-            lobby_id: `in.(${lobbyIds.join(",")})`,
-            order: "slot_number.asc",
-          },
-        },
-      )
+    ? await fetchLobbyParticipants(lobbyIds)
     : [];
   const participantById = new Map(
     participants.map((participant) => [
@@ -522,7 +548,9 @@ export async function getTournamentDetail(
     roundId: String(lobby.round_id),
     gameNumber: lobby.game_number,
     lobbyNumber: lobby.lobby_number,
-    participants: lobbyParticipantsByLobbyId.get(String(lobby.id)) ?? [],
+    participants: [
+      ...(lobbyParticipantsByLobbyId.get(String(lobby.id)) ?? []),
+    ].sort((first, second) => first.slotNumber - second.slotNumber),
   }));
   const currentFormatRound = getConfiguredRound(
     tournament.format_config,
@@ -679,6 +707,27 @@ export async function updateLobbyResults(
 
   if (!result) {
     throw new Error("Database did not return the updated lobby.");
+  }
+
+  return result;
+}
+
+export async function randomizePendingLobbyResults(
+  input: StartTournamentInput,
+): Promise<RandomizePendingLobbyResultsResult> {
+  const rows = await supabaseRestRequest<RandomizePendingLobbyResultsResult[]>(
+    "rpc/randomize_pending_lobby_results",
+    {
+      method: "POST",
+      body: {
+        p_tournament_id: input.tournamentId,
+      },
+    },
+  );
+  const result = rows[0];
+
+  if (!result) {
+    throw new Error("Database did not return randomized lobby results.");
   }
 
   return result;
