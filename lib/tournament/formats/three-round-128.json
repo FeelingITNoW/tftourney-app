@@ -1,7 +1,6 @@
 {
-  "id": "default",
-  "name": "Default TFT Tournament Format",
-  "isDefault": true,
+  "id": "three-round-128-checkmate",
+  "name": "128-Player Three-Round Checkmate",
   "placementPoints": {
     "1": 8,
     "2": 7,
@@ -51,16 +50,69 @@
       },
       "advancement": {
         "type": "top_n",
+        "count": 64,
+        "rankingMetric": "points",
+        "destinationRoundId": "second-round"
+      },
+      "winCondition": {
+        "type": "highest_points_after_games",
+        "games": 6,
+        "rankingMetric": "points"
+      }
+    },
+    {
+      "id": "second-round",
+      "name": "Second Round",
+      "type": "qualifier",
+      "participants": "advanced_from_opening-round",
+      "lobbySeeding": "snake",
+      "games": 6,
+      "reseed": 2,
+      "standings": {
+        "rankingMetric": "points",
+        "sortDirection": "desc",
+        "tieBreakers": [
+          {
+            "rankingMetric": "current_round_firsts",
+            "sortDirection": "desc"
+          },
+          {
+            "rankingMetric": "round_entry_seed",
+            "sortDirection": "asc"
+          }
+        ]
+      },
+      "reseedStandings": {
+        "rankingMetric": "tournament_points",
+        "sortDirection": "desc",
+        "tieBreakers": [
+          {
+            "rankingMetric": "current_round_firsts",
+            "sortDirection": "desc"
+          },
+          {
+            "rankingMetric": "round_entry_seed",
+            "sortDirection": "asc"
+          }
+        ]
+      },
+      "advancement": {
+        "type": "top_n",
         "count": 8,
         "rankingMetric": "points",
         "destinationRoundId": "final-round"
+      },
+      "winCondition": {
+        "type": "highest_points_after_games",
+        "games": 6,
+        "rankingMetric": "points"
       }
     },
     {
       "id": "final-round",
-      "name": "Final Round",
+      "name": "Checkmate Final",
       "type": "final",
-      "participants": "advanced_from_opening-round",
+      "participants": "advanced_from_second-round",
       "lobbySeeding": "random",
       "reseed": 0,
       "standings": {

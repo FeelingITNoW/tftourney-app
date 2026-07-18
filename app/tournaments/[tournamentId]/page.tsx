@@ -3,7 +3,7 @@ import { notFound } from "next/navigation";
 import {
   deleteTournamentAction,
   progressTournamentRoundAction,
-  randomizeAllLobbyResultsAction,
+  randomizePendingLobbyResultsAction,
   registerPlayerAction,
   startTournamentAction,
 } from "@/app/actions";
@@ -88,16 +88,29 @@ export default async function TournamentPage({
         tournament.playerCount,
       ).length
     : 0;
+  const meetsStartRequirement = tournament
+    ? tournament.startRequirement.exactEntrants !== null
+      ? potentialEntrantCount === tournament.startRequirement.exactEntrants
+      : potentialEntrantCount >= tournament.startRequirement.minimumEntrants
+    : false;
   const enteredRegistrationIds = new Set(
     tournament?.participants.map((participant) => participant.registrationId) ??
       [],
   );
+  const hasPendingCurrentRoundLobby =
+    tournament?.lobbies.some(
+      (lobby) =>
+        lobby.participants.length > 0 &&
+        lobby.participants.every(
+          (participant) => participant.resultStatus === "pending",
+        ),
+    ) ?? false;
   const scoresheetVersion = (tournament?.scores ?? [])
     .map((score) => `${score.id}:${score.roundId}:${score.score}`)
     .concat(
       tournament?.gameScores.map(
         (score) =>
-          `${score.participantId}:${score.roundId}:game-${score.gameNumber}:${score.score ?? "pending"}`,
+          `${score.participantId}:${score.roundId}:game-${score.gameNumber}:${score.placement ?? "pending"}:${score.score ?? "pending"}`,
       ) ?? [],
     )
     .concat(
@@ -105,6 +118,9 @@ export default async function TournamentPage({
         (round) => `${round.id}:round-${round.roundNumber}`,
       ) ?? [],
     )
+    .concat([
+      `checkmate:${tournament?.roundProgress?.winnerParticipantId ?? "none"}:${tournament?.roundProgress?.decisiveGame ?? "none"}`,
+    ])
     .join("|");
   const isTournamentCompleted = tournament?.status === "completed";
 
@@ -197,6 +213,13 @@ export default async function TournamentPage({
                         {potentialEntrantCount === 1 ? "" : "s"} will enter
                         round 1.
                       </p>
+                      {!meetsStartRequirement ? (
+                        <p className="mt-2 text-sm font-medium text-amber-800">
+                          {tournament.startRequirement.exactEntrants !== null
+                            ? `This format requires exactly ${tournament.startRequirement.exactEntrants} entrants to start.`
+                            : `Register at least ${tournament.startRequirement.minimumEntrants} entrants to start.`}
+                        </p>
+                      ) : null}
                       <form action={startTournamentAction} className="mt-4">
                         <input
                           name="tournamentId"
@@ -205,11 +228,11 @@ export default async function TournamentPage({
                         />
                         <button
                           className={`flex h-11 w-full items-center justify-center rounded-md px-4 text-sm font-semibold transition focus:outline-none focus:ring-2 focus:ring-emerald-600 focus:ring-offset-2 ${
-                            tournament.registrations.length === 0
+                            tournament.registrations.length === 0 || !meetsStartRequirement
                               ? "cursor-not-allowed bg-zinc-200 text-zinc-500"
                               : "bg-emerald-700 text-white hover:bg-emerald-800"
                           }`}
-                          disabled={tournament.registrations.length === 0}
+                          disabled={tournament.registrations.length === 0 || !meetsStartRequirement}
                           type="submit"
                         >
                           Start tournament
@@ -349,6 +372,7 @@ export default async function TournamentPage({
                       deleteError={deleteError}
                       enteredRegistrationIds={enteredRegistrationIds}
                       potentialEntrantCount={potentialEntrantCount}
+                      startRequirement={tournament.startRequirement}
                       registrationError={registrationError}
                       startError={startError}
                       tournament={tournament}
@@ -363,13 +387,15 @@ export default async function TournamentPage({
                               Current round lobbies
                             </h2>
                             <p className="mt-1 text-sm text-zinc-500">
-                              {tournament.roundProgress
-                                ? `${tournament.roundProgress.completedGames} of ${tournament.roundProgress.configuredGames} games complete.`
+                              {tournament.roundProgress?.roundFormat === "checkmate"
+                                ? `${tournament.roundProgress.completedGames} game${tournament.roundProgress.completedGames === 1 ? "" : "s"} complete${tournament.roundProgress.maxGames ? ` of ${tournament.roundProgress.maxGames}` : ""}.`
+                                : tournament.roundProgress
+                                  ? `${tournament.roundProgress.completedGames} of ${tournament.roundProgress.configuredGames} games complete.`
                                 : "Players are assigned when the round starts."}
                             </p>
                           </div>
                           <form
-                            action={randomizeAllLobbyResultsAction}
+                            action={randomizePendingLobbyResultsAction}
                             className="flex flex-col items-stretch gap-2 sm:items-end"
                           >
                             <input name="tournamentId" type="hidden" value={tournament.id} />
@@ -385,14 +411,16 @@ export default async function TournamentPage({
                             />
                             <button
                               className="rounded-md border border-amber-300 bg-amber-50 px-3 py-2 text-sm font-semibold text-amber-900 transition hover:bg-amber-100 focus:outline-none focus:ring-2 focus:ring-amber-600 focus:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-40"
-                              disabled={isTournamentCompleted}
+                              disabled={
+                                isTournamentCompleted || !hasPendingCurrentRoundLobby
+                              }
                               title="Temporary testing helper"
                               type="submit"
                             >
-                              Randomize all lobbies (test)
+                              Randomize pending block (test)
                             </button>
                             <span className="text-xs text-zinc-500">
-                              Saves random unique placements for every current-round lobby.
+                              Saves random placements for pending lobbies in the active block; existing results are preserved.
                             </span>
                           </form>
                         </div>
@@ -403,7 +431,7 @@ export default async function TournamentPage({
                           className="mt-4 rounded-md border border-emerald-200 bg-emerald-50 p-4 text-sm font-medium text-emerald-900"
                           role="status"
                         >
-                          All current-round lobby results were randomized and saved for testing.
+                          Pending lobbies in the active block were randomized and saved for testing. Existing results were preserved.
                         </div>
                       ) : null}
 
@@ -411,6 +439,17 @@ export default async function TournamentPage({
                         <p className="mt-3 text-sm font-medium text-cyan-800">
                           Automatic reseed begins at Game {tournament.roundProgress.nextReseedGame} after
                           the current block is complete.
+                        </p>
+                      ) : null}
+
+                      {tournament.roundProgress?.roundFormat === "checkmate" ? (
+                        <p className="mt-3 text-sm font-medium text-violet-800">
+                          Checkmate threshold: above {tournament.roundProgress.checkmateThreshold} points before a game.
+                          {tournament.roundProgress.winnerParticipantId
+                            ? ` Decisive game: ${tournament.roundProgress.decisiveGame}.`
+                            : tournament.roundProgress.maxGames
+                              ? ` The round falls back to points after ${tournament.roundProgress.maxGames} games.`
+                              : " Games continue until an eligible first place is recorded."}
                         </p>
                       ) : null}
 
@@ -458,6 +497,8 @@ export default async function TournamentPage({
                     <Scoresheet
                       gameScores={tournament.gameScores}
                       key={scoresheetVersion}
+                      currentRoundId={tournament.currentRoundId}
+                      currentRoundWinnerId={tournament.roundProgress?.winnerParticipantId}
                       rounds={tournament.rounds}
                       scores={tournament.scores}
                     />

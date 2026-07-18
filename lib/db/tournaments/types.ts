@@ -1,4 +1,5 @@
 import type { VerifiedRiotAccount } from "@/lib/riot/accounts/types";
+import type { TournamentStartRequirement } from "@/lib/tournament/formats/types";
 
 export type TournamentStatus =
   | "accepting_players"
@@ -12,8 +13,13 @@ export type TournamentProgressionAction =
   | null;
 
 export type TournamentRoundProgress = {
+  roundFormat: "fixed_games" | "checkmate";
   completedGames: number;
-  configuredGames: number;
+  configuredGames: number | null;
+  checkmateThreshold: number | null;
+  maxGames: number | null;
+  decisiveGame: number | null;
+  winnerParticipantId: string | null;
   currentBlockStartGame: number | null;
   currentBlockEndGame: number | null;
   nextReseedGame: number | null;
@@ -71,6 +77,7 @@ export type TournamentGameScore = {
   seedNumber: number;
   roundId: string;
   gameNumber: number;
+  placement: number | null;
   score: number | null;
 };
 
@@ -102,6 +109,7 @@ export type TournamentDetail = Omit<
   TournamentSummary,
   "registeredPlayerCount"
 > & {
+  startRequirement: TournamentStartRequirement;
   registrations: TournamentRegistration[];
   participants: TournamentParticipant[];
   rounds: TournamentRound[];
@@ -215,6 +223,11 @@ export type UpdateLobbyResultsInput = {
 export type UpdateLobbyResultsResult = {
   updated_lobby_id: string;
   updated_participant_count: number;
+};
+
+export type RandomizePendingLobbyResultsResult = {
+  randomized_lobby_count: number;
+  randomized_participant_count: number;
 };
 
 export type ProgressTournamentRoundInput = {

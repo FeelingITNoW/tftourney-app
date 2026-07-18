@@ -6,7 +6,7 @@ import defaultTournamentFormat from "@/lib/tournament/formats/default.json";
 import {
   createTournament,
   deleteTournament,
-  getTournamentDetail,
+  randomizePendingLobbyResults,
   registerTournamentPlayer,
   progressTournamentRound,
   startTournament,
@@ -249,7 +249,7 @@ export async function updateLobbyScoresAction(formData: FormData) {
   redirectWithParams(lobbyPath, { saved: "true", ...returnParams });
 }
 
-export async function randomizeAllLobbyResultsAction(formData: FormData) {
+export async function randomizePendingLobbyResultsAction(formData: FormData) {
   const tournamentId = getFormString(formData, "tournamentId");
   const returnGame = getFormString(formData, "game");
   const returnPage = getFormString(formData, "page");
@@ -266,51 +266,7 @@ export async function randomizeAllLobbyResultsAction(formData: FormData) {
   }
 
   try {
-    const tournament = await getTournamentDetail(tournamentId);
-
-    if (!tournament) {
-      throw new Error("Tournament was not found.");
-    }
-
-    if (tournament.status === "completed") {
-      throw new Error("Completed tournaments are read-only.");
-    }
-
-    if (tournament.lobbies.length === 0) {
-      throw new Error("No lobbies were generated for the current round.");
-    }
-
-    for (const lobby of tournament.lobbies) {
-      const placements = Array.from(
-        { length: lobby.participants.length },
-        (_, index) => index + 1,
-      );
-
-      for (let index = placements.length - 1; index > 0; index -= 1) {
-        const randomIndex = Math.floor(Math.random() * (index + 1));
-        [placements[index], placements[randomIndex]] = [
-          placements[randomIndex],
-          placements[index],
-        ];
-      }
-
-      const validation = validateLobbyResults(
-        lobby.participants.map((participant, index) => ({
-          participantId: participant.id,
-          placement: String(placements[index]),
-        })),
-      );
-
-      if (!validation.success) {
-        throw new Error(validation.error);
-      }
-
-      await updateLobbyResults({
-        tournamentId,
-        lobbyId: lobby.id,
-        results: validation.data,
-      });
-    }
+    await randomizePendingLobbyResults({ tournamentId });
   } catch (error) {
     redirectWithParams(detailPath, {
       progressionError:

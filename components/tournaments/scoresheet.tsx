@@ -16,6 +16,8 @@ type ScoresheetProps = {
   gameScores: TournamentGameScore[];
   rounds: TournamentRound[];
   scores: TournamentScore[];
+  currentRoundWinnerId?: string | null;
+  currentRoundId?: string | null;
 };
 
 type ScoresheetColumn = {
@@ -74,6 +76,8 @@ function buildRoundTab(
   round: TournamentRound,
   scores: TournamentScore[],
   gameScores: TournamentGameScore[],
+  winnerId: string | null | undefined,
+  winnerRoundId: string | null | undefined,
 ): ScoresheetTab {
   const roundGameScores = gameScores.filter(
     (score) => score.roundId === round.id,
@@ -96,19 +100,25 @@ function buildRoundTab(
     emptyCellLabel: "Pending",
     id: round.id,
     label: `Round ${round.roundNumber}`,
-    scores: sortScoresHighestFirst(
-      scores.filter((score) => score.roundId === round.id),
-    ).map((score) => ({
-      ...score,
-      breakdown: Object.fromEntries(
-        gameNumbers.map((gameNumber) => [
-          String(gameNumber),
-          scoreByParticipantAndGame.get(
-            `${score.participantId}:${gameNumber}`,
-          ) ?? null,
-        ]),
-      ),
-    })),
+    scores: sortScoresHighestFirst(scores.filter((score) => score.roundId === round.id))
+      .sort((first, second) =>
+        winnerRoundId === round.id && winnerId === first.participantId
+          ? -1
+          : winnerRoundId === round.id && winnerId === second.participantId
+            ? 1
+            : 0,
+      )
+      .map((score) => ({
+        ...score,
+        breakdown: Object.fromEntries(
+          gameNumbers.map((gameNumber) => [
+            String(gameNumber),
+            scoreByParticipantAndGame.get(
+              `${score.participantId}:${gameNumber}`,
+            ) ?? null,
+          ]),
+        ),
+      })),
   };
 }
 
@@ -116,16 +126,32 @@ function buildScoresheetTabs(
   rounds: TournamentRound[],
   scores: TournamentScore[],
   gameScores: TournamentGameScore[],
+  winnerId: string | null | undefined,
+  winnerRoundId: string | null | undefined,
 ): ScoresheetTab[] {
   return [
     buildOverallTab(rounds, scores),
-    ...rounds.map((round) => buildRoundTab(round, scores, gameScores)),
+    ...rounds.map((round) =>
+      buildRoundTab(round, scores, gameScores, winnerId, winnerRoundId),
+    ),
   ];
 }
 
-export function Scoresheet({ gameScores, rounds, scores }: ScoresheetProps) {
+export function Scoresheet({
+  currentRoundWinnerId,
+  currentRoundId,
+  gameScores,
+  rounds,
+  scores,
+}: ScoresheetProps) {
   const [tabs] = useState(() =>
-    buildScoresheetTabs(rounds, scores, gameScores),
+    buildScoresheetTabs(
+      rounds,
+      scores,
+      gameScores,
+      currentRoundWinnerId,
+      currentRoundId,
+    ),
   );
   const [activeTabId, setActiveTabId] = useState(OVERALL_TAB_ID);
   const activeTab =

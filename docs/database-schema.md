@@ -131,10 +131,14 @@ CREATE TABLE public.participant_round_scores (
 
 ## Lobby seeding in tournament formats
 
-Every object in `format_config.rounds` declares `games`, `reseed`, a
-`lobbySeeding` strategy, and standings tie-breakers. `reseed: 0` disables
-automatic reseeding for the round. The built-in format uses six games and
-reseed blocks of two games.
+Every object in `format_config.rounds` declares a `reseed`, a `lobbySeeding`
+strategy, and standings tie-breakers. Fixed-game rounds declare a positive
+`games` count; `reseed: 0` disables automatic reseeding. Checkmate rounds omit
+`games`, use `reseed: 0`, and declare `winCondition` as
+`{"type":"checkmate","threshold":18,"rankingMetric":"points"}`. They run
+one game at a time until a player who was strictly above the threshold before
+the game finishes first. An optional positive `maxGames` enables a points
+fallback when no player checkmates.
 
 Every object in `format_config.rounds` declares a `lobbySeeding` strategy:
 
@@ -143,16 +147,20 @@ Every object in `format_config.rounds` declares a `lobbySeeding` strategy:
 - `"random"` shuffles the round participants before distributing them evenly
   across lobbies.
 
-Every configured round also declares a positive integer `games` count. Lobby
-assignments are repeated for each game in the round. The built-in default format
-currently uses six games per round with reseed blocks of two.
+Lobby assignments are repeated for each fixed-game block. Checkmate rounds
+must have exactly eight active participants (including finals), while a
+checkmate configuration is only valid on an eight-player destination or final
+round. The built-in default uses six games with reseed blocks of two in its
+opening round and checkmate in its eight-player final.
 
 The top-level `format_config.placementPoints` object maps finishing placements
 to awarded points. The default format awards 8 points for first place, 7 for
 second, continuing down to 1 point for eighth place.
 
 Starting a tournament creates round 1, its round-seeded score rows, and its
-first game block in one database transaction. `generate_round_lobbies(round_id)`
+first game block in one database transaction. Formats containing checkmate
+require at least eight selected entrants; a checkmate opening round requires
+exactly eight. `generate_round_lobbies(round_id)`
 is idempotent and creates the next block only after the current block is fully
 scored. It uses tournament totals, current-round firsts, and the round seed for
 reseeding; random assignments are persisted in `lobby_participants`.
@@ -164,11 +172,20 @@ for every player in a lobby and derives awarded points from the tournament's
 `format_config.placementPoints` mapping. The function requires a complete roster
 with unique placements, marks first-time results as `confirmed` and later edits
 as `corrected`, then recalculates `participant_round_scores.score` from all
-confirmed or corrected lobby points in that round. The lobby results and round
-score totals are therefore updated in one database transaction.
+confirmed or corrected lobby points in that round. For checkmate, points after
+the decisive game are excluded. The lobby results and round score totals are
+therefore updated in one database transaction.
 
 When the last result in a block is saved, the same transaction creates the next
-game block. `progress_tournament_round(tournament_id)` locks the tournament and
-active round, verifies every configured game and result, advances the
-format-defined count to the destination round, or completes the tournament if
-the active round is final. Completed rounds are read-only.
+game block. For checkmate, the next single-game block is created only when no
+decisive result exists. `progress_tournament_round(tournament_id)` locks the
+tournament and active round, verifies the decisive game (or `maxGames`
+fallback), ranks the checkmate winner first and the remaining players by points,
+then advances the format-defined count or completes the tournament. Completed
+rounds are read-only.
+
+The testing RPC `randomize_pending_lobby_results(tournament_id)` randomizes only
+pending lobbies in the active game block and runs the updates in one transaction.
+Existing results are preserved. Once a later reseeded block exists, result edits
+to earlier blocks are rejected so persisted lobby assignments cannot diverge from
+the standings that produced them.
