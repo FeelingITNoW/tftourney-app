@@ -1,7 +1,11 @@
 {
+  "schemaVersion": 3,
   "id": "default",
   "name": "Default TFT Tournament Format",
   "isDefault": true,
+  "startRequirement": {
+    "minimumEntrants": 8
+  },
   "placementPoints": {
     "1": 8,
     "2": 7,
@@ -12,90 +16,52 @@
     "7": 2,
     "8": 1
   },
-  "rounds": [
+  "nodeDefaults": {
+    "mergeSeeding": "random",
+    "lobbySeeding": "snake",
+    "games": 6,
+    "reseed": 2,
+    "standings": {
+      "rankingMetric": "points",
+      "sortDirection": "desc",
+      "tieBreakers": [
+        { "rankingMetric": "current_node_firsts", "sortDirection": "desc" },
+        { "rankingMetric": "node_entry_seed", "sortDirection": "asc" }
+      ]
+    },
+    "reseedStandings": {
+      "rankingMetric": "tournament_points",
+      "sortDirection": "desc",
+      "tieBreakers": [
+        { "rankingMetric": "current_node_firsts", "sortDirection": "desc" },
+        { "rankingMetric": "node_entry_seed", "sortDirection": "asc" }
+      ]
+    }
+  },
+  "nodes": [
     {
       "id": "opening-round",
       "name": "Opening Round",
-      "type": "qualifier",
-      "participants": "all_registered_players",
-      "lobbySeeding": "snake",
-      "games": 6,
-      "reseed": 2,
-      "standings": {
-        "rankingMetric": "points",
-        "sortDirection": "desc",
-        "tieBreakers": [
-          {
-            "rankingMetric": "current_round_firsts",
-            "sortDirection": "desc"
-          },
-          {
-            "rankingMetric": "round_entry_seed",
-            "sortDirection": "asc"
-          }
-        ]
-      },
-      "reseedStandings": {
-        "rankingMetric": "tournament_points",
-        "sortDirection": "desc",
-        "tieBreakers": [
-          {
-            "rankingMetric": "current_round_firsts",
-            "sortDirection": "desc"
-          },
-          {
-            "rankingMetric": "round_entry_seed",
-            "sortDirection": "asc"
-          }
-        ]
-      },
-      "advancement": {
-        "type": "top_n",
-        "count": 8,
-        "rankingMetric": "points",
-        "destinationRoundId": "final-round"
-      }
+      "initialEntrantSlots": "all"
     },
     {
       "id": "final-round",
       "name": "Final Round",
-      "type": "final",
-      "participants": "advanced_from_opening-round",
       "lobbySeeding": "random",
       "reseed": 0,
-      "standings": {
-        "rankingMetric": "points",
-        "sortDirection": "desc",
-        "tieBreakers": [
-          {
-            "rankingMetric": "current_round_firsts",
-            "sortDirection": "desc"
-          },
-          {
-            "rankingMetric": "round_entry_seed",
-            "sortDirection": "asc"
-          }
-        ]
-      },
-      "reseedStandings": {
-        "rankingMetric": "tournament_points",
-        "sortDirection": "desc",
-        "tieBreakers": [
-          {
-            "rankingMetric": "current_round_firsts",
-            "sortDirection": "desc"
-          },
-          {
-            "rankingMetric": "round_entry_seed",
-            "sortDirection": "asc"
-          }
-        ]
-      },
       "winCondition": {
         "type": "checkmate",
-        "threshold": 18,
-        "rankingMetric": "points"
+        "threshold": 18
       }
+    }
+  ],
+  "edges": [
+    {
+      "id": "opening-to-final",
+      "sourceNodeId": "opening-round",
+      "destinationNodeId": "final-round",
+      "priority": 1,
+      "condition": { "type": "top_n", "count": 8 }
     }
   ]
 }

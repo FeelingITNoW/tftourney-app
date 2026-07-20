@@ -116,27 +116,25 @@ test("loads every lobby participant when the relationship exceeds the REST row c
     }),
   );
   const formatConfig = {
-    rounds: [
-      {
-        id: "opening-round",
-        name: "Opening",
-        games: 6,
-        reseed: 2,
-        lobbySeeding: "snake",
-        advancement: {
-          type: "top_n",
-          count: 8,
-          rankingMetric: "points",
-          destinationRoundId: "second-round",
-        },
-      },
-      {
-        id: "second-round",
-        name: "Second",
-        games: 6,
-        reseed: 2,
-        lobbySeeding: "snake",
-      },
+    schemaVersion: 3,
+    id: "large",
+    name: "Large",
+    placementPoints: { "1": 8 },
+    startRequirement: { minimumEntrants: 1 },
+    nodeDefaults: {
+      mergeSeeding: "random",
+      lobbySeeding: "snake",
+      games: 6,
+      reseed: 2,
+      standings: { rankingMetric: "points", sortDirection: "desc", tieBreakers: [] },
+      reseedStandings: { rankingMetric: "tournament_points", sortDirection: "desc", tieBreakers: [] },
+    },
+    nodes: [
+      { id: "opening-round", name: "Opening", initialEntrantSlots: "all" },
+      { id: "second-round", name: "Second" },
+    ],
+    edges: [
+      { id: "opening-to-second", sourceNodeId: "opening-round", destinationNodeId: "second-round", priority: 1, condition: { type: "top_n", count: 8 } },
     ],
   };
 
@@ -180,6 +178,9 @@ test("loads every lobby participant when the relationship exceeds the REST row c
           { id: 1, round_number: 1, format_round_id: "opening-round", status: "completed" },
           { id: 2, round_number: 2, format_round_id: "second-round", status: "active" },
         ];
+        break;
+      case "tournament_edges":
+        response = [];
         break;
       case "lobbies":
         response = lobbies;

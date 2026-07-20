@@ -34,11 +34,14 @@ begin
     'accepting_players',
     128,
     'default',
-    $format$
+    public.compact_tournament_format_v3($format$
     {
       "id": "default",
       "name": "Default TFT Tournament Format",
       "isDefault": true,
+      "startRequirement": {
+        "minimumEntrants": 8
+      },
       "placementPoints": {
         "1": 8,
         "2": 7,
@@ -136,7 +139,7 @@ begin
         }
       ]
     }
-    $format$::jsonb,
+    $format$::jsonb),
     null,
     null,
     seeded_at,
@@ -312,10 +315,14 @@ begin
     'accepting_players',
     128,
     'three-round-128-checkmate',
-    $three_round_format$
+    public.compact_tournament_format_v3($three_round_format$
     {
       "id": "three-round-128-checkmate",
       "name": "128-Player Three-Round Checkmate",
+      "startRequirement": {
+        "minimumEntrants": 128,
+        "exactEntrants": 128
+      },
       "placementPoints": {
         "1": 8,
         "2": 7,
@@ -466,7 +473,7 @@ begin
         }
       ]
     }
-    $three_round_format$::jsonb,
+    $three_round_format$::jsonb),
     null,
     null,
     seeded_at + interval '1 minute',

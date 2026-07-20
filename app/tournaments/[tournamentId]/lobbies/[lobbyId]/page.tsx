@@ -2,7 +2,7 @@ import Link from "next/link";
 import { notFound } from "next/navigation";
 import { updateLobbyScoresAction } from "@/app/actions";
 import { RandomizeLobbyScoresButton } from "@/components/tournaments/randomize-lobby-scores-button";
-import { getTournamentDetail } from "@/lib/db/tournaments/api";
+import { getTournamentDetail, getTournamentNodeIdForLobby } from "@/lib/db/tournaments/api";
 
 export const dynamic = "force-dynamic";
 
@@ -16,6 +16,7 @@ type LobbyPageSearchParams = Promise<{
   page?: string | string[];
   scoreError?: string | string[];
   saved?: string | string[];
+  node?: string | string[];
 }>;
 
 function getSearchValue(value: string | string[] | undefined): string {
@@ -39,13 +40,15 @@ export default async function LobbyScoresPage({
   const returnPage = getSearchValue(query.page);
   const scoreError = getSearchValue(query.scoreError);
   const saved = getSearchValue(query.saved) === "true";
+  const requestedNode = getSearchValue(query.node);
   let tournament:
     | Awaited<ReturnType<typeof getTournamentDetail>>
     | undefined;
   let databaseError = "";
 
   try {
-    tournament = await getTournamentDetail(tournamentId);
+    const nodeId = requestedNode || await getTournamentNodeIdForLobby(lobbyId);
+    tournament = await getTournamentDetail(tournamentId, nodeId ?? undefined);
   } catch (error) {
     databaseError =
       error instanceof Error
@@ -71,6 +74,9 @@ export default async function LobbyScoresPage({
   }
   if (returnPage) {
     backQuery.set("page", returnPage);
+  }
+  if (tournament?.selectedNodeId) {
+    backQuery.set("node", tournament.selectedNodeId);
   }
   const backToTournamentHref = `/tournaments/${tournamentId}${
     backQuery.toString() ? `?${backQuery.toString()}` : ""
@@ -121,8 +127,8 @@ export default async function LobbyScoresPage({
                 <div className="border-l-4 border-zinc-800 bg-white px-4 py-3 shadow-sm">
                   <dt className="text-zinc-500">Round</dt>
                   <dd className="mt-1 font-semibold text-zinc-950">
-                    {tournament.currentRoundNumber
-                      ? `Round ${tournament.currentRoundNumber}`
+                    {tournament.selectedNodeId
+                      ? tournament.nodes.find((node) => node.id === tournament.selectedNodeId)?.name ?? tournament.selectedNodeId
                       : lobby.roundId}
                   </dd>
                 </div>
@@ -181,6 +187,7 @@ export default async function LobbyScoresPage({
                 <input name="lobbyId" type="hidden" value={lobby.id} />
                 <input name="returnGame" type="hidden" value={returnGame} />
                 <input name="returnPage" type="hidden" value={returnPage} />
+                <input name="returnNode" type="hidden" value={tournament.selectedNodeId ?? ""} />
                 <div className="overflow-x-auto rounded-lg border border-zinc-200 bg-white shadow-sm">
                   <table className="w-full min-w-[32rem] border-collapse text-left text-sm">
                     <thead className="bg-zinc-50 text-zinc-600">

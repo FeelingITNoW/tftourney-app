@@ -1,10 +1,10 @@
 {
   "schemaVersion": 3,
-  "id": "three-round-128-checkmate",
-  "name": "128-Player Three-Round Checkmate",
+  "id": "64-three-node",
+  "name": "64 Player Split and Final",
   "startRequirement": {
-    "minimumEntrants": 128,
-    "exactEntrants": 128
+    "minimumEntrants": 64,
+    "exactEntrants": 64
   },
   "placementPoints": {
     "1": 8,
@@ -40,39 +40,43 @@
   },
   "nodes": [
     {
-      "id": "opening-round",
-      "name": "Opening Round",
+      "id": "a",
+      "name": "Node A",
       "initialEntrantSlots": "all"
     },
     {
-      "id": "second-round",
-      "name": "Second Round"
+      "id": "b",
+      "name": "Node B"
     },
     {
-      "id": "final-round",
-      "name": "Checkmate Final",
+      "id": "c",
+      "name": "Final Node C",
+      "mergeSeeding": "source_rank_interleave",
       "lobbySeeding": "random",
-      "reseed": 0,
-      "winCondition": {
-        "type": "checkmate",
-        "threshold": 18
-      }
+      "reseed": 0
     }
   ],
   "edges": [
     {
-      "id": "opening-to-second",
-      "sourceNodeId": "opening-round",
-      "destinationNodeId": "second-round",
+      "id": "a-to-c",
+      "sourceNodeId": "a",
+      "destinationNodeId": "c",
       "priority": 1,
-      "condition": { "type": "top_n", "count": 64 }
+      "condition": { "type": "top_n", "count": 4 }
     },
     {
-      "id": "second-to-final",
-      "sourceNodeId": "second-round",
-      "destinationNodeId": "final-round",
+      "id": "a-to-b",
+      "sourceNodeId": "a",
+      "destinationNodeId": "b",
+      "priority": 2,
+      "condition": { "type": "top_n", "count": 56 }
+    },
+    {
+      "id": "b-to-c",
+      "sourceNodeId": "b",
+      "destinationNodeId": "c",
       "priority": 1,
-      "condition": { "type": "top_n", "count": 8 }
+      "condition": { "type": "top_n", "count": 4 }
     }
   ]
 }

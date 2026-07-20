@@ -1,20 +1,24 @@
 import type {
+  TournamentEdgeDefinition,
+  TournamentEdgeFormat,
   TournamentFormat,
   TournamentFormatOption,
-  TournamentStartRequirement,
+  TournamentInitialNodeAssignment,
+  TournamentNodeDefinition,
+  TournamentNodeDefaults,
+  TournamentNodeFormat,
   TournamentRankingMetric,
-  TournamentRoundFormat,
+  TournamentRoundWinCondition,
   TournamentSortDirection,
-  TournamentTieBreaker,
+  TournamentStandingsFormat,
+  TournamentStartRequirement,
+  ResolvedTournamentFormat,
 } from "./types";
 
 export const DEFAULT_TOURNAMENT_FORMAT_ID = "default";
 
 export const TOURNAMENT_FORMAT_OPTIONS: TournamentFormatOption[] = [
-  {
-    id: DEFAULT_TOURNAMENT_FORMAT_ID,
-    name: "Default TFT Tournament Format",
-  },
+  { id: DEFAULT_TOURNAMENT_FORMAT_ID, name: "Default TFT Tournament Format" },
 ];
 
 export function isValidTournamentFormatId(formatId: string): boolean {
@@ -24,8 +28,8 @@ export function isValidTournamentFormatId(formatId: string): boolean {
 const rankingMetrics: TournamentRankingMetric[] = [
   "points",
   "tournament_points",
-  "current_round_firsts",
-  "round_entry_seed",
+  "current_node_firsts",
+  "node_entry_seed",
 ];
 const sortDirections: TournamentSortDirection[] = ["asc", "desc"];
 
@@ -41,272 +45,370 @@ function isSortDirection(value: unknown): value is TournamentSortDirection {
   return typeof value === "string" && sortDirections.includes(value as TournamentSortDirection);
 }
 
-function validateTieBreakers(
-  value: unknown,
-  path: string,
-  errors: string[],
-): value is TournamentTieBreaker[] {
+function assertKnownKeys(value: Record<string, unknown>, allowed: string[], path: string, errors: string[]): void {
+  Object.keys(value).forEach((key) => {
+    if (!allowed.includes(key)) errors.push(`${path}.${key} is not supported in schema v3.`);
+  });
+}
+
+function validateTieBreakers(value: unknown, path: string, errors: string[]): void {
   if (!Array.isArray(value)) {
     errors.push(`${path} must be an array.`);
-    return false;
+    return;
   }
 
   value.forEach((tieBreaker, index) => {
     const tieBreakerPath = `${path}[${index}]`;
-
-    if (!isRecord(tieBreaker) || !isRankingMetric(tieBreaker.rankingMetric)) {
-      errors.push(`${tieBreakerPath}.rankingMetric is invalid.`);
-    } else if (
-      tieBreaker.rankingMetric !== "current_round_firsts" &&
-      tieBreaker.rankingMetric !== "round_entry_seed"
-    ) {
-      errors.push(`${tieBreakerPath}.rankingMetric must be a tie-breaker metric.`);
+    if (!isRecord(tieBreaker)) {
+      errors.push(`${tieBreakerPath} must be an object.`);
+      return;
     }
-
-    if (!isRecord(tieBreaker) || !isSortDirection(tieBreaker.sortDirection)) {
-      errors.push(`${tieBreakerPath}.sortDirection is invalid.`);
+    assertKnownKeys(tieBreaker, ["rankingMetric", "sortDirection"], tieBreakerPath, errors);
+    if (!isRankingMetric(tieBreaker.rankingMetric) || !["current_node_firsts", "node_entry_seed"].includes(tieBreaker.rankingMetric)) {
+      errors.push(`${tieBreakerPath}.rankingMetric must be a node tie-breaker metric.`);
     }
+    if (!isSortDirection(tieBreaker.sortDirection)) errors.push(`${tieBreakerPath}.sortDirection is invalid.`);
   });
-
-  return true;
 }
 
-function validateStandings(
+function validateStandings(value: unknown, path: string, errors: string[]): void {
+  if (!isRecord(value)) {
+    errors.push(`${path} must be an object.`);
+    return;
+  }
+  assertKnownKeys(value, ["rankingMetric", "sortDirection", "tieBreakers"], path, errors);
+  if (!isRankingMetric(value.rankingMetric)) errors.push(`${path}.rankingMetric is invalid.`);
+  if (!isSortDirection(value.sortDirection)) errors.push(`${path}.sortDirection is invalid.`);
+  validateTieBreakers(value.tieBreakers, `${path}.tieBreakers`, errors);
+}
+
+function validateWinCondition(
   value: unknown,
   path: string,
+  games: unknown,
+  reseed: unknown,
   errors: string[],
-): value is TournamentRoundFormat["standings"] {
+): void {
   if (!isRecord(value)) {
     errors.push(`${path} must be an object.`);
-    return false;
+    return;
   }
-
-  if (!isRankingMetric(value.rankingMetric)) {
-    errors.push(`${path}.rankingMetric is invalid.`);
+  assertKnownKeys(value, ["type", "games", "threshold", "maxGames", "rankingMetric"], path, errors);
+  if (value.rankingMetric !== undefined && value.rankingMetric !== "points") errors.push(`${path}.rankingMetric must be points.`);
+  if (value.type === "highest_points_after_games") {
+    if (!Number.isInteger(value.games) || (value.games as number) <= 0) errors.push(`${path}.games must be positive.`);
+    if (!Number.isInteger(games) || games !== value.games) errors.push(`${path.replace("winCondition", "games")} must equal winCondition.games.`);
+    return;
   }
-
-  if (!isSortDirection(value.sortDirection)) {
-    errors.push(`${path}.sortDirection is invalid.`);
+  if (value.type === "checkmate") {
+    if (!Number.isInteger(value.threshold) || (value.threshold as number) < 0) errors.push(`${path}.threshold must be a non-negative whole number.`);
+    if (value.maxGames !== undefined && (!Number.isInteger(value.maxGames) || (value.maxGames as number) <= 0)) errors.push(`${path}.maxGames must be a positive whole number.`);
+    if (games !== undefined) errors.push(`${path.replace("winCondition", "games")} must be omitted for checkmate nodes.`);
+    if (reseed !== 0) errors.push(`${path.replace("winCondition", "reseed")} must be zero for checkmate nodes.`);
+    return;
   }
-
-  validateTieBreakers(value.tieBreakers, `${path}.tieBreakers`, errors);
-  return true;
+  errors.push(`${path}.type is invalid.`);
 }
 
-function validateRound(
-  value: unknown,
-  index: number,
-  roundIds: Set<string>,
-  errors: string[],
-): value is TournamentRoundFormat {
-  const path = `rounds[${index}]`;
-
+function validateDefaults(value: unknown, errors: string[]): void {
+  const path = "nodeDefaults";
   if (!isRecord(value)) {
     errors.push(`${path} must be an object.`);
-    return false;
+    return;
   }
-
-  if (typeof value.id !== "string" || value.id.trim() === "") {
-    errors.push(`${path}.id is required.`);
-  } else if (roundIds.has(value.id)) {
-    errors.push(`${path}.id must be unique.`);
-  } else {
-    roundIds.add(value.id);
-  }
-
-  if (typeof value.name !== "string" || value.name.trim() === "") {
-    errors.push(`${path}.name is required.`);
-  }
-
-  if (value.type !== undefined && value.type !== "qualifier" && value.type !== "final") {
-    errors.push(`${path}.type must be qualifier or final.`);
-  }
-
-  if (value.lobbySeeding !== "snake" && value.lobbySeeding !== "random") {
-    errors.push(`${path}.lobbySeeding must be snake or random.`);
-  }
-
+  assertKnownKeys(value, ["mergeSeeding", "lobbySeeding", "games", "reseed", "standings", "reseedStandings"], path, errors);
+  if (value.mergeSeeding !== "random" && value.mergeSeeding !== "source_rank_interleave") errors.push(`${path}.mergeSeeding is invalid.`);
+  if (value.lobbySeeding !== "snake" && value.lobbySeeding !== "random") errors.push(`${path}.lobbySeeding must be snake or random.`);
+  if (value.games !== undefined && (!Number.isInteger(value.games) || (value.games as number) <= 0)) errors.push(`${path}.games must be a positive whole number.`);
+  if (!Number.isInteger(value.reseed) || (value.reseed as number) < 0) errors.push(`${path}.reseed must be a non-negative whole number.`);
   validateStandings(value.standings, `${path}.standings`, errors);
   validateStandings(value.reseedStandings, `${path}.reseedStandings`, errors);
+}
 
-  if (value.advancement !== undefined) {
-    if (!isRecord(value.advancement)) {
-      errors.push(`${path}.advancement must be an object.`);
-    } else {
-      if (value.advancement.type !== "top_n") {
-        errors.push(`${path}.advancement.type must be top_n.`);
-      }
-      if (!Number.isInteger(value.advancement.count) || (value.advancement.count as number) <= 0) {
-        errors.push(`${path}.advancement.count must be a positive whole number.`);
-      }
-      if (value.advancement.rankingMetric !== "points") {
-        errors.push(`${path}.advancement.rankingMetric must be points.`);
-      }
-      if (
-        typeof value.advancement.destinationRoundId !== "string" ||
-        value.advancement.destinationRoundId.trim() === ""
-      ) {
-        errors.push(`${path}.advancement.destinationRoundId is required.`);
-      }
+function mergeNode(defaults: Record<string, unknown>, node: Record<string, unknown>): Record<string, unknown> {
+  const merged = { ...defaults, ...node };
+  if (isRecord(merged.winCondition) && merged.winCondition.type === "checkmate") delete merged.games;
+  return merged;
+}
+
+function validateNode(
+  value: unknown,
+  resolved: Record<string, unknown>,
+  index: number,
+  nodeIds: Set<string>,
+  errors: string[],
+): void {
+  const path = `nodes[${index}]`;
+  if (!isRecord(value)) {
+    errors.push(`${path} must be an object.`);
+    return;
+  }
+  assertKnownKeys(value, ["id", "name", "initialEntrantSlots", "mergeSeeding", "lobbySeeding", "games", "reseed", "standings", "reseedStandings", "winCondition", "position"], path, errors);
+  if (typeof value.id !== "string" || value.id.trim() === "") errors.push(`${path}.id is required.`);
+  else if (nodeIds.has(value.id)) errors.push(`${path}.id must be unique.`);
+  else nodeIds.add(value.id);
+  if (typeof value.name !== "string" || value.name.trim() === "") errors.push(`${path}.name is required.`);
+  if (value.initialEntrantSlots !== undefined && value.initialEntrantSlots !== "all" && (!Number.isInteger(value.initialEntrantSlots) || (value.initialEntrantSlots as number) <= 0)) errors.push(`${path}.initialEntrantSlots must be positive or all.`);
+  if (resolved.mergeSeeding !== "random" && resolved.mergeSeeding !== "source_rank_interleave") errors.push(`${path}.mergeSeeding is invalid.`);
+  if (resolved.lobbySeeding !== "snake" && resolved.lobbySeeding !== "random") errors.push(`${path}.lobbySeeding must be snake or random.`);
+  validateStandings(resolved.standings, `${path}.standings`, errors);
+  validateStandings(resolved.reseedStandings, `${path}.reseedStandings`, errors);
+  if (value.winCondition !== undefined && resolved.winCondition === undefined) errors.push(`${path}.winCondition is invalid.`);
+  if (resolved.winCondition !== undefined) validateWinCondition(resolved.winCondition, `${path}.winCondition`, resolved.games, resolved.reseed, errors);
+  const isCheckmate = isRecord(resolved.winCondition) && resolved.winCondition.type === "checkmate";
+  if (!isCheckmate && (!Number.isInteger(resolved.games) || (resolved.games as number) <= 0)) errors.push(`${path}.games must be a positive whole number.`);
+  if (!Number.isInteger(resolved.reseed) || (resolved.reseed as number) < 0) errors.push(`${path}.reseed must be a non-negative whole number.`);
+  else if (!isCheckmate && Number.isInteger(resolved.games) && (resolved.reseed as number) > (resolved.games as number)) errors.push(`${path}.reseed must be between 0 and games.`);
+  if (resolved.position !== undefined && (!isRecord(resolved.position) || typeof resolved.position.x !== "number" || typeof resolved.position.y !== "number")) errors.push(`${path}.position must contain numeric x and y.`);
+}
+
+function validateEdge(value: unknown, index: number, nodeIds: Set<string>, edgeIds: Set<string>, priorities: Map<string, Set<number>>, errors: string[]): void {
+  const path = `edges[${index}]`;
+  if (!isRecord(value)) {
+    errors.push(`${path} must be an object.`);
+    return;
+  }
+  assertKnownKeys(value, ["id", "sourceNodeId", "destinationNodeId", "priority", "condition"], path, errors);
+  if (typeof value.id !== "string" || value.id.trim() === "") errors.push(`${path}.id is required.`);
+  else if (edgeIds.has(value.id)) errors.push(`${path}.id must be unique.`);
+  else edgeIds.add(value.id);
+  const source = value.sourceNodeId;
+  const destination = value.destinationNodeId;
+  if (typeof source !== "string" || !nodeIds.has(source)) errors.push(`${path}.sourceNodeId must reference a node.`);
+  if (typeof destination !== "string" || !nodeIds.has(destination)) errors.push(`${path}.destinationNodeId must reference a node.`);
+  if (source === destination) errors.push(`${path} cannot connect a node to itself.`);
+  if (!Number.isInteger(value.priority) || (value.priority as number) <= 0) errors.push(`${path}.priority must be positive.`);
+  else if (typeof source === "string") {
+    const sourcePriorities = priorities.get(source) ?? new Set<number>();
+    if (sourcePriorities.has(value.priority as number)) errors.push(`${path}.priority must be unique for its source node.`);
+    sourcePriorities.add(value.priority as number);
+    priorities.set(source, sourcePriorities);
+  }
+  if (!isRecord(value.condition)) {
+    errors.push(`${path}.condition must be an object.`);
+    return;
+  }
+  assertKnownKeys(value.condition, ["type", "count", "rankingMetric"], `${path}.condition`, errors);
+  if (value.condition.type !== "top_n") errors.push(`${path}.condition.type must be top_n.`);
+  if (!Number.isInteger(value.condition.count) || (value.condition.count as number) <= 0) errors.push(`${path}.condition.count must be positive.`);
+  if (value.condition.rankingMetric !== undefined && value.condition.rankingMetric !== "points") errors.push(`${path}.condition.rankingMetric must be points.`);
+}
+
+function hasCycle(nodes: Set<string>, edges: TournamentEdgeFormat[]): boolean {
+  const incoming = new Map([...nodes].map((node) => [node, 0]));
+  const outgoing = new Map<string, string[]>([...nodes].map((node) => [node, []]));
+  for (const edge of edges) {
+    incoming.set(edge.destinationNodeId, (incoming.get(edge.destinationNodeId) ?? 0) + 1);
+    outgoing.get(edge.sourceNodeId)?.push(edge.destinationNodeId);
+  }
+  const queue = [...incoming.entries()].filter(([, count]) => count === 0).map(([node]) => node);
+  let visited = 0;
+  while (queue.length) {
+    const node = queue.shift() as string;
+    visited += 1;
+    for (const destination of outgoing.get(node) ?? []) {
+      const next = (incoming.get(destination) ?? 0) - 1;
+      incoming.set(destination, next);
+      if (next === 0) queue.push(destination);
     }
   }
+  return visited !== nodes.size;
+}
 
-  if (value.winCondition !== undefined) {
-    if (!isRecord(value.winCondition)) {
-      errors.push(`${path}.winCondition must be an object.`);
-    } else if (value.winCondition.type === "highest_points_after_games") {
-      if (value.winCondition.rankingMetric !== "points") {
-        errors.push(`${path}.winCondition.rankingMetric must be points.`);
-      }
-      if (
-        !Number.isInteger(value.winCondition.games) ||
-        (value.winCondition.games as number) <= 0
-      ) {
-        errors.push(`${path}.winCondition.games must be positive.`);
-      }
-      if (
-        !Number.isInteger(value.games) ||
-        (value.games as number) !== (value.winCondition.games as number)
-      ) {
-        errors.push(`${path}.games must equal winCondition.games.`);
-      }
-    } else if (value.winCondition.type === "checkmate") {
-      if (value.winCondition.rankingMetric !== "points") {
-        errors.push(`${path}.winCondition.rankingMetric must be points.`);
-      }
-      if (
-        !Number.isInteger(value.winCondition.threshold) ||
-        (value.winCondition.threshold as number) < 0
-      ) {
-        errors.push(`${path}.winCondition.threshold must be a non-negative whole number.`);
-      }
-      if (
-        value.winCondition.maxGames !== undefined &&
-        (!Number.isInteger(value.winCondition.maxGames) ||
-          (value.winCondition.maxGames as number) <= 0)
-      ) {
-        errors.push(`${path}.winCondition.maxGames must be a positive whole number.`);
-      }
-      if (value.games !== undefined) {
-        errors.push(`${path}.games must be omitted for checkmate rounds.`);
-      }
-      if (value.reseed !== 0) {
-        errors.push(`${path}.reseed must be zero for checkmate rounds.`);
-      }
-    } else {
-      errors.push(`${path}.winCondition.type is invalid.`);
-    }
+function resolvedWinCondition(value: unknown): TournamentRoundWinCondition | undefined {
+  if (!isRecord(value)) return undefined;
+  if (value.type === "highest_points_after_games") {
+    return { type: "highest_points_after_games", games: Number(value.games), rankingMetric: "points" };
   }
-
-  const isCheckmate = isRecord(value.winCondition) && value.winCondition.type === "checkmate";
-  if (!isCheckmate && (!Number.isInteger(value.games) || (value.games as number) <= 0)) {
-    errors.push(`${path}.games must be a positive whole number.`);
+  if (value.type === "checkmate") {
+    return {
+      type: "checkmate",
+      threshold: Number(value.threshold),
+      rankingMetric: "points",
+      ...(value.maxGames === undefined ? {} : { maxGames: Number(value.maxGames) }),
+    };
   }
+  return undefined;
+}
 
-  if (!Number.isInteger(value.reseed) || (value.reseed as number) < 0) {
-    errors.push(`${path}.reseed must be a non-negative whole number.`);
-  } else if (!isCheckmate && Number.isInteger(value.games) && (value.reseed as number) > (value.games as number)) {
-    errors.push(`${path}.reseed must be between 0 and games.`);
-  }
+function resolveNode(defaults: TournamentNodeDefaults, node: TournamentNodeDefinition): TournamentNodeFormat {
+  const merged = mergeNode(defaults as unknown as Record<string, unknown>, node as unknown as Record<string, unknown>);
+  return {
+    id: String(merged.id),
+    name: String(merged.name),
+    ...(merged.initialEntrantSlots === undefined ? {} : { initialEntrantSlots: merged.initialEntrantSlots as number | "all" }),
+    mergeSeeding: merged.mergeSeeding as TournamentNodeFormat["mergeSeeding"],
+    lobbySeeding: merged.lobbySeeding as TournamentNodeFormat["lobbySeeding"],
+    ...(merged.games === undefined ? {} : { games: Number(merged.games) }),
+    reseed: Number(merged.reseed),
+    standings: merged.standings as TournamentStandingsFormat,
+    reseedStandings: merged.reseedStandings as TournamentStandingsFormat,
+    ...(merged.winCondition === undefined ? {} : { winCondition: resolvedWinCondition(merged.winCondition) }),
+    ...(merged.position === undefined ? {} : { position: merged.position as { x: number; y: number } }),
+  };
+}
 
-  return true;
+function resolveEdge(edge: TournamentEdgeDefinition): TournamentEdgeFormat {
+  return {
+    id: edge.id,
+    sourceNodeId: edge.sourceNodeId,
+    destinationNodeId: edge.destinationNodeId,
+    priority: edge.priority,
+    condition: { type: "top_n", count: edge.condition.count, rankingMetric: "points" },
+  };
 }
 
 export type TournamentFormatValidation =
-  | { success: true; data: TournamentFormat; errors: string[] }
+  | { success: true; data: ResolvedTournamentFormat; errors: string[] }
   | { success: false; data: null; errors: string[] };
 
-export function validateTournamentFormat(
-  value: unknown,
-): TournamentFormatValidation {
+export function validateTournamentFormat(value: unknown): TournamentFormatValidation {
   const errors: string[] = [];
+  if (!isRecord(value)) return { success: false, data: null, errors: ["Format must be an object."] };
+  assertKnownKeys(value, ["schemaVersion", "id", "name", "isDefault", "placementPoints", "startRequirement", "nodeDefaults", "nodes", "edges"], "format", errors);
+  if (value.schemaVersion !== 3) errors.push("schemaVersion must be 3.");
+  if (typeof value.id !== "string" || value.id.trim() === "") errors.push("Format id is required.");
+  if (typeof value.name !== "string" || value.name.trim() === "") errors.push("Format name is required.");
+  if (value.isDefault !== undefined && typeof value.isDefault !== "boolean") errors.push("isDefault must be boolean.");
+  if (!isRecord(value.placementPoints)) errors.push("placementPoints must be an object.");
+  else Object.entries(value.placementPoints).forEach(([placement, points]) => {
+    if (!/^\d+$/.test(placement) || !Number.isFinite(points) || (points as number) < 0) errors.push(`placementPoints.${placement} must be a non-negative number.`);
+  });
+  if (!isRecord(value.startRequirement)) errors.push("startRequirement must be an object.");
+  else assertKnownKeys(value.startRequirement, ["minimumEntrants", "exactEntrants"], "startRequirement", errors);
+  if (!Array.isArray(value.nodes) || value.nodes.length === 0) errors.push("Format must define at least one node.");
+  if (!Array.isArray(value.edges)) errors.push("edges must be an array.");
+  validateDefaults(value.nodeDefaults, errors);
 
-  if (!isRecord(value)) {
-    return { success: false, data: null, errors: ["Format must be an object."] };
-  }
+  const defaults = isRecord(value.nodeDefaults) ? value.nodeDefaults : {};
+  const nodeValues = Array.isArray(value.nodes) ? value.nodes : [];
+  const nodeIds = new Set<string>();
+  const resolvedNodes = nodeValues.map((node) => resolveNode(defaults as unknown as TournamentNodeDefaults, node as TournamentNodeDefinition));
+  nodeValues.forEach((node, index) => validateNode(node, resolvedNodes[index] as unknown as Record<string, unknown>, index, nodeIds, errors));
 
-  if (typeof value.id !== "string" || value.id.trim() === "") {
-    errors.push("Format id is required.");
-  }
-  if (typeof value.name !== "string" || value.name.trim() === "") {
-    errors.push("Format name is required.");
-  }
-  if (!isRecord(value.placementPoints)) {
-    errors.push("placementPoints must be an object.");
-  }
-  if (!Array.isArray(value.rounds) || value.rounds.length === 0) {
-    errors.push("Format must define at least one round.");
-  }
+  const edgeValues = Array.isArray(value.edges) ? value.edges : [];
+  const edgeIds = new Set<string>();
+  const priorities = new Map<string, Set<number>>();
+  edgeValues.forEach((edge, index) => validateEdge(edge, index, nodeIds, edgeIds, priorities, errors));
+  const resolvedEdges = edgeValues.map((edge) => resolveEdge(edge as TournamentEdgeDefinition));
 
-  const roundIds = new Set<string>();
-  if (Array.isArray(value.rounds)) {
-    value.rounds.forEach((round, index) => validateRound(round, index, roundIds, errors));
-  }
-
-  if (Array.isArray(value.rounds)) {
-    const rounds = value.rounds as unknown[];
-    value.rounds.forEach((round, index) => {
-      if (!isRecord(round) || !isRecord(round.advancement)) {
-        return;
-      }
-
-      const destinationRoundId = round.advancement.destinationRoundId;
-      if (typeof destinationRoundId === "string" && !roundIds.has(destinationRoundId)) {
-        errors.push(`rounds[${index}].advancement.destinationRoundId must reference a round.`);
-      }
+  if (!hasCycle(nodeIds, resolvedEdges)) {
+    const incoming = new Set(resolvedEdges.map((edge) => edge.destinationNodeId));
+    resolvedNodes.filter((node) => !incoming.has(node.id)).forEach((root) => {
+      if (root.initialEntrantSlots === undefined) errors.push(`nodes.${root.id}.initialEntrantSlots is required for an entry node.`);
     });
-
-    value.rounds.forEach((round, index) => {
-      if (!isRecord(round) || !isRecord(round.winCondition) || round.winCondition.type !== "checkmate") {
-        return;
-      }
-
-      const isFinal = round.type === "final" || index === rounds.length - 1;
-      const incomingCounts = rounds
-        .filter((candidate): candidate is Record<string, unknown> => isRecord(candidate) && isRecord(candidate.advancement))
-        .filter((candidate) => (candidate.advancement as Record<string, unknown>).destinationRoundId === round.id)
-        .map((candidate) => (candidate.advancement as Record<string, unknown>).count)
-        .filter((count): count is number => Number.isInteger(count));
-
-      if (!isFinal && !incomingCounts.includes(8)) {
-        errors.push(`rounds[${index}].checkmate requires an eight-player round or final round.`);
-      }
-    });
+    resolvedNodes.filter((node) => incoming.has(node.id) && node.initialEntrantSlots !== undefined).forEach((node) => errors.push(`nodes.${node.id}.initialEntrantSlots is only allowed on entry nodes.`));
+  } else {
+    errors.push("Format graph must be acyclic.");
   }
 
-  if (errors.length > 0) {
-    return { success: false, data: null, errors };
-  }
+  const requirementValue = isRecord(value.startRequirement) ? value.startRequirement : {};
+  const requirement: TournamentStartRequirement = {
+    minimumEntrants: Number(requirementValue.minimumEntrants),
+    exactEntrants: requirementValue.exactEntrants === undefined || requirementValue.exactEntrants === null ? null : Number(requirementValue.exactEntrants),
+  };
+  if (!Number.isInteger(requirement.minimumEntrants) || requirement.minimumEntrants < 1) errors.push("startRequirement.minimumEntrants must be positive.");
+  if (requirement.exactEntrants !== null && (!Number.isInteger(requirement.exactEntrants) || requirement.exactEntrants < requirement.minimumEntrants)) errors.push("startRequirement.exactEntrants must be at least minimumEntrants.");
 
+  if (errors.length) return { success: false, data: null, errors };
   return {
     success: true,
-    data: value as unknown as TournamentFormat,
+    data: {
+      schemaVersion: 3,
+      id: value.id as string,
+      name: value.name as string,
+      ...(value.isDefault === true ? { isDefault: true } : {}),
+      placementPoints: value.placementPoints as Record<string, number>,
+      startRequirement: requirement,
+      nodeDefaults: defaults as TournamentNodeDefaults,
+      nodes: resolvedNodes,
+      edges: resolvedEdges,
+    },
     errors: [],
   };
+}
+
+export function resolveTournamentFormat(value: unknown): ResolvedTournamentFormat | null {
+  const result = validateTournamentFormat(value);
+  return result.success ? result.data : null;
 }
 
 export function isValidTournamentFormat(value: unknown): value is TournamentFormat {
   return validateTournamentFormat(value).success;
 }
 
-export function getTournamentStartRequirement(
-  value: unknown,
-): TournamentStartRequirement {
-  if (!isRecord(value) || !Array.isArray(value.rounds)) {
-    return { minimumEntrants: 1, exactEntrants: null };
-  }
-
-  const rounds = value.rounds.filter(isRecord);
-  const hasCheckmate = rounds.some(
-    (round) => isRecord(round.winCondition) && round.winCondition.type === "checkmate",
-  );
-  const firstRoundIsCheckmate =
-    rounds.length > 0 &&
-    isRecord(rounds[0]?.winCondition) &&
-    rounds[0].winCondition.type === "checkmate";
-
+export function canonicalizeTournamentFormat(value: unknown): TournamentFormat | null {
+  const result = validateTournamentFormat(value);
+  if (!result.success) return null;
+  const resolved = result.data;
+  const defaults = resolved.nodeDefaults as unknown as Record<string, unknown>;
+  const nodes = resolved.nodes.map((node) => {
+    const compact: Record<string, unknown> = { id: node.id, name: node.name };
+    (["initialEntrantSlots", "position"] as const).forEach((key) => {
+      if (node[key] !== undefined) compact[key] = node[key];
+    });
+    (["mergeSeeding", "lobbySeeding", "games", "reseed", "standings", "reseedStandings"] as const).forEach((key) => {
+      if (node[key] !== undefined && JSON.stringify(node[key]) !== JSON.stringify(defaults[key])) compact[key] = node[key];
+    });
+    if (node.winCondition) {
+      const condition: Record<string, unknown> = { type: node.winCondition.type };
+      if (node.winCondition.type === "highest_points_after_games") condition.games = node.winCondition.games;
+      else {
+        condition.threshold = node.winCondition.threshold;
+        if (node.winCondition.maxGames !== undefined) condition.maxGames = node.winCondition.maxGames;
+      }
+      compact.winCondition = condition;
+    }
+    return compact as TournamentNodeDefinition;
+  });
   return {
-    minimumEntrants: hasCheckmate ? 8 : 1,
-    exactEntrants: firstRoundIsCheckmate ? 8 : null,
+    schemaVersion: 3,
+    id: resolved.id,
+    name: resolved.name,
+    ...(resolved.isDefault ? { isDefault: true } : {}),
+    placementPoints: resolved.placementPoints,
+    startRequirement: {
+      minimumEntrants: resolved.startRequirement.minimumEntrants,
+      ...(resolved.startRequirement.exactEntrants === null ? {} : { exactEntrants: resolved.startRequirement.exactEntrants }),
+    },
+    nodeDefaults: resolved.nodeDefaults,
+    nodes,
+    edges: resolved.edges.map((edge) => ({
+      ...edge,
+      condition: { type: "top_n", count: edge.condition.count },
+    })),
   };
+}
+
+export function getTournamentStartRequirement(value: unknown): TournamentStartRequirement {
+  if (isRecord(value) && isRecord(value.startRequirement)) {
+    return {
+      minimumEntrants: Number(value.startRequirement.minimumEntrants),
+      exactEntrants: value.startRequirement.exactEntrants === undefined || value.startRequirement.exactEntrants === null ? null : Number(value.startRequirement.exactEntrants),
+    };
+  }
+  return { minimumEntrants: 1, exactEntrants: null };
+}
+
+export function getFormatGraph(value: unknown): { nodes: TournamentNodeFormat[]; edges: TournamentEdgeFormat[] } {
+  const resolved = resolveTournamentFormat(value);
+  return resolved ? { nodes: resolved.nodes, edges: resolved.edges } : { nodes: [], edges: [] };
+}
+
+export type OrderedAdvancement = TournamentEdgeFormat & { participantIds: string[] };
+
+export function selectOrderedTopNAdvancements<T extends { id: string }>(players: T[], edges: TournamentEdgeFormat[]): { advancements: OrderedAdvancement[]; eliminatedParticipantIds: string[] } {
+  const remaining = [...players];
+  const advancements = [...edges].sort((first, second) => first.priority - second.priority || first.id.localeCompare(second.id)).map((edge) => {
+    const selected = remaining.splice(0, edge.condition.count);
+    return { ...edge, participantIds: selected.map((player) => player.id) };
+  });
+  return { advancements, eliminatedParticipantIds: remaining.map((player) => player.id) };
+}
+
+export function getInitialNodeAssignments(value: unknown, assignments: TournamentInitialNodeAssignment[]): TournamentInitialNodeAssignment[] {
+  const graph = getFormatGraph(value);
+  const nodeIds = new Set(graph.nodes.map((node) => node.id));
+  const incoming = new Set(graph.edges.map((edge) => edge.destinationNodeId));
+  return assignments.filter((assignment) => nodeIds.has(assignment.nodeId) && !incoming.has(assignment.nodeId));
 }
