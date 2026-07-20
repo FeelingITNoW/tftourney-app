@@ -49,7 +49,8 @@ CREATE TABLE public.rounds (
   format_round_id text,
   stage_name character varying,
   status character varying NOT NULL DEFAULT 'pending'
-    CHECK (status IN ('pending', 'active', 'completed', 'cancelled')),
+    CHECK (status IN ('pending', 'active', 'completed', 'cancelled', 'skipped')),
+  node_depth integer,
   created_at timestamptz NOT NULL DEFAULT now(),
   updated_at timestamptz NOT NULL DEFAULT now(),
   CONSTRAINT rounds_pkey PRIMARY KEY (id),
@@ -109,6 +110,8 @@ CREATE TABLE public.participant_round_scores (
   round_id bigint NOT NULL,
   round_seed_number integer NOT NULL CHECK (round_seed_number > 0),
   score integer NOT NULL DEFAULT 0,
+  source_edge_id bigint,
+  source_rank integer,
   created_at timestamptz NOT NULL DEFAULT now(),
   updated_at timestamptz NOT NULL DEFAULT now(),
   CONSTRAINT participant_round_scores_pkey PRIMARY KEY (id),
@@ -123,44 +126,44 @@ CREATE TABLE public.participant_round_scores (
 -- tournament_registrations(tournament_id, riot_puuid) where riot_puuid is not null
 -- tournament_participants(tournament_id, registration_id)
 -- tournament_participants(tournament_id, seed_number)
--- rounds(tournament_id, round_number)
+-- rounds(tournament_id, format_round_id)
 -- lobbies(round_id, game_number, lobby_number)
 -- lobby_participants(lobby_id, participant_id)
 -- participant_round_scores(participant_id, round_id)
 -- participant_round_scores(round_id, round_seed_number)
 
-## Lobby seeding in tournament formats
+## Compact graph tournament formats
 
-Every object in `format_config.rounds` declares a `reseed`, a `lobbySeeding`
-strategy, and standings tie-breakers. Fixed-game rounds declare a positive
-`games` count; `reseed: 0` disables automatic reseeding. Checkmate rounds omit
-`games`, use `reseed: 0`, and declare `winCondition` as
-`{"type":"checkmate","threshold":18,"rankingMetric":"points"}`. They run
-one game at a time until a player who was strictly above the threshold before
-the game finishes first. An optional positive `maxGames` enables a points
-fallback when no player checkmates.
+`format_config` uses schema version 3 and is graph-only. It contains one
+`nodeDefaults` object, a `nodes` array, and an `edges` array; it never stores a
+duplicate `rounds` array. Node fields inherit from `nodeDefaults`, with a node
+field replacing the corresponding default as a whole. Fixed-game nodes use a
+positive `games` count; `reseed: 0` disables automatic reseeding. Checkmate
+nodes omit `games`, use `reseed: 0`, and declare `winCondition` as
+`{"type":"checkmate","threshold":18}`. Omitted ranking metrics default to
+`points`.
 
-Every object in `format_config.rounds` declares a `lobbySeeding` strategy:
+Each node declares a `lobbySeeding` strategy:
 
 - `"snake"` assigns seeded players across lobbies in alternating directions.
   For two lobbies, seeds 1–4 are distributed 1, 2, 2, 1.
-- `"random"` shuffles the round participants before distributing them evenly
+- `"random"` shuffles the node participants before distributing them evenly
   across lobbies.
 
-Lobby assignments are repeated for each fixed-game block. Checkmate rounds
+Lobby assignments are repeated for each fixed-game block. Checkmate nodes
 must have exactly eight active participants (including finals), while a
 checkmate configuration is only valid on an eight-player destination or final
-round. The built-in default uses six games with reseed blocks of two in its
-opening round and checkmate in its eight-player final.
+node. The built-in default uses six games with reseed blocks of two in its
+opening node and checkmate in its eight-player final.
 
 The top-level `format_config.placementPoints` object maps finishing placements
 to awarded points. The default format awards 8 points for first place, 7 for
 second, continuing down to 1 point for eighth place.
 
-Starting a tournament creates round 1, its round-seeded score rows, and its
-first game block in one database transaction. Formats containing checkmate
-require at least eight selected entrants; a checkmate opening round requires
-exactly eight. `generate_round_lobbies(round_id)`
+Starting a tournament creates every graph node and edge, its round-seeded score
+rows, and the first game block for each active entry node in one database
+transaction. Formats containing checkmate require at least eight selected
+entrants. `generate_round_lobbies(round_id)`
 is idempotent and creates the next block only after the current block is fully
 scored. It uses tournament totals, current-round firsts, and the round seed for
 reseeding; random assignments are persisted in `lobby_participants`.
@@ -178,26 +181,25 @@ therefore updated in one database transaction.
 
 When the last result in a block is saved, the same transaction creates the next
 game block. For checkmate, the next single-game block is created only when no
-decisive result exists. `progress_tournament_round(tournament_id)` locks the
-tournament and active round, verifies the decisive game (or `maxGames`
-fallback), ranks the checkmate winner first and the remaining players by points,
-then advances the format-defined count or completes the tournament. Completed
-rounds are read-only.
+decisive result exists. `finalize_tournament_node(tournament_id, node_id)` locks
+a completed node, evaluates its ordered outgoing edges, and activates
+destinations after all incoming edges resolve. Completed nodes are read-only.
 
-The testing RPC `randomize_pending_lobby_results(tournament_id)` randomizes only
-pending lobbies in the active game block and runs the updates in one transaction.
+The testing RPC `randomize_pending_lobby_results(tournament_id, node_id)`
+randomizes only pending lobbies in the selected active node and runs the
+updates in one transaction.
 Existing results are preserved. Once a later reseeded block exists, result edits
 to earlier blocks are rejected so persisted lobby assignments cannot diverge from
 the standings that produced them.
 
 ## Graph tournament runtime
 
-Format snapshots with `schemaVersion: 2` define `nodes` and `edges`. A node
-contains the existing game count, reseed block, lobby seeding, standings, and
-win-condition settings. An edge contains a source node, destination node,
-priority, and an ordered exclusive `top_n` condition. Edges are evaluated by
-priority and consume players from the source standings; unmatched players are
-eliminated.
+Format snapshots with `schemaVersion: 3` define `nodeDefaults`, `nodes`, and
+`edges`. A node contains only overrides for game count, reseed block, lobby
+seeding, standings, and win-condition settings. An edge contains a source node,
+destination node, priority, and an ordered exclusive `top_n` condition. Edges
+are evaluated by priority and consume players from the source standings;
+unmatched players are eliminated.
 
 The `rounds` table is used as the runtime node table during the graph migration.
 `rounds.format_round_id` identifies the configured node and `rounds.status` may
@@ -205,7 +207,9 @@ also be `skipped`. `tournament_edges` stores the runtime edge snapshot and
 resolution state. `participant_round_scores.source_edge_id` and `source_rank`
 retain the transfer audit trail. A tournament may have several active
 rounds/nodes at once; `tournaments.current_round_id` is retained only as a
-legacy display pointer and is not used for graph progression.
+legacy display pointer and is not used for graph progression. The v3 migration
+adds `rounds.node_depth`, allows `skipped` status, and enforces that stored
+`format_config` objects contain schema version 3 with no `rounds` property.
 
 `start_tournament(tournament_id, initial_assignments)` creates every graph node
 and edge, assigns explicit registrations first, randomly distributes remaining

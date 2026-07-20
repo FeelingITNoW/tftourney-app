@@ -34,11 +34,14 @@ begin
     'accepting_players',
     128,
     'default',
-    $format$
+    public.compact_tournament_format_v3($format$
     {
       "id": "default",
       "name": "Default TFT Tournament Format",
       "isDefault": true,
+      "startRequirement": {
+        "minimumEntrants": 8
+      },
       "placementPoints": {
         "1": 8,
         "2": 7,
@@ -136,27 +139,13 @@ begin
         }
       ]
     }
-    $format$::jsonb,
+    $format$::jsonb),
     null,
     null,
     seeded_at,
     seeded_at
   )
   returning id into seed_tournament_id;
-
-  update public.tournaments
-  set format_config = format_config || jsonb_build_object(
-    'schemaVersion', 2,
-    'startRequirement', jsonb_build_object('minimumEntrants', 8, 'exactEntrants', null),
-    'nodes', jsonb_build_array(
-      (format_config -> 'rounds' -> 0) || jsonb_build_object('initialEntrantSlots', 'all', 'mergeSeeding', 'random'),
-      (format_config -> 'rounds' -> 1) || jsonb_build_object('mergeSeeding', 'random')
-    ),
-    'edges', jsonb_build_array(
-      jsonb_build_object('id', 'opening-to-final', 'sourceNodeId', 'opening-round', 'destinationNodeId', 'final-round', 'priority', 1, 'condition', jsonb_build_object('type', 'top_n', 'count', 8, 'rankingMetric', 'points'))
-    )
-  )
-  where id = seed_tournament_id;
 
   insert into public.tournament_registrations (
     tournament_id,
@@ -326,10 +315,14 @@ begin
     'accepting_players',
     128,
     'three-round-128-checkmate',
-    $three_round_format$
+    public.compact_tournament_format_v3($three_round_format$
     {
       "id": "three-round-128-checkmate",
       "name": "128-Player Three-Round Checkmate",
+      "startRequirement": {
+        "minimumEntrants": 128,
+        "exactEntrants": 128
+      },
       "placementPoints": {
         "1": 8,
         "2": 7,
@@ -480,29 +473,13 @@ begin
         }
       ]
     }
-    $three_round_format$::jsonb,
+    $three_round_format$::jsonb),
     null,
     null,
     seeded_at + interval '1 minute',
     seeded_at + interval '1 minute'
   )
   returning id into three_round_tournament_id;
-
-  update public.tournaments
-  set format_config = format_config || jsonb_build_object(
-    'schemaVersion', 2,
-    'startRequirement', jsonb_build_object('minimumEntrants', 128, 'exactEntrants', 128),
-    'nodes', jsonb_build_array(
-      (format_config -> 'rounds' -> 0) || jsonb_build_object('initialEntrantSlots', 'all', 'mergeSeeding', 'random'),
-      (format_config -> 'rounds' -> 1) || jsonb_build_object('mergeSeeding', 'random'),
-      (format_config -> 'rounds' -> 2) || jsonb_build_object('mergeSeeding', 'random')
-    ),
-    'edges', jsonb_build_array(
-      jsonb_build_object('id', 'opening-to-second', 'sourceNodeId', 'opening-round', 'destinationNodeId', 'second-round', 'priority', 1, 'condition', jsonb_build_object('type', 'top_n', 'count', 64, 'rankingMetric', 'points')),
-      jsonb_build_object('id', 'second-to-final', 'sourceNodeId', 'second-round', 'destinationNodeId', 'final-round', 'priority', 1, 'condition', jsonb_build_object('type', 'top_n', 'count', 8, 'rankingMetric', 'points'))
-    )
-  )
-  where id = three_round_tournament_id;
 
   insert into public.tournament_registrations (
     tournament_id,

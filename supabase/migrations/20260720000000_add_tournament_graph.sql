@@ -367,6 +367,9 @@ begin
     select * from public.tournament_edges where source_round_id = v_node.id and status = 'pending' order by priority, id
   loop
     v_count := coalesce((v_edge.condition ->> 'count')::integer, 0);
+    select coalesce(max(round_seed_number), 0) + 1 into v_temp_seed
+    from public.participant_round_scores
+    where round_id = v_edge.destination_round_id;
     for v_player in
       select scores.participant_id, row_number() over (
         order by scores.score desc, scores.round_seed_number asc, participants.display_name_at_start asc, participants.id::text
@@ -377,12 +380,10 @@ begin
       order by scores.score desc, scores.round_seed_number asc, participants.display_name_at_start asc, participants.id::text
       offset v_taken limit v_count
     loop
-      select coalesce(max(round_seed_number), 0) + 1 into v_temp_seed
-      from public.participant_round_scores
-      where round_id = v_edge.destination_round_id;
       insert into public.participant_round_scores (participant_id, round_id, round_seed_number, score, source_edge_id, source_rank)
       values (v_player.participant_id, v_edge.destination_round_id, v_temp_seed, 0, v_edge.id, v_player.source_rank)
       on conflict (participant_id, round_id) do update set source_edge_id = excluded.source_edge_id, source_rank = excluded.source_rank, score = 0;
+      v_temp_seed := v_temp_seed + 1;
       v_taken := v_taken + 1;
       v_total_advanced := v_total_advanced + 1;
     end loop;

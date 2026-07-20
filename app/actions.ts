@@ -9,7 +9,6 @@ import {
   finalizeTournamentNode,
   randomizePendingLobbyResults,
   registerTournamentPlayer,
-  progressTournamentRound,
   startTournament,
   updateLobbyResults,
 } from "@/lib/db/tournaments/api";
@@ -268,9 +267,14 @@ export async function randomizePendingLobbyResultsAction(formData: FormData) {
       createError: "Tournament was not found.",
     });
   }
+  if (!nodeId) {
+    redirectWithParams(detailPath, {
+      progressionError: "Select a tournament node before randomizing results.",
+    });
+  }
 
   try {
-    await randomizePendingLobbyResults({ tournamentId, nodeId: nodeId || undefined });
+    await randomizePendingLobbyResults({ tournamentId, nodeId });
   } catch (error) {
     redirectWithParams(detailPath, {
       progressionError:
@@ -306,31 +310,4 @@ export async function finalizeTournamentNodeAction(formData: FormData) {
   revalidatePath("/");
   revalidatePath(detailPath);
   redirectWithParams(detailPath, { progressed: "true", node: nodeId });
-}
-
-export async function progressTournamentRoundAction(formData: FormData) {
-  const tournamentId = getFormString(formData, "tournamentId");
-  const detailPath = `/tournaments/${tournamentId}`;
-
-  if (!tournamentId) {
-    redirectWithParams("/", {
-      createError: "Tournament was not found.",
-    });
-  }
-
-  try {
-    await progressTournamentRound({ tournamentId });
-  } catch (error) {
-    redirectWithParams(detailPath, {
-      progressionError:
-        error instanceof Error
-          ? error.message
-          : "The tournament round could not be progressed.",
-    });
-  }
-
-  revalidatePath("/");
-  revalidatePath(detailPath);
-  revalidatePath(`${detailPath}/lobbies`, "layout");
-  redirectWithParams(detailPath, { progressed: "true" });
 }

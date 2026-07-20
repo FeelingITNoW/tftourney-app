@@ -10,6 +10,8 @@ import {
 } from "../lib/tournament/validation/api";
 import { selectTournamentEntrants } from "../lib/tournament/start/api";
 import {
+  canonicalizeTournamentFormat,
+  getFormatGraph,
   getTournamentStartRequirement,
   selectOrderedTopNAdvancements,
   validateTournamentFormat,
@@ -113,6 +115,8 @@ test("default tournament format specifies fixed-game opening and checkmate final
   );
 
   assert.equal(format.isDefault, true);
+  assert.equal(format.schemaVersion, 3);
+  assert.equal("rounds" in format, false);
   assert.deepEqual(format.placementPoints, {
     "1": 8,
     "2": 7,
@@ -123,32 +127,20 @@ test("default tournament format specifies fixed-game opening and checkmate final
     "7": 2,
     "8": 1,
   });
-  assert.equal(format.rounds.length, 2);
-
-  const [openingRound, finalRound] = format.rounds;
-  assert.equal(openingRound.lobbySeeding, "snake");
-  assert.equal(openingRound.games, 6);
-  assert.equal(openingRound.reseed, 2);
-  assert.deepEqual(openingRound.standings.tieBreakers, [
-    { rankingMetric: "current_round_firsts", sortDirection: "desc" },
-    { rankingMetric: "round_entry_seed", sortDirection: "asc" },
-  ]);
-  assert.equal(openingRound.reseedStandings.rankingMetric, "tournament_points");
-  assert.deepEqual(openingRound.advancement, {
-    type: "top_n",
-    count: 8,
-    rankingMetric: "points",
-    destinationRoundId: "final-round",
-  });
-
-  assert.equal(finalRound.lobbySeeding, "random");
-  assert.equal(finalRound.games, undefined);
-  assert.equal(finalRound.reseed, 0);
-  assert.deepEqual(finalRound.winCondition, {
+  assert.equal(format.nodes.length, 2);
+  assert.equal(format.nodeDefaults.games, 6);
+  assert.equal(format.nodes[0].initialEntrantSlots, "all");
+  assert.equal(format.nodes[0].games, undefined);
+  assert.equal(format.nodes[1].lobbySeeding, "random");
+  assert.equal(format.nodes[1].reseed, 0);
+  assert.deepEqual(format.nodes[1].winCondition, {
     type: "checkmate",
     threshold: 18,
-    rankingMetric: "points",
   });
+  const graph = getFormatGraph(format);
+  assert.equal(graph.nodes[0]?.games, 6);
+  assert.equal(graph.nodes[1]?.games, undefined);
+  assert.equal(graph.edges[0]?.condition.rankingMetric, "points");
 });
 
 test("three-round 128-player format advances 128 to 64 to an eight-player checkmate final", () => {
@@ -164,14 +156,11 @@ test("three-round 128-player format advances 128 to 64 to an eight-player checkm
 
   const validation = validateTournamentFormat(format);
   assert.equal(validation.success, true, validation.errors.join(" "));
-  assert.equal(format.rounds.length, 3);
-  assert.equal(format.rounds[0].games, 6);
-  assert.equal(format.rounds[0].advancement.count, 64);
-  assert.equal(format.rounds[0].advancement.destinationRoundId, "second-round");
-  assert.equal(format.rounds[1].games, 6);
-  assert.equal(format.rounds[1].advancement.count, 8);
-  assert.equal(format.rounds[1].advancement.destinationRoundId, "final-round");
-  assert.equal(format.rounds[2].winCondition.type, "checkmate");
+  assert.equal(format.nodes.length, 3);
+  assert.equal(validation.data.nodes[0]?.games, 6);
+  assert.equal(validation.data.nodes[1]?.games, 6);
+  assert.equal(validation.data.nodes[2]?.winCondition?.type, "checkmate");
+  assert.deepEqual(validation.data.edges.map((edge) => edge.condition.count), [64, 8]);
 });
 
 test("validates game blocks, reseed bounds, destinations, and tie-breakers", () => {
@@ -184,7 +173,7 @@ test("validates game blocks, reseed bounds, destinations, and tie-breakers", () 
   const valid = validateTournamentFormat(format);
   assert.equal(valid.success, true);
 
-  format.rounds[0].reseed = format.rounds[0].games + 1;
+  format.nodeDefaults.reseed = format.nodeDefaults.games + 1;
   const invalid = validateTournamentFormat(format);
   assert.equal(invalid.success, false);
   assert.match(invalid.errors.join(" "), /reseed must be between 0 and games/);
@@ -193,41 +182,59 @@ test("validates game blocks, reseed bounds, destinations, and tie-breakers", () 
 test("requires eight entrants when a format includes checkmate", () => {
   assert.deepEqual(
     getTournamentStartRequirement({
-      rounds: [
-        { winCondition: { type: "highest_points_after_games" } },
-        { winCondition: { type: "checkmate" } },
-      ],
+      schemaVersion: 3,
+      startRequirement: { minimumEntrants: 8 },
     }),
     { minimumEntrants: 8, exactEntrants: null },
   );
 
   assert.deepEqual(
     getTournamentStartRequirement({
-      rounds: [{ winCondition: { type: "checkmate" } }],
+      schemaVersion: 3,
+      startRequirement: { minimumEntrants: 8, exactEntrants: 8 },
     }),
     { minimumEntrants: 8, exactEntrants: 8 },
   );
 });
 
-test("rejects non-final checkmate rounds without an eight-player destination", () => {
+test("rejects checkmate nodes with a non-zero reseed override", () => {
   const format = JSON.parse(
     readFileSync(
       join(process.cwd(), "lib/tournament/formats/default.json"),
       "utf8",
     ),
   );
-  format.rounds[0].games = undefined;
-  format.rounds[0].reseed = 0;
-  format.rounds[0].winCondition = {
+  format.nodes[0].reseed = 1;
+  format.nodes[0].winCondition = {
     type: "checkmate",
     threshold: 18,
-    rankingMetric: "points",
   };
 
   const result = validateTournamentFormat(format);
 
   assert.equal(result.success, false);
-  assert.match(result.errors.join(" "), /requires an eight-player round or final round/);
+  assert.match(result.errors.join(" "), /reseed must be zero/);
+});
+
+test("canonicalizes inherited node values and default edge metrics", () => {
+  const format = JSON.parse(readFileSync(join(process.cwd(), "lib/tournament/formats/default.json"), "utf8"));
+  const canonical = canonicalizeTournamentFormat(format);
+  assert.ok(canonical);
+  assert.equal("rounds" in canonical, false);
+  assert.equal(canonical.nodes[0].games, undefined);
+  assert.equal(canonical.edges[0].condition.rankingMetric, undefined);
+});
+
+test("rejects legacy round-based format snapshots", () => {
+  const result = validateTournamentFormat({
+    schemaVersion: 2,
+    id: "legacy",
+    name: "Legacy",
+    placementPoints: { "1": 8 },
+    rounds: [],
+  });
+  assert.equal(result.success, false);
+  assert.match(result.errors.join(" "), /schemaVersion must be 3|rounds is not supported/);
 });
 
 test("selects the earliest registered players when starting a tournament", () => {
@@ -314,11 +321,19 @@ test("routes ordered exclusive top-N edges and eliminates the remainder", () => 
 
 test("rejects graph cycles and duplicate edge priorities", () => {
   const format = {
-    schemaVersion: 2,
+    schemaVersion: 3,
     id: "graph",
     name: "Graph",
     placementPoints: { "1": 8 },
     startRequirement: { minimumEntrants: 8, exactEntrants: 8 },
+    nodeDefaults: {
+      mergeSeeding: "random",
+      lobbySeeding: "snake",
+      games: 1,
+      reseed: 0,
+      standings: { rankingMetric: "points", sortDirection: "desc", tieBreakers: [] },
+      reseedStandings: { rankingMetric: "points", sortDirection: "desc", tieBreakers: [] },
+    },
     nodes: [
       { id: "a", name: "A", initialEntrantSlots: "all", mergeSeeding: "random", lobbySeeding: "snake", games: 1, reseed: 0, standings: { rankingMetric: "points", sortDirection: "desc", tieBreakers: [] }, reseedStandings: { rankingMetric: "points", sortDirection: "desc", tieBreakers: [] } },
       { id: "b", name: "B", mergeSeeding: "random", lobbySeeding: "snake", games: 1, reseed: 0, standings: { rankingMetric: "points", sortDirection: "desc", tieBreakers: [] }, reseedStandings: { rankingMetric: "points", sortDirection: "desc", tieBreakers: [] } },

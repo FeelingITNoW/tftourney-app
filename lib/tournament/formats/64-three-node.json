@@ -1,45 +1,82 @@
 {
-  "schemaVersion": 2,
+  "schemaVersion": 3,
   "id": "64-three-node",
   "name": "64 Player Split and Final",
-  "startRequirement": { "minimumEntrants": 64, "exactEntrants": 64 },
-  "placementPoints": { "1": 8, "2": 7, "3": 6, "4": 5, "5": 4, "6": 3, "7": 2, "8": 1 },
+  "startRequirement": {
+    "minimumEntrants": 64,
+    "exactEntrants": 64
+  },
+  "placementPoints": {
+    "1": 8,
+    "2": 7,
+    "3": 6,
+    "4": 5,
+    "5": 4,
+    "6": 3,
+    "7": 2,
+    "8": 1
+  },
+  "nodeDefaults": {
+    "mergeSeeding": "random",
+    "lobbySeeding": "snake",
+    "games": 6,
+    "reseed": 2,
+    "standings": {
+      "rankingMetric": "points",
+      "sortDirection": "desc",
+      "tieBreakers": [
+        { "rankingMetric": "current_node_firsts", "sortDirection": "desc" },
+        { "rankingMetric": "node_entry_seed", "sortDirection": "asc" }
+      ]
+    },
+    "reseedStandings": {
+      "rankingMetric": "tournament_points",
+      "sortDirection": "desc",
+      "tieBreakers": [
+        { "rankingMetric": "current_node_firsts", "sortDirection": "desc" },
+        { "rankingMetric": "node_entry_seed", "sortDirection": "asc" }
+      ]
+    }
+  },
   "nodes": [
     {
       "id": "a",
       "name": "Node A",
-      "initialEntrantSlots": "all",
-      "mergeSeeding": "random",
-      "lobbySeeding": "snake",
-      "games": 6,
-      "reseed": 2,
-      "standings": { "rankingMetric": "points", "sortDirection": "desc", "tieBreakers": [{ "rankingMetric": "current_node_firsts", "sortDirection": "desc" }, { "rankingMetric": "node_entry_seed", "sortDirection": "asc" }] },
-      "reseedStandings": { "rankingMetric": "tournament_points", "sortDirection": "desc", "tieBreakers": [{ "rankingMetric": "current_node_firsts", "sortDirection": "desc" }, { "rankingMetric": "node_entry_seed", "sortDirection": "asc" }] }
+      "initialEntrantSlots": "all"
     },
     {
       "id": "b",
-      "name": "Node B",
-      "mergeSeeding": "random",
-      "lobbySeeding": "snake",
-      "games": 6,
-      "reseed": 2,
-      "standings": { "rankingMetric": "points", "sortDirection": "desc", "tieBreakers": [{ "rankingMetric": "current_node_firsts", "sortDirection": "desc" }, { "rankingMetric": "node_entry_seed", "sortDirection": "asc" }] },
-      "reseedStandings": { "rankingMetric": "tournament_points", "sortDirection": "desc", "tieBreakers": [{ "rankingMetric": "current_node_firsts", "sortDirection": "desc" }, { "rankingMetric": "node_entry_seed", "sortDirection": "asc" }] }
+      "name": "Node B"
     },
     {
       "id": "c",
       "name": "Final Node C",
       "mergeSeeding": "source_rank_interleave",
       "lobbySeeding": "random",
-      "games": 6,
-      "reseed": 0,
-      "standings": { "rankingMetric": "points", "sortDirection": "desc", "tieBreakers": [{ "rankingMetric": "current_node_firsts", "sortDirection": "desc" }, { "rankingMetric": "node_entry_seed", "sortDirection": "asc" }] },
-      "reseedStandings": { "rankingMetric": "tournament_points", "sortDirection": "desc", "tieBreakers": [{ "rankingMetric": "current_node_firsts", "sortDirection": "desc" }, { "rankingMetric": "node_entry_seed", "sortDirection": "asc" }] }
+      "reseed": 0
     }
   ],
   "edges": [
-    { "id": "a-to-c", "sourceNodeId": "a", "destinationNodeId": "c", "priority": 1, "condition": { "type": "top_n", "count": 4, "rankingMetric": "points" } },
-    { "id": "a-to-b", "sourceNodeId": "a", "destinationNodeId": "b", "priority": 2, "condition": { "type": "top_n", "count": 56, "rankingMetric": "points" } },
-    { "id": "b-to-c", "sourceNodeId": "b", "destinationNodeId": "c", "priority": 1, "condition": { "type": "top_n", "count": 4, "rankingMetric": "points" } }
+    {
+      "id": "a-to-c",
+      "sourceNodeId": "a",
+      "destinationNodeId": "c",
+      "priority": 1,
+      "condition": { "type": "top_n", "count": 4 }
+    },
+    {
+      "id": "a-to-b",
+      "sourceNodeId": "a",
+      "destinationNodeId": "b",
+      "priority": 2,
+      "condition": { "type": "top_n", "count": 56 }
+    },
+    {
+      "id": "b-to-c",
+      "sourceNodeId": "b",
+      "destinationNodeId": "c",
+      "priority": 1,
+      "condition": { "type": "top_n", "count": 4 }
+    }
   ]
 }

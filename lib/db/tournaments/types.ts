@@ -8,8 +8,6 @@ export type TournamentStatus =
   | "cancelled";
 
 export type TournamentProgressionAction =
-  | "create_next_round"
-  | "complete_tournament"
   | "finalize_node"
   | null;
 
@@ -25,13 +23,6 @@ export type TournamentRoundProgress = {
   currentBlockEndGame: number | null;
   nextReseedGame: number | null;
   isComplete: boolean;
-};
-
-export type TournamentNextRoundMetadata = {
-  roundNumber: number;
-  roundName: string;
-  destinationRoundId: string;
-  advancementCount: number;
 };
 
 export type TournamentSummary = {
@@ -139,7 +130,6 @@ export type TournamentDetail = Omit<
   gameScores: TournamentGameScore[];
   scores: TournamentScore[];
   roundProgress: TournamentRoundProgress | null;
-  nextRound: TournamentNextRoundMetadata | null;
   progressionAction: TournamentProgressionAction;
   nodes: TournamentNode[];
   edges: TournamentEdge[];
@@ -201,7 +191,7 @@ export type TournamentRoundRow = {
   tournament_id?: string | number;
   round_number: number;
   format_round_id: string | null;
-  status: "pending" | "active" | "completed" | "cancelled";
+  status: "pending" | "active" | "completed" | "cancelled" | "skipped";
 };
 
 export type TournamentLobbyRow = {
@@ -272,7 +262,7 @@ export type RandomizePendingLobbyResultsResult = {
 
 export type RandomizePendingLobbyResultsInput = {
   tournamentId: string;
-  nodeId?: string;
+  nodeId: string;
 };
 
 export type FinalizeTournamentNodeInput = {
@@ -285,16 +275,5 @@ export type FinalizeTournamentNodeResult = {
   completed_node_id: string;
   activated_node_ids: string[];
   skipped_node_ids: string[];
-  advanced_player_count: number;
-};
-
-export type ProgressTournamentRoundInput = {
-  tournamentId: string;
-};
-
-export type ProgressTournamentRoundResult = {
-  transition_type: "round_created" | "tournament_completed";
-  completed_round_id: string;
-  new_round_id: string | null;
   advanced_player_count: number;
 };

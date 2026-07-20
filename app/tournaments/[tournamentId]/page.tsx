@@ -3,7 +3,6 @@ import { notFound } from "next/navigation";
 import {
   deleteTournamentAction,
   finalizeTournamentNodeAction,
-  progressTournamentRoundAction,
   randomizePendingLobbyResultsAction,
   registerPlayerAction,
   startTournamentAction,
@@ -471,32 +470,18 @@ export default async function TournamentPage({
 
                       {tournament.progressionAction ? (
                         <div className="mt-5 rounded-lg border border-amber-200 bg-amber-50 p-5">
-                          <h3 className="text-lg font-semibold text-amber-950">
-                            {tournament.progressionAction === "finalize_node"
-                              ? "Finalize current node"
-                              : tournament.progressionAction === "complete_tournament"
-                              ? "Complete tournament"
-                              : `Create Round ${tournament.nextRound?.roundNumber}`}
-                          </h3>
+                          <h3 className="text-lg font-semibold text-amber-950">Finalize current node</h3>
                           <p className="mt-2 text-sm text-amber-900">
-                            {tournament.progressionAction === "finalize_node"
-                              ? "All games are scored. Finalizing this node will resolve its ordered advancement edges and activate any ready destinations."
-                              : tournament.progressionAction === "complete_tournament"
-                              ? "All configured games are scored. This final action locks the tournament."
-                              : `${tournament.nextRound?.advancementCount} player${tournament.nextRound?.advancementCount === 1 ? "" : "s"} advance to ${tournament.nextRound?.roundName}.`}
+                            All games are scored. Finalizing this node will resolve its ordered advancement edges and activate any ready destinations.
                           </p>
-                          <form action={tournament.progressionAction === "finalize_node" ? finalizeTournamentNodeAction : progressTournamentRoundAction} className="mt-4">
+                          <form action={finalizeTournamentNodeAction} className="mt-4">
                             <input name="tournamentId" type="hidden" value={tournament.id} />
-                            {tournament.progressionAction === "finalize_node" ? <input name="nodeId" type="hidden" value={tournament.selectedNodeId ?? ""} /> : null}
+                            <input name="nodeId" type="hidden" value={tournament.selectedNodeId ?? ""} />
                             <button
                               className="flex h-11 w-full items-center justify-center rounded-md bg-amber-700 px-4 text-sm font-semibold text-white transition hover:bg-amber-800 focus:outline-none focus:ring-2 focus:ring-amber-600 focus:ring-offset-2 sm:w-auto"
                               type="submit"
                             >
-                              {tournament.progressionAction === "finalize_node"
-                                ? "Finalize node and resolve edges"
-                                : tournament.progressionAction === "complete_tournament"
-                                ? "Complete tournament"
-                                : `Create Round ${tournament.nextRound?.roundNumber} — Top ${tournament.nextRound?.advancementCount} advance`}
+                              Finalize node and resolve edges
                             </button>
                           </form>
                         </div>

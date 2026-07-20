@@ -22,9 +22,6 @@ import type {
   TournamentScoreRow,
   TournamentRow,
   TournamentSummary,
-  ProgressTournamentRoundInput,
-  ProgressTournamentRoundResult,
-  TournamentNextRoundMetadata,
   TournamentRoundProgress,
   TournamentProgressionAction,
   TournamentEdge,
@@ -37,8 +34,8 @@ import type {
   UpdateLobbyResultsInput,
   UpdateLobbyResultsResult,
 } from "./types";
-import type { TournamentNodeFormat, TournamentRoundFormat } from "@/lib/tournament/formats/types";
-import { getFormatGraph, getTournamentStartRequirement, withLegacyRoundSnapshot } from "../../tournament/formats/api";
+import type { TournamentNodeFormat } from "@/lib/tournament/formats/types";
+import { canonicalizeTournamentFormat, getFormatGraph, getTournamentStartRequirement } from "../../tournament/formats/api";
 import { resolveCheckmateOutcome } from "../../tournament/checkmate/api";
 
 export const TOURNAMENT_STATUS_ACCEPTING_PLAYERS = "accepting_players";
@@ -49,11 +46,6 @@ const tournamentSelect =
   "id,name,max_players,format_id,status,current_round_id,format_config,created_at";
 
 const LOBBY_PARTICIPANT_BATCH_SIZE = 64;
-
-type StoredTournamentFormat = {
-  rounds?: Array<Record<string, unknown>>;
-  nodes?: Array<Record<string, unknown>>;
-};
 
 function splitIntoBatches<T>(values: T[], batchSize: number): T[][] {
   const batches: T[][] = [];
@@ -91,35 +83,14 @@ async function fetchLobbyParticipants(
 function getConfiguredRound(
   formatConfig: unknown,
   formatRoundId: string | null | undefined,
-): TournamentRoundFormat | null {
-  if (
-    !formatRoundId ||
-    typeof formatConfig !== "object" ||
-    formatConfig === null
-  ) {
-    return null;
-  }
-
-  const storedFormat = formatConfig as StoredTournamentFormat;
-  const rounds = storedFormat.nodes ?? storedFormat.rounds;
-  const configuredRound = rounds?.find((round) => round.id === formatRoundId);
-
-  if (!configuredRound) {
-    return null;
-  }
-
-  return {
-    ...configuredRound,
-    ...(configuredRound.games === undefined
-      ? {}
-      : { games: Number(configuredRound.games) }),
-    reseed: Number(configuredRound.reseed ?? 0),
-  } as unknown as TournamentNodeFormat;
+): TournamentNodeFormat | null {
+  if (!formatRoundId) return null;
+  return getFormatGraph(formatConfig).nodes.find((node) => node.id === formatRoundId) ?? null;
 }
 
 function getRoundProgress(
   lobbies: TournamentLobby[],
-  configuredRound: TournamentRoundFormat | null,
+  configuredRound: TournamentNodeFormat | null,
 ): TournamentRoundProgress | null {
   if (!configuredRound) {
     return null;
@@ -217,37 +188,11 @@ function getRoundProgress(
 }
 
 function currentCheckmateCondition(
-  configuredRound: TournamentRoundFormat,
-): Extract<NonNullable<TournamentRoundFormat["winCondition"]>, { type: "checkmate" }> | null {
+  configuredRound: TournamentNodeFormat,
+): Extract<NonNullable<TournamentNodeFormat["winCondition"]>, { type: "checkmate" }> | null {
   return configuredRound.winCondition?.type === "checkmate"
     ? configuredRound.winCondition
     : null;
-}
-
-function getNextRoundMetadata(
-  currentRound: TournamentRoundRow | null,
-  currentFormatRound: TournamentRoundFormat | null,
-  formatConfig: unknown,
-): TournamentNextRoundMetadata | null {
-  const advancement = currentFormatRound?.advancement;
-  if (!currentRound || !advancement) {
-    return null;
-  }
-
-  const destinationRound = getConfiguredRound(
-    formatConfig,
-    advancement.destinationRoundId,
-  );
-  if (!destinationRound) {
-    return null;
-  }
-
-  return {
-    roundNumber: currentRound.round_number + 1,
-    roundName: destinationRound.name,
-    destinationRoundId: advancement.destinationRoundId,
-    advancementCount: advancement.count,
-  };
 }
 
 function mapTournamentRow(row: TournamentRow): Omit<
@@ -318,7 +263,11 @@ export async function createTournament(
       name: input.name,
       max_players: input.playerCount,
       format_id: input.formatId,
-      format_config: withLegacyRoundSnapshot(input.formatConfig),
+      format_config: (() => {
+        const canonical = canonicalizeTournamentFormat(input.formatConfig);
+        if (!canonical) throw new Error("Invalid tournament format configuration.");
+        return canonical;
+      })(),
       status: TOURNAMENT_STATUS_ACCEPTING_PLAYERS,
     },
   });
@@ -596,21 +545,15 @@ export async function getTournamentDetail(
     currentRound?.format_round_id,
   );
   const roundProgress = getRoundProgress(mappedLobbies, currentFormatRound);
-  const nextRound = getNextRoundMetadata(
-    currentRound ?? null,
-    currentFormatRound,
-    tournament.format_config,
-  );
   const activeNodeIds = rounds
     .filter((round) => round.status === "active")
     .map((round) => String(round.id));
   const progressionAction: TournamentProgressionAction =
-    tournament.status === "in_progress" && currentRound?.status === "active" && roundProgress?.isComplete
-      ? isGraphFormat
-        ? "finalize_node"
-        : nextRound
-          ? "create_next_round"
-          : "complete_tournament"
+    tournament.status === "in_progress" &&
+    currentRound?.status === "active" &&
+    roundProgress?.isComplete &&
+    isGraphFormat
+      ? "finalize_node"
       : null;
 
   const graph = getFormatGraph(tournament.format_config);
@@ -679,7 +622,6 @@ export async function getTournamentDetail(
       .filter((score): score is TournamentScore => score !== null)
       .sort((a, b) => a.seedNumber - b.seedNumber),
     roundProgress,
-    nextRound,
     progressionAction,
     nodes,
     edges: edgeRows.length
@@ -816,9 +758,7 @@ export async function randomizePendingLobbyResults(
 ): Promise<RandomizePendingLobbyResultsResult> {
   const rows = await supabaseRestRequest<RandomizePendingLobbyResultsResult[]>("rpc/randomize_pending_lobby_results", {
     method: "POST",
-    body: input.nodeId
-      ? { p_tournament_id: input.tournamentId, p_node_id: input.nodeId }
-      : { p_tournament_id: input.tournamentId },
+    body: { p_tournament_id: input.tournamentId, p_node_id: input.nodeId },
   });
   const result = rows[0];
 
@@ -844,26 +784,5 @@ export async function finalizeTournamentNode(
   );
   const result = rows[0];
   if (!result) throw new Error("Database did not return the node transition.");
-  return result;
-}
-
-export async function progressTournamentRound(
-  input: ProgressTournamentRoundInput,
-): Promise<ProgressTournamentRoundResult> {
-  const rows = await supabaseRestRequest<ProgressTournamentRoundResult[]>(
-    "rpc/progress_tournament_round",
-    {
-      method: "POST",
-      body: {
-        p_tournament_id: input.tournamentId,
-      },
-    },
-  );
-  const result = rows[0];
-
-  if (!result) {
-    throw new Error("Database did not return the round transition.");
-  }
-
   return result;
 }
