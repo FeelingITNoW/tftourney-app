@@ -2,6 +2,11 @@
   "id": "default",
   "name": "Default TFT Tournament Format",
   "isDefault": true,
+  "schemaVersion": 2,
+  "startRequirement": {
+    "minimumEntrants": 8,
+    "exactEntrants": null
+  },
   "placementPoints": {
     "1": 8,
     "2": 7,
@@ -96,6 +101,70 @@
         "threshold": 18,
         "rankingMetric": "points"
       }
+    }
+  ],
+  "nodes": [
+    {
+      "id": "opening-round",
+      "name": "Opening Round",
+      "initialEntrantSlots": "all",
+      "mergeSeeding": "random",
+      "lobbySeeding": "snake",
+      "games": 6,
+      "reseed": 2,
+      "standings": {
+        "rankingMetric": "points",
+        "sortDirection": "desc",
+        "tieBreakers": [
+          { "rankingMetric": "current_node_firsts", "sortDirection": "desc" },
+          { "rankingMetric": "node_entry_seed", "sortDirection": "asc" }
+        ]
+      },
+      "reseedStandings": {
+        "rankingMetric": "tournament_points",
+        "sortDirection": "desc",
+        "tieBreakers": [
+          { "rankingMetric": "current_node_firsts", "sortDirection": "desc" },
+          { "rankingMetric": "node_entry_seed", "sortDirection": "asc" }
+        ]
+      }
+    },
+    {
+      "id": "final-round",
+      "name": "Final Round",
+      "mergeSeeding": "random",
+      "lobbySeeding": "random",
+      "reseed": 0,
+      "standings": {
+        "rankingMetric": "points",
+        "sortDirection": "desc",
+        "tieBreakers": [
+          { "rankingMetric": "current_node_firsts", "sortDirection": "desc" },
+          { "rankingMetric": "node_entry_seed", "sortDirection": "asc" }
+        ]
+      },
+      "reseedStandings": {
+        "rankingMetric": "tournament_points",
+        "sortDirection": "desc",
+        "tieBreakers": [
+          { "rankingMetric": "current_node_firsts", "sortDirection": "desc" },
+          { "rankingMetric": "node_entry_seed", "sortDirection": "asc" }
+        ]
+      },
+      "winCondition": {
+        "type": "checkmate",
+        "threshold": 18,
+        "rankingMetric": "points"
+      }
+    }
+  ],
+  "edges": [
+    {
+      "id": "opening-to-final",
+      "sourceNodeId": "opening-round",
+      "destinationNodeId": "final-round",
+      "priority": 1,
+      "condition": { "type": "top_n", "count": 8, "rankingMetric": "points" }
     }
   ]
 }

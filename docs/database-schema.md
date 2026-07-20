@@ -189,3 +189,29 @@ pending lobbies in the active game block and runs the updates in one transaction
 Existing results are preserved. Once a later reseeded block exists, result edits
 to earlier blocks are rejected so persisted lobby assignments cannot diverge from
 the standings that produced them.
+
+## Graph tournament runtime
+
+Format snapshots with `schemaVersion: 2` define `nodes` and `edges`. A node
+contains the existing game count, reseed block, lobby seeding, standings, and
+win-condition settings. An edge contains a source node, destination node,
+priority, and an ordered exclusive `top_n` condition. Edges are evaluated by
+priority and consume players from the source standings; unmatched players are
+eliminated.
+
+The `rounds` table is used as the runtime node table during the graph migration.
+`rounds.format_round_id` identifies the configured node and `rounds.status` may
+also be `skipped`. `tournament_edges` stores the runtime edge snapshot and
+resolution state. `participant_round_scores.source_edge_id` and `source_rank`
+retain the transfer audit trail. A tournament may have several active
+rounds/nodes at once; `tournaments.current_round_id` is retained only as a
+legacy display pointer and is not used for graph progression.
+
+`start_tournament(tournament_id, initial_assignments)` creates every graph node
+and edge, assigns explicit registrations first, randomly distributes remaining
+entrants among entry nodes, and generates lobbies for every active root.
+`finalize_tournament_node(tournament_id, node_id)` locks a completed node,
+resolves its outgoing edges, and activates a destination only after all of its
+incoming edges resolve. Empty destinations are marked `skipped` and propagate
+zero-player edges. `randomize_pending_lobby_results(tournament_id, node_id)`
+is the graph-aware test helper.

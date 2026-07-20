@@ -1,6 +1,11 @@
 {
   "id": "three-round-128-checkmate",
   "name": "128-Player Three-Round Checkmate",
+  "schemaVersion": 2,
+  "startRequirement": {
+    "minimumEntrants": 128,
+    "exactEntrants": 128
+  },
   "placementPoints": {
     "1": 8,
     "2": 7,
@@ -149,5 +154,42 @@
         "rankingMetric": "points"
       }
     }
+  ],
+  "nodes": [
+    {
+      "id": "opening-round",
+      "name": "Opening Round",
+      "initialEntrantSlots": "all",
+      "mergeSeeding": "random",
+      "lobbySeeding": "snake",
+      "games": 6,
+      "reseed": 2,
+      "standings": { "rankingMetric": "points", "sortDirection": "desc", "tieBreakers": [{ "rankingMetric": "current_node_firsts", "sortDirection": "desc" }, { "rankingMetric": "node_entry_seed", "sortDirection": "asc" }] },
+      "reseedStandings": { "rankingMetric": "tournament_points", "sortDirection": "desc", "tieBreakers": [{ "rankingMetric": "current_node_firsts", "sortDirection": "desc" }, { "rankingMetric": "node_entry_seed", "sortDirection": "asc" }] }
+    },
+    {
+      "id": "second-round",
+      "name": "Second Round",
+      "mergeSeeding": "random",
+      "lobbySeeding": "snake",
+      "games": 6,
+      "reseed": 2,
+      "standings": { "rankingMetric": "points", "sortDirection": "desc", "tieBreakers": [{ "rankingMetric": "current_node_firsts", "sortDirection": "desc" }, { "rankingMetric": "node_entry_seed", "sortDirection": "asc" }] },
+      "reseedStandings": { "rankingMetric": "tournament_points", "sortDirection": "desc", "tieBreakers": [{ "rankingMetric": "current_node_firsts", "sortDirection": "desc" }, { "rankingMetric": "node_entry_seed", "sortDirection": "asc" }] }
+    },
+    {
+      "id": "final-round",
+      "name": "Checkmate Final",
+      "mergeSeeding": "random",
+      "lobbySeeding": "random",
+      "reseed": 0,
+      "standings": { "rankingMetric": "points", "sortDirection": "desc", "tieBreakers": [{ "rankingMetric": "current_node_firsts", "sortDirection": "desc" }, { "rankingMetric": "node_entry_seed", "sortDirection": "asc" }] },
+      "reseedStandings": { "rankingMetric": "tournament_points", "sortDirection": "desc", "tieBreakers": [{ "rankingMetric": "current_node_firsts", "sortDirection": "desc" }, { "rankingMetric": "node_entry_seed", "sortDirection": "asc" }] },
+      "winCondition": { "type": "checkmate", "threshold": 18, "rankingMetric": "points" }
+    }
+  ],
+  "edges": [
+    { "id": "opening-to-second", "sourceNodeId": "opening-round", "destinationNodeId": "second-round", "priority": 1, "condition": { "type": "top_n", "count": 64, "rankingMetric": "points" } },
+    { "id": "second-to-final", "sourceNodeId": "second-round", "destinationNodeId": "final-round", "priority": 1, "condition": { "type": "top_n", "count": 8, "rankingMetric": "points" } }
   ]
 }

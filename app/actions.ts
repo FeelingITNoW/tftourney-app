@@ -6,6 +6,7 @@ import defaultTournamentFormat from "@/lib/tournament/formats/default.json";
 import {
   createTournament,
   deleteTournament,
+  finalizeTournamentNode,
   randomizePendingLobbyResults,
   registerTournamentPlayer,
   progressTournamentRound,
@@ -200,9 +201,11 @@ export async function updateLobbyScoresAction(formData: FormData) {
   const placements = getFormStrings(formData, "placement");
   const returnGame = getFormString(formData, "returnGame");
   const returnPage = getFormString(formData, "returnPage");
+  const returnNode = getFormString(formData, "returnNode");
   const returnParams = {
     game: returnGame,
     page: returnPage,
+    node: returnNode,
   };
 
   if (participantIds.length !== placements.length) {
@@ -251,6 +254,7 @@ export async function updateLobbyScoresAction(formData: FormData) {
 
 export async function randomizePendingLobbyResultsAction(formData: FormData) {
   const tournamentId = getFormString(formData, "tournamentId");
+  const nodeId = getFormString(formData, "nodeId");
   const returnGame = getFormString(formData, "game");
   const returnPage = getFormString(formData, "page");
   const detailPath = `/tournaments/${tournamentId}`;
@@ -266,7 +270,7 @@ export async function randomizePendingLobbyResultsAction(formData: FormData) {
   }
 
   try {
-    await randomizePendingLobbyResults({ tournamentId });
+    await randomizePendingLobbyResults({ tournamentId, nodeId: nodeId || undefined });
   } catch (error) {
     redirectWithParams(detailPath, {
       progressionError:
@@ -280,7 +284,28 @@ export async function randomizePendingLobbyResultsAction(formData: FormData) {
   revalidatePath("/");
   revalidatePath(detailPath);
   revalidatePath(`${detailPath}/lobbies`, "layout");
-  redirectWithParams(detailPath, { randomized: "true", ...returnParams });
+  redirectWithParams(detailPath, { randomized: "true", node: nodeId, ...returnParams });
+}
+
+export async function finalizeTournamentNodeAction(formData: FormData) {
+  const tournamentId = getFormString(formData, "tournamentId");
+  const nodeId = getFormString(formData, "nodeId");
+  const detailPath = `/tournaments/${tournamentId}`;
+  if (!tournamentId || !nodeId) {
+    redirectWithParams(detailPath, { progressionError: "Tournament node was not found." });
+  }
+  try {
+    await finalizeTournamentNode({ tournamentId, nodeId });
+  } catch (error) {
+    redirectWithParams(detailPath, {
+      progressionError:
+        error instanceof Error ? error.message : "The tournament node could not be finalized.",
+      node: nodeId,
+    });
+  }
+  revalidatePath("/");
+  revalidatePath(detailPath);
+  redirectWithParams(detailPath, { progressed: "true", node: nodeId });
 }
 
 export async function progressTournamentRoundAction(formData: FormData) {

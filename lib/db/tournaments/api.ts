@@ -27,12 +27,18 @@ import type {
   TournamentNextRoundMetadata,
   TournamentRoundProgress,
   TournamentProgressionAction,
+  TournamentEdge,
+  TournamentEdgeRow,
+  TournamentNode,
+  FinalizeTournamentNodeInput,
+  FinalizeTournamentNodeResult,
   RandomizePendingLobbyResultsResult,
+  RandomizePendingLobbyResultsInput,
   UpdateLobbyResultsInput,
   UpdateLobbyResultsResult,
 } from "./types";
-import type { TournamentRoundFormat } from "@/lib/tournament/formats/types";
-import { getTournamentStartRequirement } from "../../tournament/formats/api";
+import type { TournamentNodeFormat, TournamentRoundFormat } from "@/lib/tournament/formats/types";
+import { getFormatGraph, getTournamentStartRequirement, withLegacyRoundSnapshot } from "../../tournament/formats/api";
 import { resolveCheckmateOutcome } from "../../tournament/checkmate/api";
 
 export const TOURNAMENT_STATUS_ACCEPTING_PLAYERS = "accepting_players";
@@ -46,6 +52,7 @@ const LOBBY_PARTICIPANT_BATCH_SIZE = 64;
 
 type StoredTournamentFormat = {
   rounds?: Array<Record<string, unknown>>;
+  nodes?: Array<Record<string, unknown>>;
 };
 
 function splitIntoBatches<T>(values: T[], batchSize: number): T[][] {
@@ -93,7 +100,8 @@ function getConfiguredRound(
     return null;
   }
 
-  const rounds = (formatConfig as StoredTournamentFormat).rounds;
+  const storedFormat = formatConfig as StoredTournamentFormat;
+  const rounds = storedFormat.nodes ?? storedFormat.rounds;
   const configuredRound = rounds?.find((round) => round.id === formatRoundId);
 
   if (!configuredRound) {
@@ -106,7 +114,7 @@ function getConfiguredRound(
       ? {}
       : { games: Number(configuredRound.games) }),
     reseed: Number(configuredRound.reseed ?? 0),
-  } as unknown as TournamentRoundFormat;
+  } as unknown as TournamentNodeFormat;
 }
 
 function getRoundProgress(
@@ -256,7 +264,21 @@ function mapTournamentRow(row: TournamentRow): Omit<
     currentRoundId:
       row.current_round_id === null ? null : String(row.current_round_id),
     currentRoundNumber: null,
+    activeNodeIds: row.current_round_id === null ? [] : [String(row.current_round_id)],
     createdAt: row.created_at,
+  };
+}
+
+function mapTournamentEdgeRow(row: TournamentEdgeRow): TournamentEdge {
+  return {
+    id: String(row.id),
+    formatEdgeId: row.format_edge_id,
+    sourceNodeId: String(row.source_round_id),
+    destinationNodeId: String(row.destination_round_id),
+    priority: row.priority,
+    condition: row.condition,
+    status: row.status,
+    advancedPlayerCount: row.advanced_player_count,
   };
 }
 
@@ -296,7 +318,7 @@ export async function createTournament(
       name: input.name,
       max_players: input.playerCount,
       format_id: input.formatId,
-      format_config: input.formatConfig,
+      format_config: withLegacyRoundSnapshot(input.formatConfig),
       status: TOURNAMENT_STATUS_ACCEPTING_PLAYERS,
     },
   });
@@ -364,21 +386,21 @@ export async function listTournaments(): Promise<TournamentSummary[]> {
     );
   }
 
-  const currentRoundIds = tournaments
-    .map((tournament) => tournament.current_round_id)
-    .filter((roundId): roundId is string | number => roundId !== null)
-    .map(String);
-  const rounds = currentRoundIds.length
-    ? await supabaseRestRequest<Pick<TournamentRoundRow, "id" | "round_number">[]>("rounds", {
+  const rounds = tournamentIds.length
+    ? await supabaseRestRequest<Pick<TournamentRoundRow, "id" | "round_number" | "tournament_id" | "status">[]>("rounds", {
         query: {
-          select: "id,round_number",
-          id: `in.(${currentRoundIds.join(",")})`,
+          select: "id,round_number,tournament_id,status",
+          tournament_id: `in.(${tournamentIds.join(",")})`,
         },
       })
     : [];
-  const currentRoundNumberById = new Map(
-    rounds.map((round) => [String(round.id), round.round_number]),
-  );
+  const currentRoundNumberById = new Map(rounds.map((round) => [String(round.id), round.round_number]));
+  const activeNodeIdsByTournament = new Map<string, string[]>();
+  for (const round of rounds) {
+    if (round.status !== "active") continue;
+    const key = String(round.tournament_id);
+    activeNodeIdsByTournament.set(key, [...(activeNodeIdsByTournament.get(key) ?? []), String(round.id)]);
+  }
 
   return tournaments.map((tournament) => ({
     ...mapTournamentRow(tournament),
@@ -386,6 +408,8 @@ export async function listTournaments(): Promise<TournamentSummary[]> {
       tournament.current_round_id === null
         ? null
         : currentRoundNumberById.get(String(tournament.current_round_id)) ?? null,
+    activeNodeIds: activeNodeIdsByTournament.get(String(tournament.id)) ??
+      (tournament.current_round_id === null ? [] : [String(tournament.current_round_id)]),
     registeredPlayerCount:
       playerCountByTournamentId.get(String(tournament.id)) ?? 0,
   }));
@@ -393,6 +417,7 @@ export async function listTournaments(): Promise<TournamentSummary[]> {
 
 export async function getTournamentDetail(
   tournamentId: string,
+  selectedNodeId?: string,
 ): Promise<TournamentDetail | null> {
   const tournaments = await supabaseRestRequest<TournamentRow[]>("tournaments", {
     query: {
@@ -453,9 +478,23 @@ export async function getTournamentDetail(
       order: "round_number.asc",
     },
   });
+  const isGraphFormat =
+    typeof tournament.format_config === "object" &&
+    tournament.format_config !== null &&
+    Array.isArray((tournament.format_config as { nodes?: unknown }).nodes);
+  const edgeRows = isGraphFormat
+    ? await supabaseRestRequest<TournamentEdgeRow[]>("tournament_edges", {
+        query: {
+          select:
+            "id,tournament_id,format_edge_id,source_round_id,destination_round_id,priority,condition,status,advanced_player_count",
+          tournament_id: `eq.${tournamentId}`,
+          order: "priority.asc,id.asc",
+        },
+      })
+    : [];
   const currentRound = rounds.find(
-    (round) => String(round.id) === String(tournament.current_round_id),
-  );
+    (round) => String(round.id) === String(selectedNodeId ?? tournament.current_round_id),
+  ) ?? rounds.find((round) => round.status === "active") ?? null;
   const roundIds = rounds.map((round) => round.id);
   const allLobbies = roundIds.length
     ? await supabaseRestRequest<TournamentLobbyRow[]>("lobbies", {
@@ -467,7 +506,7 @@ export async function getTournamentDetail(
       })
     : [];
   const lobbies = allLobbies.filter(
-    (lobby) => String(lobby.round_id) === String(tournament.current_round_id),
+    (lobby) => String(lobby.round_id) === String(currentRound?.id ?? tournament.current_round_id),
   );
   const lobbyIds = allLobbies.map((lobby) => lobby.id);
   const lobbyParticipants = lobbyIds.length
@@ -562,12 +601,46 @@ export async function getTournamentDetail(
     currentFormatRound,
     tournament.format_config,
   );
+  const activeNodeIds = rounds
+    .filter((round) => round.status === "active")
+    .map((round) => String(round.id));
   const progressionAction: TournamentProgressionAction =
-    tournament.status === "in_progress" && roundProgress?.isComplete
-      ? nextRound
-        ? "create_next_round"
-        : "complete_tournament"
+    tournament.status === "in_progress" && currentRound?.status === "active" && roundProgress?.isComplete
+      ? isGraphFormat
+        ? "finalize_node"
+        : nextRound
+          ? "create_next_round"
+          : "complete_tournament"
       : null;
+
+  const graph = getFormatGraph(tournament.format_config);
+  const nodes: TournamentNode[] = rounds.length
+    ? rounds.map((round) => {
+    const nodeScores = scores.filter((score) => String(score.round_id) === String(round.id));
+    const nodeGames = allLobbies.filter((lobby) => String(lobby.round_id) === String(round.id)).map((lobby) => lobby.game_number);
+    return {
+      id: String(round.id),
+      roundNumber: round.round_number,
+      formatNodeId: round.format_round_id,
+      name:
+        graph.nodes.find((node) => node.id === round.format_round_id)?.name ??
+        round.format_round_id,
+      status: round.status,
+      entrantCount: nodeScores.length,
+      completedGames: new Set(nodeGames).size,
+      configuredGames: getConfiguredRound(tournament.format_config, round.format_round_id)?.games ?? null,
+    };
+  })
+    : graph.nodes.map((node, index) => ({
+        id: node.id,
+        roundNumber: index + 1,
+        formatNodeId: node.id,
+        name: node.name,
+        status: "pending" as const,
+        entrantCount: 0,
+        completedGames: 0,
+        configuredGames: node.games ?? null,
+      }));
 
   return {
     ...mapTournamentRow(tournament),
@@ -578,6 +651,9 @@ export async function getTournamentDetail(
     rounds: rounds.map((round) => ({
       id: String(round.id),
       roundNumber: round.round_number,
+      formatNodeId: round.format_round_id,
+      name: graph.nodes.find((node) => node.id === round.format_round_id)?.name ?? null,
+      status: round.status,
     })),
     lobbies: mappedLobbies,
     gameScores,
@@ -605,7 +681,29 @@ export async function getTournamentDetail(
     roundProgress,
     nextRound,
     progressionAction,
+    nodes,
+    edges: edgeRows.length
+      ? edgeRows.map(mapTournamentEdgeRow)
+      : graph.edges.map((edge) => ({
+          id: edge.id,
+          formatEdgeId: edge.id,
+          sourceNodeId: edge.sourceNodeId,
+          destinationNodeId: edge.destinationNodeId,
+          priority: edge.priority,
+          condition: edge.condition,
+          status: "pending" as const,
+          advancedPlayerCount: 0,
+        })),
+    activeNodeIds,
+    selectedNodeId: currentRound ? String(currentRound.id) : null,
   };
+}
+
+export async function getTournamentNodeIdForLobby(lobbyId: string): Promise<string | null> {
+  const rows = await supabaseRestRequest<Pick<TournamentLobbyRow, "round_id">[]>("lobbies", {
+    query: { select: "round_id", id: `eq.${lobbyId}`, limit: "1" },
+  });
+  return rows[0] ? String(rows[0].round_id) : null;
 }
 
 export async function registerTournamentPlayer(
@@ -674,6 +772,7 @@ export async function startTournament(
       method: "POST",
       body: {
         p_tournament_id: input.tournamentId,
+        p_initial_assignments: input.initialAssignments ?? [],
       },
     },
   );
@@ -713,23 +812,38 @@ export async function updateLobbyResults(
 }
 
 export async function randomizePendingLobbyResults(
-  input: StartTournamentInput,
+  input: RandomizePendingLobbyResultsInput,
 ): Promise<RandomizePendingLobbyResultsResult> {
-  const rows = await supabaseRestRequest<RandomizePendingLobbyResultsResult[]>(
-    "rpc/randomize_pending_lobby_results",
-    {
-      method: "POST",
-      body: {
-        p_tournament_id: input.tournamentId,
-      },
-    },
-  );
+  const rows = await supabaseRestRequest<RandomizePendingLobbyResultsResult[]>("rpc/randomize_pending_lobby_results", {
+    method: "POST",
+    body: input.nodeId
+      ? { p_tournament_id: input.tournamentId, p_node_id: input.nodeId }
+      : { p_tournament_id: input.tournamentId },
+  });
   const result = rows[0];
 
   if (!result) {
     throw new Error("Database did not return randomized lobby results.");
   }
 
+  return result;
+}
+
+export async function finalizeTournamentNode(
+  input: FinalizeTournamentNodeInput,
+): Promise<FinalizeTournamentNodeResult> {
+  const rows = await supabaseRestRequest<FinalizeTournamentNodeResult[]>(
+    "rpc/finalize_tournament_node",
+    {
+      method: "POST",
+      body: {
+        p_tournament_id: input.tournamentId,
+        p_node_id: input.nodeId,
+      },
+    },
+  );
+  const result = rows[0];
+  if (!result) throw new Error("Database did not return the node transition.");
   return result;
 }
 

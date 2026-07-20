@@ -13,6 +13,8 @@ export type TournamentStartRequirement = {
 export type TournamentRankingMetric =
   | "points"
   | "tournament_points"
+  | "current_node_firsts"
+  | "node_entry_seed"
   | "current_round_firsts"
   | "round_entry_seed";
 
@@ -29,11 +31,41 @@ export type TournamentStandingsFormat = {
   tieBreakers: TournamentTieBreaker[];
 };
 
+export type TournamentTopNCondition = {
+  type: "top_n";
+  count: number;
+  rankingMetric: "points";
+};
+
 export type TournamentAdvancementFormat = {
   type: "top_n";
   count: number;
   rankingMetric: "points";
   destinationRoundId: string;
+};
+
+export type TournamentEdgeFormat = {
+  id: string;
+  sourceNodeId: string;
+  destinationNodeId: string;
+  priority: number;
+  condition: TournamentTopNCondition;
+};
+
+export type TournamentNodeMergeSeeding = "random" | "source_rank_interleave";
+
+export type TournamentNodeFormat = {
+  id: string;
+  name: string;
+  initialEntrantSlots?: number | "all";
+  mergeSeeding: TournamentNodeMergeSeeding;
+  lobbySeeding: LobbySeedingStrategy;
+  games?: number;
+  reseed: number;
+  standings: TournamentStandingsFormat;
+  reseedStandings: TournamentStandingsFormat;
+  winCondition?: TournamentRoundWinCondition;
+  position?: { x: number; y: number };
 };
 
 export type TournamentRoundType = "qualifier" | "final";
@@ -55,23 +87,26 @@ export type TournamentRoundWinCondition =
   | TournamentFixedGamesWinCondition
   | TournamentCheckmateWinCondition;
 
-export type TournamentRoundFormat = {
-  id: string;
-  name: string;
+/** @deprecated Use TournamentNodeFormat. Kept for legacy callers during migration. */
+export type TournamentRoundFormat = Omit<TournamentNodeFormat, "mergeSeeding" | "initialEntrantSlots"> & {
   type?: TournamentRoundType;
-  lobbySeeding: LobbySeedingStrategy;
-  games?: number;
-  reseed: number;
-  standings: TournamentStandingsFormat;
-  reseedStandings: TournamentStandingsFormat;
+  mergeSeeding?: TournamentNodeMergeSeeding;
+  initialEntrantSlots?: number | "all";
   advancement?: TournamentAdvancementFormat;
-  winCondition?: TournamentRoundWinCondition;
 };
 
 export type TournamentFormat = {
+  schemaVersion: 2;
   id: string;
   name: string;
   isDefault?: boolean;
   placementPoints: Record<string, number>;
-  rounds: TournamentRoundFormat[];
+  startRequirement: TournamentStartRequirement;
+  nodes: TournamentNodeFormat[];
+  edges: TournamentEdgeFormat[];
+};
+
+export type TournamentInitialNodeAssignment = {
+  registrationId: string;
+  nodeId: string;
 };

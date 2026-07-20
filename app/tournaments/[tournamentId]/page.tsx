@@ -2,12 +2,14 @@ import Link from "next/link";
 import { notFound } from "next/navigation";
 import {
   deleteTournamentAction,
+  finalizeTournamentNodeAction,
   progressTournamentRoundAction,
   randomizePendingLobbyResultsAction,
   registerPlayerAction,
   startTournamentAction,
 } from "@/app/actions";
 import { LobbyBrowser } from "@/components/tournaments/lobby-browser";
+import { TournamentGraph } from "@/components/tournaments/tournament-graph";
 import { RoundTabs } from "@/components/tournaments/round-tabs";
 import { Scoresheet } from "@/components/tournaments/scoresheet";
 import { TournamentDetails } from "@/components/tournaments/tournament-details";
@@ -32,6 +34,7 @@ type TournamentPageSearchParams = Promise<{
   progressionError?: string | string[];
   progressed?: string | string[];
   deleteError?: string | string[];
+  node?: string | string[];
 }>;
 
 function getSearchValue(value: string | string[] | undefined): string {
@@ -59,13 +62,14 @@ export default async function TournamentPage({
   const progressionError = getSearchValue(query.progressionError);
   const progressed = getSearchValue(query.progressed) === "true";
   const deleteError = getSearchValue(query.deleteError);
+  const requestedNode = getSearchValue(query.node);
   let tournament:
     | Awaited<ReturnType<typeof getTournamentDetail>>
     | undefined;
   let databaseError = "";
 
   try {
-    tournament = await getTournamentDetail(tournamentId);
+    tournament = await getTournamentDetail(tournamentId, requestedNode || undefined);
   } catch (error) {
     databaseError =
       error instanceof Error
@@ -79,8 +83,8 @@ export default async function TournamentPage({
 
   const isAcceptingPlayers =
     tournament?.status === TOURNAMENT_STATUS_ACCEPTING_PLAYERS;
-  const currentRoundLabel = tournament?.currentRoundNumber
-    ? `Round ${tournament.currentRoundNumber}`
+  const currentRoundLabel = tournament?.selectedNodeId
+    ? tournament.nodes.find((node) => node.id === tournament.selectedNodeId)?.name ?? `Node ${tournament.selectedNodeId}`
     : "Not started";
   const potentialEntrantCount = tournament
     ? selectTournamentEntrants(
@@ -355,6 +359,15 @@ export default async function TournamentPage({
 
             {tournament.hasStarted ? (
               <>
+                <div className="pt-8">
+                  <TournamentGraph
+                    edges={tournament.edges}
+                    nodes={tournament.nodes}
+                    selectedNodeId={tournament.selectedNodeId}
+                    started
+                    tournamentId={tournament.id}
+                  />
+                </div>
                 {progressed ? (
                   <div
                     className="mb-5 rounded-md border border-emerald-200 bg-emerald-50 p-4 text-sm font-medium text-emerald-900"
@@ -384,7 +397,9 @@ export default async function TournamentPage({
                         <div className="flex flex-col gap-4 sm:flex-row sm:items-end sm:justify-between">
                           <div>
                             <h2 className="text-2xl font-semibold text-zinc-950">
-                              Current round lobbies
+                              {tournament.selectedNodeId
+                                ? `${tournament.nodes.find((node) => node.id === tournament.selectedNodeId)?.name ?? "Selected node"} lobbies`
+                                : "Current round lobbies"}
                             </h2>
                             <p className="mt-1 text-sm text-zinc-500">
                               {tournament.roundProgress?.roundFormat === "checkmate"
@@ -399,6 +414,7 @@ export default async function TournamentPage({
                             className="flex flex-col items-stretch gap-2 sm:items-end"
                           >
                             <input name="tournamentId" type="hidden" value={tournament.id} />
+                            <input name="nodeId" type="hidden" value={tournament.selectedNodeId ?? ""} />
                             <input
                               name="game"
                               type="hidden"
@@ -456,22 +472,29 @@ export default async function TournamentPage({
                       {tournament.progressionAction ? (
                         <div className="mt-5 rounded-lg border border-amber-200 bg-amber-50 p-5">
                           <h3 className="text-lg font-semibold text-amber-950">
-                            {tournament.progressionAction === "complete_tournament"
+                            {tournament.progressionAction === "finalize_node"
+                              ? "Finalize current node"
+                              : tournament.progressionAction === "complete_tournament"
                               ? "Complete tournament"
                               : `Create Round ${tournament.nextRound?.roundNumber}`}
                           </h3>
                           <p className="mt-2 text-sm text-amber-900">
-                            {tournament.progressionAction === "complete_tournament"
+                            {tournament.progressionAction === "finalize_node"
+                              ? "All games are scored. Finalizing this node will resolve its ordered advancement edges and activate any ready destinations."
+                              : tournament.progressionAction === "complete_tournament"
                               ? "All configured games are scored. This final action locks the tournament."
                               : `${tournament.nextRound?.advancementCount} player${tournament.nextRound?.advancementCount === 1 ? "" : "s"} advance to ${tournament.nextRound?.roundName}.`}
                           </p>
-                          <form action={progressTournamentRoundAction} className="mt-4">
+                          <form action={tournament.progressionAction === "finalize_node" ? finalizeTournamentNodeAction : progressTournamentRoundAction} className="mt-4">
                             <input name="tournamentId" type="hidden" value={tournament.id} />
+                            {tournament.progressionAction === "finalize_node" ? <input name="nodeId" type="hidden" value={tournament.selectedNodeId ?? ""} /> : null}
                             <button
                               className="flex h-11 w-full items-center justify-center rounded-md bg-amber-700 px-4 text-sm font-semibold text-white transition hover:bg-amber-800 focus:outline-none focus:ring-2 focus:ring-amber-600 focus:ring-offset-2 sm:w-auto"
                               type="submit"
                             >
-                              {tournament.progressionAction === "complete_tournament"
+                              {tournament.progressionAction === "finalize_node"
+                                ? "Finalize node and resolve edges"
+                                : tournament.progressionAction === "complete_tournament"
                                 ? "Complete tournament"
                                 : `Create Round ${tournament.nextRound?.roundNumber} — Top ${tournament.nextRound?.advancementCount} advance`}
                             </button>
@@ -508,6 +531,16 @@ export default async function TournamentPage({
             ) : null}
 
             {!tournament.hasStarted ? (
+              <>
+              <div className="border-t border-zinc-200 py-8">
+                <TournamentGraph
+                  edges={tournament.edges}
+                  nodes={tournament.nodes}
+                  selectedNodeId={null}
+                  started={false}
+                  tournamentId={tournament.id}
+                />
+              </div>
               <section className="border-t border-zinc-200 py-8">
               <div className="flex items-end justify-between gap-4">
                 <div>
@@ -563,6 +596,7 @@ export default async function TournamentPage({
                 </div>
               )}
               </section>
+              </>
             ) : null}
           </>
         ) : null}

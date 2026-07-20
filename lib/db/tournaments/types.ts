@@ -10,6 +10,7 @@ export type TournamentStatus =
 export type TournamentProgressionAction =
   | "create_next_round"
   | "complete_tournament"
+  | "finalize_node"
   | null;
 
 export type TournamentRoundProgress = {
@@ -42,6 +43,7 @@ export type TournamentSummary = {
   hasStarted: boolean;
   currentRoundId: string | null;
   currentRoundNumber: number | null;
+  activeNodeIds: string[];
   createdAt: string;
   registeredPlayerCount: number;
 };
@@ -84,6 +86,26 @@ export type TournamentGameScore = {
 export type TournamentRound = {
   id: string;
   roundNumber: number;
+  formatNodeId?: string | null;
+  name?: string | null;
+  status?: "pending" | "active" | "completed" | "cancelled" | "skipped";
+};
+
+export type TournamentNode = TournamentRound & {
+  entrantCount: number;
+  completedGames: number;
+  configuredGames: number | null;
+};
+
+export type TournamentEdge = {
+  id: string;
+  formatEdgeId: string;
+  sourceNodeId: string;
+  destinationNodeId: string;
+  priority: number;
+  condition: unknown;
+  status: "pending" | "resolved";
+  advancedPlayerCount: number;
 };
 
 export type TournamentLobbyParticipant = {
@@ -119,6 +141,10 @@ export type TournamentDetail = Omit<
   roundProgress: TournamentRoundProgress | null;
   nextRound: TournamentNextRoundMetadata | null;
   progressionAction: TournamentProgressionAction;
+  nodes: TournamentNode[];
+  edges: TournamentEdge[];
+  activeNodeIds: string[];
+  selectedNodeId: string | null;
 };
 
 export type TournamentRow = {
@@ -130,6 +156,18 @@ export type TournamentRow = {
   current_round_id: string | number | null;
   format_config: unknown;
   created_at: string;
+};
+
+export type TournamentEdgeRow = {
+  id: string | number;
+  tournament_id: string | number;
+  format_edge_id: string;
+  source_round_id: string | number;
+  destination_round_id: string | number;
+  priority: number;
+  condition: unknown;
+  status: "pending" | "resolved";
+  advanced_player_count: number;
 };
 
 export type TournamentRegistrationRow = {
@@ -160,6 +198,7 @@ export type TournamentScoreRow = {
 
 export type TournamentRoundRow = {
   id: string | number;
+  tournament_id?: string | number;
   round_number: number;
   format_round_id: string | null;
   status: "pending" | "active" | "completed" | "cancelled";
@@ -207,6 +246,7 @@ export type RegisterTournamentPlayerInput = {
 
 export type StartTournamentInput = {
   tournamentId: string;
+  initialAssignments?: Array<{ registrationId: string; nodeId: string }>;
 };
 
 export type LobbyResultInput = {
@@ -228,6 +268,24 @@ export type UpdateLobbyResultsResult = {
 export type RandomizePendingLobbyResultsResult = {
   randomized_lobby_count: number;
   randomized_participant_count: number;
+};
+
+export type RandomizePendingLobbyResultsInput = {
+  tournamentId: string;
+  nodeId?: string;
+};
+
+export type FinalizeTournamentNodeInput = {
+  tournamentId: string;
+  nodeId: string;
+};
+
+export type FinalizeTournamentNodeResult = {
+  transition_type: "node_finalized" | "node_already_finalized" | "tournament_completed";
+  completed_node_id: string;
+  activated_node_ids: string[];
+  skipped_node_ids: string[];
+  advanced_player_count: number;
 };
 
 export type ProgressTournamentRoundInput = {

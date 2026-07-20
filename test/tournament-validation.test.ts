@@ -11,6 +11,7 @@ import {
 import { selectTournamentEntrants } from "../lib/tournament/start/api";
 import {
   getTournamentStartRequirement,
+  selectOrderedTopNAdvancements,
   validateTournamentFormat,
 } from "../lib/tournament/formats/api";
 
@@ -285,4 +286,57 @@ test("allows a tournament to start with fewer entrants than the player limit", (
     entrants.map((entrant) => entrant.seedNumber),
     [1, 2],
   );
+});
+
+test("routes ordered exclusive top-N edges and eliminates the remainder", () => {
+  const players = Array.from({ length: 64 }, (_, index) => ({ id: `player-${index + 1}` }));
+  const result = selectOrderedTopNAdvancements(players, [
+    {
+      id: "to-final",
+      sourceNodeId: "a",
+      destinationNodeId: "c",
+      priority: 1,
+      condition: { type: "top_n", count: 4, rankingMetric: "points" },
+    },
+    {
+      id: "to-lower",
+      sourceNodeId: "a",
+      destinationNodeId: "b",
+      priority: 2,
+      condition: { type: "top_n", count: 56, rankingMetric: "points" },
+    },
+  ]);
+
+  assert.deepEqual(result.advancements[0]?.participantIds, ["player-1", "player-2", "player-3", "player-4"]);
+  assert.equal(result.advancements[1]?.participantIds.length, 56);
+  assert.deepEqual(result.eliminatedParticipantIds, ["player-61", "player-62", "player-63", "player-64"]);
+});
+
+test("rejects graph cycles and duplicate edge priorities", () => {
+  const format = {
+    schemaVersion: 2,
+    id: "graph",
+    name: "Graph",
+    placementPoints: { "1": 8 },
+    startRequirement: { minimumEntrants: 8, exactEntrants: 8 },
+    nodes: [
+      { id: "a", name: "A", initialEntrantSlots: "all", mergeSeeding: "random", lobbySeeding: "snake", games: 1, reseed: 0, standings: { rankingMetric: "points", sortDirection: "desc", tieBreakers: [] }, reseedStandings: { rankingMetric: "points", sortDirection: "desc", tieBreakers: [] } },
+      { id: "b", name: "B", mergeSeeding: "random", lobbySeeding: "snake", games: 1, reseed: 0, standings: { rankingMetric: "points", sortDirection: "desc", tieBreakers: [] }, reseedStandings: { rankingMetric: "points", sortDirection: "desc", tieBreakers: [] } },
+    ],
+    edges: [
+      { id: "a-b", sourceNodeId: "a", destinationNodeId: "b", priority: 1, condition: { type: "top_n", count: 4, rankingMetric: "points" } },
+      { id: "b-a", sourceNodeId: "b", destinationNodeId: "a", priority: 1, condition: { type: "top_n", count: 4, rankingMetric: "points" } },
+    ],
+  };
+  const result = validateTournamentFormat(format);
+  assert.equal(result.success, false);
+  assert.match(result.errors.join(" "), /acyclic/);
+});
+
+test("accepts the 64-player A/B/C split graph", () => {
+  const format = JSON.parse(readFileSync(join(process.cwd(), "lib/tournament/formats/64-three-node.json"), "utf8"));
+  const result = validateTournamentFormat(format);
+  assert.equal(result.success, true, result.errors.join(" "));
+  assert.equal(format.edges[0].condition.count, 4);
+  assert.equal(format.edges[1].condition.count, 56);
 });
