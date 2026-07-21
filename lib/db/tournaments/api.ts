@@ -588,6 +588,7 @@ export async function getTournamentDetail(
         roundNumber: index + 1,
         formatNodeId: node.id,
         name: node.name,
+        isCheckmate: node.winCondition?.type === "checkmate",
         status: "pending" as const,
         entrantCount: 0,
         completedGames: 0,
@@ -606,6 +607,9 @@ export async function getTournamentDetail(
       roundNumber: round.round_number,
       formatNodeId: round.format_round_id,
       name: graph.nodes.find((node) => node.id === round.format_round_id)?.name ?? null,
+      isCheckmate:
+        getConfiguredRound(tournament.format_config, round.format_round_id)?.winCondition?.type ===
+        "checkmate",
       status: round.status,
     })),
     lobbies: mappedLobbies,

@@ -78,6 +78,7 @@ export type TournamentRound = {
   id: string;
   roundNumber: number;
   formatNodeId?: string | null;
+  isCheckmate?: boolean;
   name?: string | null;
   status?: "pending" | "active" | "completed" | "cancelled" | "skipped";
 };
