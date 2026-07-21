@@ -27,6 +27,8 @@ import type {
   TournamentEdge,
   TournamentEdgeRow,
   TournamentNode,
+  AddRandomSeededTournamentPlayersInput,
+  AddRandomSeededTournamentPlayersResult,
   FinalizeTournamentNodeInput,
   FinalizeTournamentNodeResult,
   RandomizePendingLobbyResultsResult,
@@ -37,6 +39,12 @@ import type {
 import type { TournamentNodeFormat } from "@/lib/tournament/formats/types";
 import { canonicalizeTournamentFormat, getFormatGraph, getTournamentStartRequirement } from "../../tournament/formats/api";
 import { resolveCheckmateOutcome } from "../../tournament/checkmate/api";
+import {
+  getRiotAccountByRiotId,
+  RiotAccountNotFoundError,
+} from "../../riot/accounts/api";
+import { SEEDED_RIOT_IDS, selectRandomSeededRiotIds } from "../../riot/accounts/seed";
+import { parseRiotGameTag } from "../../tournament/players/api";
 
 export const TOURNAMENT_STATUS_ACCEPTING_PLAYERS = "accepting_players";
 
@@ -572,6 +580,7 @@ export async function getTournamentDetail(
       entrantCount: nodeScores.length,
       completedGames: new Set(nodeGames).size,
       configuredGames: getConfiguredRound(tournament.format_config, round.format_round_id)?.games ?? null,
+      position: getConfiguredRound(tournament.format_config, round.format_round_id)?.position ?? null,
     };
   })
     : graph.nodes.map((node, index) => ({
@@ -583,6 +592,7 @@ export async function getTournamentDetail(
         entrantCount: 0,
         completedGames: 0,
         configuredGames: node.games ?? null,
+        position: node.position ?? null,
       }));
 
   return {
@@ -703,6 +713,126 @@ export async function registerTournamentPlayer(
   }
 
   return mapTournamentRegistrationRow(player);
+}
+
+export async function addRandomSeededTournamentPlayers(
+  input: AddRandomSeededTournamentPlayersInput,
+): Promise<AddRandomSeededTournamentPlayersResult> {
+  const requestedCount = Number.isFinite(input.count)
+    ? Math.max(0, Math.floor(input.count))
+    : 0;
+  const tournaments = await supabaseRestRequest<TournamentRow[]>("tournaments", {
+    query: {
+      select: tournamentSelect,
+      id: `eq.${input.tournamentId}`,
+      limit: "1",
+    },
+  });
+  const tournament = tournaments[0];
+
+  if (!tournament) {
+    throw new Error("Tournament was not found.");
+  }
+
+  if (tournament.status !== TOURNAMENT_STATUS_ACCEPTING_PLAYERS) {
+    throw new Error("Random test players can only be added before the tournament starts.");
+  }
+
+  const registrations = await supabaseRestRequest<
+    Pick<TournamentRegistrationRow, "display_name" | "riot_puuid">[]
+  >("tournament_registrations", {
+    query: {
+      select: "display_name,riot_puuid",
+      tournament_id: `eq.${input.tournamentId}`,
+    },
+  });
+  const remainingSlots = Math.max(0, tournament.max_players - registrations.length);
+  const targetCount = Math.min(requestedCount, remainingSlots);
+
+  if (targetCount === 0) {
+    return {
+      requestedCount,
+      addedCount: 0,
+      skippedCount: 0,
+      remainingSlots,
+    };
+  }
+
+  const existingIds = registrations
+    .map((registration) => registration.display_name)
+    .filter((displayName): displayName is string => Boolean(displayName));
+  const existingPuuids = new Set(
+    registrations
+      .map((registration) => registration.riot_puuid)
+      .filter((puuid): puuid is string => Boolean(puuid)),
+  );
+  const candidates = selectRandomSeededRiotIds(existingIds, SEEDED_RIOT_IDS.length);
+  let addedCount = 0;
+  let skippedCount = 0;
+
+  for (const candidate of candidates) {
+    if (addedCount >= targetCount) {
+      break;
+    }
+
+    const parsed = parseRiotGameTag(candidate);
+    if (!parsed) {
+      skippedCount += 1;
+      continue;
+    }
+
+    let riotAccount;
+    try {
+      riotAccount = await getRiotAccountByRiotId({
+        gameName: parsed.gameName,
+        tagLine: parsed.tagLine,
+      });
+    } catch (error) {
+      if (error instanceof RiotAccountNotFoundError) {
+        skippedCount += 1;
+        continue;
+      }
+
+      throw error;
+    }
+
+    if (existingPuuids.has(riotAccount.puuid)) {
+      skippedCount += 1;
+      continue;
+    }
+
+    try {
+      await registerTournamentPlayer({
+        tournamentId: input.tournamentId,
+        riotAccount,
+      });
+      existingPuuids.add(riotAccount.puuid);
+      addedCount += 1;
+    } catch (error) {
+      if (
+        error instanceof DatabaseRequestError &&
+        error.message.includes("23505")
+      ) {
+        skippedCount += 1;
+        continue;
+      }
+      if (error instanceof Error && error.message === "That Riot account is already registered.") {
+        skippedCount += 1;
+        continue;
+      }
+
+      throw error;
+    }
+  }
+
+  skippedCount += Math.max(0, targetCount - addedCount - skippedCount);
+
+  return {
+    requestedCount,
+    addedCount,
+    skippedCount,
+    remainingSlots: remainingSlots - addedCount,
+  };
 }
 
 export async function startTournament(

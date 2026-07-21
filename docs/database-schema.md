@@ -216,6 +216,9 @@ and edge, assigns explicit registrations first, randomly distributes remaining
 entrants among entry nodes, and generates lobbies for every active root.
 `finalize_tournament_node(tournament_id, node_id)` locks a completed node,
 resolves its outgoing edges, and activates a destination only after all of its
-incoming edges resolve. Empty destinations are marked `skipped` and propagate
-zero-player edges. `randomize_pending_lobby_results(tournament_id, node_id)`
+incoming edges resolve. Before activating a destination with multiple incoming
+edges, its existing seeds are temporarily moved outside the final range before
+ranked contiguous seeds are assigned; this preserves the unique
+`(round_id, round_seed_number)` index during reseeding. Empty destinations are
+marked `skipped` and propagate zero-player edges. `randomize_pending_lobby_results(tournament_id, node_id)`
 is the graph-aware test helper.

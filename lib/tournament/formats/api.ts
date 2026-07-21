@@ -191,7 +191,7 @@ function validateEdge(value: unknown, index: number, nodeIds: Set<string>, edgeI
   assertKnownKeys(value.condition, ["type", "count", "rankingMetric"], `${path}.condition`, errors);
   if (value.condition.type !== "top_n") errors.push(`${path}.condition.type must be top_n.`);
   if (!Number.isInteger(value.condition.count) || (value.condition.count as number) <= 0) errors.push(`${path}.condition.count must be positive.`);
-  if (value.condition.rankingMetric !== undefined && value.condition.rankingMetric !== "points") errors.push(`${path}.condition.rankingMetric must be points.`);
+  if (value.condition.rankingMetric !== undefined && value.condition.rankingMetric !== "points" && value.condition.rankingMetric !== "tournament_points") errors.push(`${path}.condition.rankingMetric must be points or tournament_points.`);
 }
 
 function hasCycle(nodes: Set<string>, edges: TournamentEdgeFormat[]): boolean {
@@ -254,7 +254,7 @@ function resolveEdge(edge: TournamentEdgeDefinition): TournamentEdgeFormat {
     sourceNodeId: edge.sourceNodeId,
     destinationNodeId: edge.destinationNodeId,
     priority: edge.priority,
-    condition: { type: "top_n", count: edge.condition.count, rankingMetric: "points" },
+    condition: { type: "top_n", count: edge.condition.count, rankingMetric: edge.condition.rankingMetric ?? "points" },
   };
 }
 
@@ -375,7 +375,11 @@ export function canonicalizeTournamentFormat(value: unknown): TournamentFormat |
     nodes,
     edges: resolved.edges.map((edge) => ({
       ...edge,
-      condition: { type: "top_n", count: edge.condition.count },
+      condition: {
+        type: "top_n",
+        count: edge.condition.count,
+        ...(edge.condition.rankingMetric === "points" ? {} : { rankingMetric: edge.condition.rankingMetric }),
+      },
     })),
   };
 }

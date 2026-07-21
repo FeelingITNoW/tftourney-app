@@ -1,6 +1,7 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import {
+  addRandomSeededPlayersAction,
   deleteTournamentAction,
   finalizeTournamentNodeAction,
   randomizePendingLobbyResultsAction,
@@ -29,6 +30,9 @@ type TournamentPageSearchParams = Promise<{
   page?: string | string[];
   randomized?: string | string[];
   registrationError?: string | string[];
+  randomPlayerError?: string | string[];
+  randomPlayersAdded?: string | string[];
+  randomPlayersSkipped?: string | string[];
   startError?: string | string[];
   progressionError?: string | string[];
   progressed?: string | string[];
@@ -57,6 +61,9 @@ export default async function TournamentPage({
   const requestedPage = Number.parseInt(getSearchValue(query.page), 10);
   const randomized = getSearchValue(query.randomized) === "true";
   const registrationError = getSearchValue(query.registrationError);
+  const randomPlayerError = getSearchValue(query.randomPlayerError);
+  const randomPlayersAdded = Number.parseInt(getSearchValue(query.randomPlayersAdded), 10);
+  const randomPlayersSkipped = Number.parseInt(getSearchValue(query.randomPlayersSkipped), 10);
   const startError = getSearchValue(query.startError);
   const progressionError = getSearchValue(query.progressionError);
   const progressed = getSearchValue(query.progressed) === "true";
@@ -126,6 +133,10 @@ export default async function TournamentPage({
     ])
     .join("|");
   const isTournamentCompleted = tournament?.status === "completed";
+  const remainingRegistrationSlots = tournament
+    ? Math.max(tournament.playerCount - tournament.registrations.length, 0)
+    : 0;
+  const defaultRandomPlayerCount = Math.min(8, remainingRegistrationSlots);
 
   return (
     <main className="min-h-screen bg-stone-50 text-zinc-950">
@@ -302,6 +313,56 @@ export default async function TournamentPage({
                     </p>
                   ) : null}
                 </div>
+
+                {isAcceptingPlayers ? (
+                  <div className="rounded-lg border border-cyan-200 bg-cyan-50 p-5 shadow-sm">
+                    <h2 className="text-lg font-semibold text-cyan-950">
+                      Testing: seed random players
+                    </h2>
+                    <p className="mt-2 text-sm text-cyan-900">
+                      Adds unique, Riot-verified IDs from the previous SEA seed roster. Existing IDs are skipped.
+                    </p>
+                    <form action={addRandomSeededPlayersAction} className="mt-4 space-y-3">
+                      <input name="tournamentId" type="hidden" value={tournament.id} />
+                      <label className="block text-sm font-medium text-cyan-950" htmlFor="randomPlayerCount">
+                        Players to add
+                        <input
+                          className="mt-2 h-11 w-full rounded-md border border-cyan-300 bg-white px-3 text-base text-zinc-950 outline-none transition focus:border-cyan-700 focus:ring-2 focus:ring-cyan-100"
+                          defaultValue={defaultRandomPlayerCount || 1}
+                          disabled={remainingRegistrationSlots === 0}
+                          id="randomPlayerCount"
+                          max={Math.max(remainingRegistrationSlots, 1)}
+                          min={1}
+                          name="randomPlayerCount"
+                          type="number"
+                        />
+                      </label>
+                      <button
+                        className="flex h-11 w-full items-center justify-center rounded-md bg-cyan-800 px-4 text-sm font-semibold text-white transition hover:bg-cyan-900 focus:outline-none focus:ring-2 focus:ring-cyan-700 focus:ring-offset-2 disabled:cursor-not-allowed disabled:bg-zinc-300"
+                        disabled={remainingRegistrationSlots === 0}
+                        type="submit"
+                      >
+                        Add random test players
+                      </button>
+                    </form>
+                    <p className="mt-2 text-xs text-cyan-800">
+                      {remainingRegistrationSlots === 0
+                        ? "The tournament roster is full."
+                        : `${remainingRegistrationSlots} registration slot${remainingRegistrationSlots === 1 ? "" : "s"} remaining.`}
+                    </p>
+                    {Number.isInteger(randomPlayersAdded) ? (
+                      <p className="mt-3 text-sm font-medium text-emerald-800" role="status">
+                        Added {randomPlayersAdded} random test player{randomPlayersAdded === 1 ? "" : "s"}.
+                        {randomPlayersSkipped > 0 ? ` Skipped ${randomPlayersSkipped} unavailable or duplicate ID${randomPlayersSkipped === 1 ? "" : "s"}.` : ""}
+                      </p>
+                    ) : null}
+                    {randomPlayerError ? (
+                      <p className="mt-3 text-sm font-medium text-red-700" role="alert">
+                        {randomPlayerError}
+                      </p>
+                    ) : null}
+                  </div>
+                ) : null}
 
                 <div className="rounded-lg border border-red-200 bg-red-50 p-5 shadow-sm">
                   <h2 className="text-lg font-semibold text-red-950">
