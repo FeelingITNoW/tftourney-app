@@ -69,11 +69,33 @@ export function TournamentGraph({
   }
   const maxColumn = Math.max(...columns.keys(), 0);
   const positions = new Map<string, { x: number; y: number }>();
+  const savedPositions = nodes
+    .map((node) => node.position)
+    .filter((position): position is { x: number; y: number } => Boolean(position));
+  const savedBounds = savedPositions.length
+    ? {
+        minX: Math.min(...savedPositions.map((position) => position.x)),
+        maxX: Math.max(...savedPositions.map((position) => position.x)),
+        minY: Math.min(...savedPositions.map((position) => position.y)),
+        maxY: Math.max(...savedPositions.map((position) => position.y)),
+      }
+    : null;
   for (const [column, columnNodes] of columns) {
     columnNodes.forEach((node, row) => {
+      const saved = node.position;
+      const savedX = saved && savedBounds
+        ? savedBounds.maxX === savedBounds.minX
+          ? 50
+          : ((saved.x - savedBounds.minX) / (savedBounds.maxX - savedBounds.minX)) * 82 + 9
+        : null;
+      const savedY = saved && savedBounds
+        ? savedBounds.maxY === savedBounds.minY
+          ? 50
+          : ((saved.y - savedBounds.minY) / (savedBounds.maxY - savedBounds.minY)) * 82 + 7
+        : null;
       positions.set(node.id, {
-        x: maxColumn === 0 ? 50 : (column / maxColumn) * 82 + 9,
-        y: ((row + 1) / (columnNodes.length + 1)) * 82 + 7,
+        x: savedX ?? (maxColumn === 0 ? 50 : (column / maxColumn) * 82 + 9),
+        y: savedY ?? ((row + 1) / (columnNodes.length + 1)) * 82 + 7,
       });
     });
   }
@@ -146,7 +168,9 @@ export function TournamentGraph({
       <div className="mt-4 flex flex-wrap gap-2 text-xs text-zinc-600">
         {edges.map((edge) => (
           <span className="rounded-full border border-zinc-200 bg-zinc-50 px-2 py-1" key={`label-${edge.id}`}>
-            {edge.condition && typeof edge.condition === "object" && "count" in edge.condition ? `Top ${String(edge.condition.count)}` : "Advances"}
+            {edge.condition && typeof edge.condition === "object" && "count" in edge.condition
+              ? `Top ${String(edge.condition.count)}${"rankingMetric" in edge.condition && edge.condition.rankingMetric === "tournament_points" ? " · cumulative" : ""}`
+              : "Advances"}
           </span>
         ))}
       </div>

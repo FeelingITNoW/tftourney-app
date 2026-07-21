@@ -10,12 +10,20 @@ import {
 } from "../lib/tournament/validation/api";
 import { selectTournamentEntrants } from "../lib/tournament/start/api";
 import {
+  SEEDED_RIOT_IDS,
+  selectRandomSeededRiotIds,
+} from "../lib/riot/accounts/seed";
+import {
   canonicalizeTournamentFormat,
   getFormatGraph,
   getTournamentStartRequirement,
   selectOrderedTopNAdvancements,
   validateTournamentFormat,
 } from "../lib/tournament/formats/api";
+import {
+  analyzeTournamentFormat,
+  createTournamentFormatPreset,
+} from "../lib/tournament/formats/presets";
 
 test("accepts tournament player counts that divide exactly into TFT lobbies", () => {
   for (const playerCount of [8, 16, 32, 64, 512]) {
@@ -104,6 +112,19 @@ test("rejects invalid Riot IDs for player registration", () => {
     assert.equal(result.success, false);
     assert.match(result.errors.gameTag ?? "", /GameName#TAG/);
   }
+});
+
+test("selects non-repeating random seeded Riot IDs and excludes registered IDs", () => {
+  const selected = selectRandomSeededRiotIds(
+    [SEEDED_RIOT_IDS[0]!, SEEDED_RIOT_IDS[1]!.toUpperCase()],
+    5,
+    () => 0,
+  );
+
+  assert.equal(selected.length, 5);
+  assert.equal(new Set(selected.map((riotId) => riotId.toLowerCase())).size, 5);
+  assert.equal(selected.some((riotId) => riotId.toLowerCase() === SEEDED_RIOT_IDS[0]!.toLowerCase()), false);
+  assert.equal(selected.some((riotId) => riotId.toLowerCase() === SEEDED_RIOT_IDS[1]!.toLowerCase()), false);
 });
 
 test("default tournament format specifies fixed-game opening and checkmate final rounds", () => {
@@ -223,6 +244,13 @@ test("canonicalizes inherited node values and default edge metrics", () => {
   assert.equal("rounds" in canonical, false);
   assert.equal(canonical.nodes[0].games, undefined);
   assert.equal(canonical.edges[0].condition.rankingMetric, undefined);
+});
+
+test("preserves cumulative advancement metrics in compact JSON", () => {
+  const format = JSON.parse(readFileSync(join(process.cwd(), "lib/tournament/formats/default.json"), "utf8"));
+  format.edges[0].condition.rankingMetric = "tournament_points";
+  const canonical = canonicalizeTournamentFormat(format);
+  assert.equal(canonical?.edges[0]?.condition.rankingMetric, "tournament_points");
 });
 
 test("rejects legacy round-based format snapshots", () => {
@@ -354,4 +382,23 @@ test("accepts the 64-player A/B/C split graph", () => {
   assert.equal(result.success, true, result.errors.join(" "));
   assert.equal(format.edges[0].condition.count, 4);
   assert.equal(format.edges[1].condition.count, 56);
+});
+
+test("preset builder formats resolve to valid advancement graphs", () => {
+  const knockout = createTournamentFormatPreset("128-knockout", 128);
+  const knockoutAnalysis = analyzeTournamentFormat(knockout, 128);
+  assert.equal(knockoutAnalysis.valid, true, knockoutAnalysis.errors.join(" "));
+  assert.deepEqual(knockout?.edges.map((edge) => edge.condition.count), [64, 16, 8]);
+
+  const attrition = createTournamentFormatPreset("128-attrition", 128);
+  const attritionAnalysis = analyzeTournamentFormat(attrition, 128);
+  assert.equal(attritionAnalysis.valid, true, attritionAnalysis.errors.join(" "));
+  assert.equal(attrition?.edges.find((edge) => edge.id === "attrition-112-to-final")?.condition.rankingMetric, "tournament_points");
+  assert.equal(attrition?.edges.find((edge) => edge.id === "attrition-112-to-final")?.priority, 1);
+
+  const bracket = createTournamentFormatPreset("adjacent-lobby-bracket", 64);
+  const bracketAnalysis = analyzeTournamentFormat(bracket, 64);
+  assert.equal(bracketAnalysis.valid, true, bracketAnalysis.errors.join(" "));
+  assert.equal(bracket?.nodes.length, 15);
+  assert.equal(bracket?.edges.length, 14);
 });

@@ -86,6 +86,7 @@ export type TournamentNode = TournamentRound & {
   entrantCount: number;
   completedGames: number;
   configuredGames: number | null;
+  position?: { x: number; y: number } | null;
 };
 
 export type TournamentEdge = {
@@ -232,6 +233,18 @@ export type DeleteTournamentInput = {
 export type RegisterTournamentPlayerInput = {
   tournamentId: string;
   riotAccount: VerifiedRiotAccount;
+};
+
+export type AddRandomSeededTournamentPlayersInput = {
+  tournamentId: string;
+  count: number;
+};
+
+export type AddRandomSeededTournamentPlayersResult = {
+  requestedCount: number;
+  addedCount: number;
+  skippedCount: number;
+  remainingSlots: number;
 };
 
 export type StartTournamentInput = {

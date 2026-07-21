@@ -6,6 +6,7 @@ import defaultTournamentFormat from "@/lib/tournament/formats/default.json";
 import {
   createTournament,
   deleteTournament,
+  addRandomSeededTournamentPlayers,
   finalizeTournamentNode,
   randomizePendingLobbyResults,
   registerTournamentPlayer,
@@ -16,6 +17,12 @@ import { getRiotAccountByRiotId } from "@/lib/riot/accounts/api";
 import { validatePlayerRegistration } from "@/lib/tournament/players/api";
 import { validateLobbyResults } from "@/lib/tournament/scoring/api";
 import { validateTournamentCreation } from "@/lib/tournament/validation/api";
+import {
+  canonicalizeTournamentFormat,
+  validateTournamentFormat,
+} from "@/lib/tournament/formats/api";
+import { analyzeTournamentFormat } from "@/lib/tournament/formats/presets";
+import type { CustomTournamentCreationState } from "@/lib/tournament/formats/creation-state";
 
 function getFormString(formData: FormData, fieldName: string): string {
   const value = formData.get(fieldName);
@@ -86,6 +93,112 @@ export async function createTournamentAction(formData: FormData) {
   redirect(`/tournaments/${tournamentId}`);
 }
 
+export async function createCustomTournamentAction(
+  _previousState: CustomTournamentCreationState,
+  formData: FormData,
+): Promise<CustomTournamentCreationState> {
+  const name = getFormString(formData, "tournamentName");
+  const playerCount = getFormString(formData, "playerCount");
+  const rawFormat = getFormString(formData, "formatConfig");
+  const creationValidation = validateTournamentCreation({
+    name,
+    playerCount,
+    formatId: "default",
+  });
+
+  if (!creationValidation.success) {
+    return {
+      message: "Fix the highlighted tournament fields.",
+      fieldErrors: creationValidation.errors as Record<string, string>,
+      graphErrors: [],
+    };
+  }
+
+  if (rawFormat.length > 262_144) {
+    return {
+      message: "The format is too large to save.",
+      fieldErrors: {},
+      graphErrors: ["Keep the format under 256 KB."],
+    };
+  }
+
+  let parsedFormat: unknown;
+  try {
+    parsedFormat = JSON.parse(rawFormat);
+  } catch {
+    return {
+      message: "The format could not be read.",
+      fieldErrors: {},
+      graphErrors: ["The format JSON is invalid."],
+    };
+  }
+
+  const formatValidation = validateTournamentFormat(parsedFormat);
+  if (!formatValidation.success) {
+    return {
+      message: "Fix the format graph before saving.",
+      fieldErrors: {},
+      graphErrors: formatValidation.errors,
+    };
+  }
+
+  const canonical = canonicalizeTournamentFormat(parsedFormat);
+  if (!canonical) {
+    return {
+      message: "Fix the format graph before saving.",
+      fieldErrors: {},
+      graphErrors: ["The format could not be canonicalized."],
+    };
+  }
+
+  const entrantCount = creationValidation.data.playerCount;
+  const exactEntrants = canonical.startRequirement.exactEntrants;
+  if (exactEntrants !== undefined && exactEntrants !== entrantCount) {
+    return {
+      message: "The player count does not match the format.",
+      fieldErrors: { playerCount: `This format requires exactly ${exactEntrants} entrants.` },
+      graphErrors: [],
+    };
+  }
+  if (canonical.startRequirement.minimumEntrants > entrantCount) {
+    return {
+      message: "The player count does not meet the format requirement.",
+      fieldErrors: {
+        playerCount: `This format requires at least ${canonical.startRequirement.minimumEntrants} entrants.`,
+      },
+      graphErrors: [],
+    };
+  }
+
+  const analysis = analyzeTournamentFormat(canonical, entrantCount);
+  if (!analysis.valid) {
+    return {
+      message: "Fix the format graph before saving.",
+      fieldErrors: {},
+      graphErrors: analysis.errors,
+    };
+  }
+
+  let tournamentId: string;
+  try {
+    const tournament = await createTournament({
+      name: creationValidation.data.name,
+      playerCount: entrantCount,
+      formatId: canonical.id,
+      formatConfig: canonical,
+    });
+    tournamentId = tournament.id;
+  } catch (error) {
+    return {
+      message: error instanceof Error ? error.message : "Tournament could not be created.",
+      fieldErrors: {},
+      graphErrors: [],
+    };
+  }
+  revalidatePath("/");
+  redirect(`/tournaments/${tournamentId}`);
+}
+
 export async function registerPlayerAction(formData: FormData) {
   const tournamentId = getFormString(formData, "tournamentId");
   const input = {
@@ -126,6 +239,46 @@ export async function registerPlayerAction(formData: FormData) {
 
   revalidatePath(detailPath);
   redirect(detailPath);
+}
+
+export async function addRandomSeededPlayersAction(formData: FormData) {
+  const tournamentId = getFormString(formData, "tournamentId");
+  const requestedCount = Number(getFormString(formData, "randomPlayerCount"));
+  const detailPath = `/tournaments/${tournamentId}`;
+
+  if (!tournamentId) {
+    redirectWithParams("/", {
+      createError: "Tournament was not found.",
+    });
+  }
+
+  if (!Number.isInteger(requestedCount) || requestedCount < 1) {
+    redirectWithParams(detailPath, {
+      randomPlayerError: "Choose at least one test player to add.",
+    });
+  }
+
+  let result: Awaited<ReturnType<typeof addRandomSeededTournamentPlayers>>;
+  try {
+    result = await addRandomSeededTournamentPlayers({
+      tournamentId,
+      count: requestedCount,
+    });
+  } catch (error) {
+    redirectWithParams(detailPath, {
+      randomPlayerError:
+        error instanceof Error
+          ? error.message
+          : "Random test players could not be added.",
+    });
+  }
+
+  revalidatePath("/");
+  revalidatePath(detailPath);
+  redirectWithParams(detailPath, {
+    randomPlayersAdded: String(result.addedCount),
+    randomPlayersSkipped: String(result.skippedCount),
+  });
 }
 
 export async function startTournamentAction(formData: FormData) {

@@ -18,6 +18,8 @@ export type TournamentRankingMetric =
 
 export type TournamentSortDirection = "asc" | "desc";
 
+export type TournamentAdvancementRankingMetric = "points" | "tournament_points";
+
 export type TournamentTieBreaker = {
   rankingMetric: Exclude<TournamentRankingMetric, "points" | "tournament_points">;
   sortDirection: TournamentSortDirection;
@@ -32,11 +34,11 @@ export type TournamentStandingsFormat = {
 export type TournamentTopNCondition = {
   type: "top_n";
   count: number;
-  rankingMetric: "points";
+  rankingMetric: TournamentAdvancementRankingMetric;
 };
 
 export type TournamentTopNConditionDefinition = Omit<TournamentTopNCondition, "rankingMetric"> & {
-  rankingMetric?: "points";
+  rankingMetric?: TournamentAdvancementRankingMetric;
 };
 
 export type TournamentNodeMergeSeeding = "random" | "source_rank_interleave";

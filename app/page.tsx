@@ -117,6 +117,13 @@ export default async function Home({
               </span>
             </div>
 
+            <Link
+              className="mt-5 flex items-center justify-center rounded-md border border-emerald-700 px-4 py-2.5 text-sm font-semibold text-emerald-800 transition hover:bg-emerald-50 focus:outline-none focus:ring-2 focus:ring-emerald-600 focus:ring-offset-2"
+              href="/tournaments/new"
+            >
+              Build a graphical format
+            </Link>
+
             <form action={createTournamentAction} className="mt-6 space-y-5">
               <div>
                 <label
