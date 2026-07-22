@@ -1,165 +1,30 @@
 "use client";
 
 import { useState } from "react";
-import type {
-  TournamentGameScore,
-  TournamentRound,
-  TournamentScore,
-} from "@/lib/db/tournaments/types";
+import type { TournamentGameScore, TournamentRound, TournamentScore } from "@/lib/db/tournaments/types";
 import {
-  aggregateParticipantScores,
-  sortScoresHighestFirst,
-} from "@/lib/tournament/scoring/api";
-import type { ParticipantScoreStanding } from "@/lib/tournament/scoring/types";
+  buildScoresheetTabs,
+  OVERALL_TAB_ID,
+} from "@/lib/tournament/scoring/scoresheet";
 
 type ScoresheetProps = {
   gameScores: TournamentGameScore[];
   rounds: TournamentRound[];
   scores: TournamentScore[];
-  currentRoundWinnerId?: string | null;
-  currentRoundId?: string | null;
 };
 
-type ScoresheetColumn = {
-  id: string;
-  label: string;
-};
-
-type ScoresheetRow = ParticipantScoreStanding & {
-  breakdown: Record<string, number | null>;
-};
-
-type ScoresheetTab = {
-  columns: ScoresheetColumn[];
-  emptyCellLabel: string;
-  id: string;
-  label: string;
-  scores: ScoresheetRow[];
-};
-
-const OVERALL_TAB_ID = "overall";
-
-function buildOverallTab(
-  rounds: TournamentRound[],
-  scores: TournamentScore[],
-): ScoresheetTab {
-  const scoreByParticipantAndRound = new Map(
-    scores.map((score) => [
-      `${score.participantId}:${score.roundId}`,
-      score.score,
-    ]),
-  );
-
-  return {
-    columns: rounds.map((round) => ({
-      id: round.id,
-      label: `Round ${round.roundNumber}`,
-    })),
-    emptyCellLabel: "—",
-    id: OVERALL_TAB_ID,
-    label: "Overall",
-    scores: aggregateParticipantScores(scores).map((score) => ({
-      ...score,
-      breakdown: Object.fromEntries(
-        rounds.map((round) => [
-          round.id,
-          scoreByParticipantAndRound.get(
-            `${score.participantId}:${round.id}`,
-          ) ?? null,
-        ]),
-      ),
-    })),
-  };
-}
-
-function buildRoundTab(
-  round: TournamentRound,
-  scores: TournamentScore[],
-  gameScores: TournamentGameScore[],
-  winnerId: string | null | undefined,
-  winnerRoundId: string | null | undefined,
-): ScoresheetTab {
-  const roundGameScores = gameScores.filter(
-    (score) => score.roundId === round.id,
-  );
-  const gameNumbers = [
-    ...new Set(roundGameScores.map((score) => score.gameNumber)),
-  ].sort((firstGame, secondGame) => firstGame - secondGame);
-  const scoreByParticipantAndGame = new Map(
-    roundGameScores.map((score) => [
-      `${score.participantId}:${score.gameNumber}`,
-      score.score,
-    ]),
-  );
-
-  return {
-    columns: gameNumbers.map((gameNumber) => ({
-      id: String(gameNumber),
-      label: `Game ${gameNumber}`,
-    })),
-    emptyCellLabel: "Pending",
-    id: round.id,
-    label: `Round ${round.roundNumber}`,
-    scores: sortScoresHighestFirst(scores.filter((score) => score.roundId === round.id))
-      .sort((first, second) =>
-        winnerRoundId === round.id && winnerId === first.participantId
-          ? -1
-          : winnerRoundId === round.id && winnerId === second.participantId
-            ? 1
-            : 0,
-      )
-      .map((score) => ({
-        ...score,
-        breakdown: Object.fromEntries(
-          gameNumbers.map((gameNumber) => [
-            String(gameNumber),
-            scoreByParticipantAndGame.get(
-              `${score.participantId}:${gameNumber}`,
-            ) ?? null,
-          ]),
-        ),
-      })),
-  };
-}
-
-function buildScoresheetTabs(
-  rounds: TournamentRound[],
-  scores: TournamentScore[],
-  gameScores: TournamentGameScore[],
-  winnerId: string | null | undefined,
-  winnerRoundId: string | null | undefined,
-): ScoresheetTab[] {
-  return [
-    buildOverallTab(rounds, scores),
-    ...rounds.map((round) =>
-      buildRoundTab(round, scores, gameScores, winnerId, winnerRoundId),
-    ),
-  ];
-}
-
-export function Scoresheet({
-  currentRoundWinnerId,
-  currentRoundId,
-  gameScores,
-  rounds,
-  scores,
-}: ScoresheetProps) {
+export function Scoresheet({ gameScores, rounds, scores }: ScoresheetProps) {
   const [tabs] = useState(() =>
-    buildScoresheetTabs(
-      rounds,
-      scores,
-      gameScores,
-      currentRoundWinnerId,
-      currentRoundId,
-    ),
+    buildScoresheetTabs(rounds, scores, gameScores),
   );
   const [activeTabId, setActiveTabId] = useState(OVERALL_TAB_ID);
-  const activeTab =
-    tabs.find((tab) => tab.id === activeTabId) ?? tabs[0];
+  const activeTab = tabs.find((tab) => tab.id === activeTabId) ?? tabs[0];
 
   if (!activeTab) {
     return null;
   }
+
+  const isOverallTab = activeTab.id === OVERALL_TAB_ID;
 
   return (
     <section className="py-8">
@@ -167,10 +32,9 @@ export function Scoresheet({
         <div>
           <h2 className="text-2xl font-semibold text-zinc-950">Scoresheet</h2>
           <p className="mt-1 text-sm text-zinc-500">
-            {activeTab.id === OVERALL_TAB_ID
-              ? "Combined standings across every round"
-              : `${activeTab.label} game-by-game standings`}
-            , ranked from highest to lowest points.
+            {isOverallTab
+              ? "Game-by-game scores across every played round."
+              : `${activeTab.label} games ordered by cumulative tournament points.`}
           </p>
         </div>
       </div>
@@ -198,7 +62,14 @@ export function Scoresheet({
               role="tab"
               type="button"
             >
-              {tab.label}
+              <span className="flex flex-col items-center leading-tight">
+                <span>{tab.label}</span>
+                {tab.isCheckmate ? (
+                  <span className="mt-1 text-[10px] font-medium uppercase tracking-[0.12em] text-violet-700">
+                    Checkmate
+                  </span>
+                ) : null}
+              </span>
             </button>
           );
         })}
@@ -214,42 +85,70 @@ export function Scoresheet({
             No score rows were created for {activeTab.label.toLowerCase()}.
           </div>
         ) : (
-          <div className="mt-5 overflow-x-auto rounded-lg border border-zinc-200 bg-white shadow-sm">
-            <table className="w-full min-w-max border-collapse text-left text-sm">
-              <thead className="bg-zinc-50 text-zinc-600">
+          <div className="mt-5 overflow-x-auto overscroll-x-contain rounded-lg border border-zinc-200 bg-white shadow-sm">
+            <table className="w-full min-w-max border-separate border-spacing-0 text-left text-sm">
+              <thead className="text-zinc-600">
                 <tr>
-                  <th className="min-w-52 px-4 py-3 font-medium">Player</th>
+                  <th
+                    aria-sort="ascending"
+                    className="sticky left-0 z-30 w-12 min-w-12 border-b border-r border-zinc-200 bg-zinc-50 px-3 py-3 text-right font-medium"
+                  >
+                    #
+                  </th>
+                  <th className="sticky left-12 z-30 min-w-52 border-b border-r border-zinc-200 bg-zinc-50 px-4 py-3 font-medium">
+                    Player
+                  </th>
                   {activeTab.columns.map((column) => (
                     <th
-                      className="min-w-28 px-4 py-3 text-right font-medium"
+                      className="min-w-28 border-b border-zinc-200 bg-zinc-50 px-4 py-3 text-right font-medium"
                       key={column.id}
                     >
                       {column.label}
                     </th>
                   ))}
-                  <th
-                    aria-sort="descending"
-                    className="min-w-24 px-4 py-3 text-right font-medium"
-                  >
-                    Total
+                  {!isOverallTab ? (
+                    <th className="sticky right-28 z-30 min-w-28 border-b border-l border-zinc-200 bg-zinc-50 px-4 py-3 text-right font-medium shadow-[-4px_0_8px_-6px_rgba(24,24,27,0.3)]">
+                      Round total
+                    </th>
+                  ) : null}
+                  <th className="sticky right-0 z-30 min-w-28 border-b border-l border-zinc-200 bg-zinc-50 px-4 py-3 text-right font-medium shadow-[-4px_0_8px_-6px_rgba(24,24,27,0.45)]">
+                    Overall
                   </th>
                 </tr>
               </thead>
-              <tbody className="divide-y divide-zinc-200">
+              <tbody>
                 {activeTab.scores.map((score) => (
                   <tr key={score.participantId}>
-                    <td className="px-4 py-3 font-medium text-zinc-950">
+                    <td className="sticky left-0 z-20 w-12 min-w-12 border-b border-r border-zinc-200 bg-white px-3 py-3 text-right text-zinc-500">
+                      {score.rank}
+                    </td>
+                    <td className="sticky left-12 z-20 min-w-52 border-b border-r border-zinc-200 bg-white px-4 py-3 font-medium text-zinc-950">
                       {score.displayName}
                     </td>
-                    {activeTab.columns.map((column) => (
-                      <td
-                        className="px-4 py-3 text-right text-zinc-600"
-                        key={column.id}
-                      >
-                        {score.breakdown[column.id] ?? activeTab.emptyCellLabel}
+                    {activeTab.columns.map((column) => {
+                      const value = score.breakdown[column.id];
+                      const label =
+                        typeof value === "number"
+                          ? value
+                          : value === null
+                            ? "Pending"
+                            : "—";
+
+                      return (
+                        <td
+                          className="border-b border-zinc-200 px-4 py-3 text-right text-zinc-600"
+                          key={column.id}
+                        >
+                          {label}
+                        </td>
+                      );
+                    })}
+                    {!isOverallTab ? (
+                      <td className="sticky right-28 z-20 min-w-28 border-b border-l border-zinc-200 bg-white px-4 py-3 text-right font-semibold text-zinc-950 shadow-[-4px_0_8px_-6px_rgba(24,24,27,0.3)]">
+                        {score.roundScore ?? "—"}
                       </td>
-                    ))}
-                    <td className="px-4 py-3 text-right font-semibold text-zinc-950">
+                    ) : null}
+                    <td className="sticky right-0 z-20 min-w-28 border-b border-l border-zinc-200 bg-white px-4 py-3 text-right font-semibold text-zinc-950 shadow-[-4px_0_8px_-6px_rgba(24,24,27,0.45)]">
                       {score.score}
                     </td>
                   </tr>

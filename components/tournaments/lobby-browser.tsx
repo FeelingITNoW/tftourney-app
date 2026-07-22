@@ -205,9 +205,6 @@ export function LobbyBrowser({
                     <span className="flex-1 font-medium text-zinc-950">
                       {participant.displayName}
                     </span>
-                    <span className="text-zinc-500">
-                      Round seed {participant.roundSeedNumber}
-                    </span>
                     <span className="w-16 text-right font-semibold text-zinc-950">
                       {participant.points === null
                         ? "Pending"

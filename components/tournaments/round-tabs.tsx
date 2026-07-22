@@ -4,13 +4,14 @@ import { useState, type ReactNode } from "react";
 
 type RoundTabsProps = {
   details: ReactNode;
+  graph: ReactNode;
   lobbies: ReactNode;
   scoresheet: ReactNode;
 };
 
-export function RoundTabs({ details, lobbies, scoresheet }: RoundTabsProps) {
+export function RoundTabs({ details, graph, lobbies, scoresheet }: RoundTabsProps) {
   const [activeTab, setActiveTab] = useState<
-    "lobbies" | "scoresheet" | "details"
+    "lobbies" | "scoresheet" | "graph" | "details"
   >("lobbies");
 
   return (
@@ -51,6 +52,21 @@ export function RoundTabs({ details, lobbies, scoresheet }: RoundTabsProps) {
           Scoresheet
         </button>
         <button
+          aria-controls="current-round-graph"
+          aria-selected={activeTab === "graph"}
+          className={`border-b-2 px-4 py-3 text-sm font-semibold transition focus:outline-none focus:ring-2 focus:ring-emerald-600 focus:ring-offset-2 ${
+            activeTab === "graph"
+              ? "border-emerald-700 text-emerald-800"
+              : "border-transparent text-zinc-500 hover:border-zinc-300 hover:text-zinc-800"
+          }`}
+          onClick={() => setActiveTab("graph")}
+          id="current-round-graph-tab"
+          role="tab"
+          type="button"
+        >
+          Tournament graph
+        </button>
+        <button
           aria-controls="current-round-details"
           aria-selected={activeTab === "details"}
           className={`border-b-2 px-4 py-3 text-sm font-semibold transition focus:outline-none focus:ring-2 focus:ring-emerald-600 focus:ring-offset-2 ${
@@ -84,6 +100,15 @@ export function RoundTabs({ details, lobbies, scoresheet }: RoundTabsProps) {
         tabIndex={0}
       >
         {scoresheet}
+      </div>
+      <div
+        aria-labelledby="current-round-graph-tab"
+        hidden={activeTab !== "graph"}
+        id="current-round-graph"
+        role="tabpanel"
+        tabIndex={0}
+      >
+        {graph}
       </div>
       <div
         aria-labelledby="current-round-details-tab"
