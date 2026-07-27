@@ -8,6 +8,6 @@
     "rootDir": ".",
     "types": ["node"]
   },
-  "include": ["lib/**/*.ts", "test/**/*.test.ts"],
+  "include": ["lib/**/*.ts", "app/api/**/*.ts", "test/**/*.test.ts"],
   "exclude": ["node_modules", ".next", ".test-build"]
 }

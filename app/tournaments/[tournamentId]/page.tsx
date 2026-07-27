@@ -1,4 +1,5 @@
 import Link from "next/link";
+import { cookies } from "next/headers";
 import { notFound } from "next/navigation";
 import {
   addRandomSeededPlayersAction,
@@ -13,6 +14,7 @@ import { TournamentGraph } from "@/components/tournaments/tournament-graph";
 import { RoundTabs } from "@/components/tournaments/round-tabs";
 import { Scoresheet } from "@/components/tournaments/scoresheet";
 import { TournamentDetails } from "@/components/tournaments/tournament-details";
+import { GoogleSheetsPublishingPanel } from "@/components/tournaments/google-sheets-publishing-panel";
 import {
   getTournamentDetail,
   TOURNAMENT_STATUS_ACCEPTING_PLAYERS,
@@ -38,6 +40,8 @@ type TournamentPageSearchParams = Promise<{
   progressed?: string | string[];
   deleteError?: string | string[];
   node?: string | string[];
+  authError?: string | string[];
+  authSuccess?: string | string[];
 }>;
 
 function getSearchValue(value: string | string[] | undefined): string {
@@ -69,6 +73,11 @@ export default async function TournamentPage({
   const progressed = getSearchValue(query.progressed) === "true";
   const deleteError = getSearchValue(query.deleteError);
   const requestedNode = getSearchValue(query.node);
+  const authError = getSearchValue(query.authError);
+  const authSuccess = getSearchValue(query.authSuccess) === "google";
+  const hasSheetSession =
+    process.env.TFT_REQUIRE_AUTH === "false" ||
+    Boolean((await cookies()).get("tftourney-session")?.value);
   let tournament:
     | Awaited<ReturnType<typeof getTournamentDetail>>
     | undefined;
@@ -172,6 +181,14 @@ export default async function TournamentPage({
           </section>
         ) : tournament ? (
           <>
+            <div className="py-6">
+              <GoogleSheetsPublishingPanel
+                authError={authError}
+                authSuccess={authSuccess}
+                initiallyAuthenticated={hasSheetSession}
+                tournamentId={tournament.id}
+              />
+            </div>
             {!tournament.hasStarted ? (
               <section className="grid gap-5 py-8 md:grid-cols-[1fr_19rem]">
               <div>

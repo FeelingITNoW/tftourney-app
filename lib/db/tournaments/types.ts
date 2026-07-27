@@ -42,6 +42,7 @@ export type TournamentSummary = {
 export type TournamentRegistration = {
   id: string;
   displayName: string;
+  registrationStatus: "registered" | "waitlisted" | "entered" | "withdrawn";
   createdAt: string;
 };
 
@@ -61,6 +62,8 @@ export type TournamentScore = {
   roundSeedNumber: number;
   roundId: string;
   score: number;
+  sourceEdgeId?: string | null;
+  sourceRank?: number | null;
   createdAt: string;
 };
 
@@ -81,6 +84,7 @@ export type TournamentRound = {
   isCheckmate?: boolean;
   name?: string | null;
   status?: "pending" | "active" | "completed" | "cancelled" | "skipped";
+  configuredGames?: number | null;
 };
 
 export type TournamentNode = TournamentRound & {
@@ -124,6 +128,7 @@ export type TournamentDetail = Omit<
   TournamentSummary,
   "registeredPlayerCount"
 > & {
+  formatConfig?: unknown;
   startRequirement: TournamentStartRequirement;
   registrations: TournamentRegistration[];
   participants: TournamentParticipant[];
@@ -141,6 +146,7 @@ export type TournamentDetail = Omit<
 
 export type TournamentRow = {
   id: string | number;
+  host_user_id?: string | number;
   name: string;
   max_players: number;
   format_id: string;
@@ -167,6 +173,7 @@ export type TournamentRegistrationRow = {
   tournament_id: string | number;
   display_name: string | null;
   riot_puuid: string | null;
+  registration_status: "registered" | "waitlisted" | "entered" | "withdrawn";
   created_at: string;
 };
 
@@ -185,6 +192,8 @@ export type TournamentScoreRow = {
   round_id: string | number;
   round_seed_number: number;
   score: number;
+  source_edge_id?: string | number | null;
+  source_rank?: number | null;
   created_at: string;
 };
 

@@ -8,6 +8,7 @@
     "start": "next start",
     "lint": "eslint",
     "test": "tsc -p tsconfig.test.json && node --test .test-build/test/*.test.js",
+    "test:sheets:live": "tsc -p tsconfig.test.json && node --test .test-build/test/google-sheets-live.test.js",
     "check": "npm run lint && npm run test && npm run build"
   },
   "dependencies": {

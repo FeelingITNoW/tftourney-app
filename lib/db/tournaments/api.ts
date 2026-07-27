@@ -18,7 +18,6 @@ import type {
   TournamentRegistration,
   TournamentRegistrationRow,
   TournamentRoundRow,
-  TournamentScore,
   TournamentScoreRow,
   TournamentRow,
   TournamentSummary,
@@ -51,7 +50,7 @@ export const TOURNAMENT_STATUS_ACCEPTING_PLAYERS = "accepting_players";
 const STANDARD_HOST_USER_ID = 1;
 
 const tournamentSelect =
-  "id,name,max_players,format_id,status,current_round_id,format_config,created_at";
+  "id,host_user_id,name,max_players,format_id,status,current_round_id,format_config,created_at";
 
 const LOBBY_PARTICIPANT_BATCH_SIZE = 64;
 
@@ -241,6 +240,7 @@ function mapTournamentRegistrationRow(
   return {
     id: String(row.id),
     displayName: row.display_name ?? row.riot_puuid ?? "Unknown player",
+    registrationStatus: row.registration_status,
     createdAt: row.created_at,
   };
 }
@@ -394,7 +394,7 @@ export async function getTournamentDetail(
     "tournament_registrations",
     {
       query: {
-        select: "id,tournament_id,display_name,riot_puuid,created_at",
+        select: "id,tournament_id,display_name,riot_puuid,registration_status,created_at",
         tournament_id: `eq.${tournamentId}`,
         order: "created_at.asc",
       },
@@ -417,13 +417,13 @@ export async function getTournamentDetail(
     participantIds.length
       ? {
           query: {
-            select: "id,participant_id,round_id,round_seed_number,score,created_at",
+            select: "id,participant_id,round_id,round_seed_number,score,source_edge_id,source_rank,created_at",
             participant_id: `in.(${participantIds.join(",")})`,
           },
         }
       : {
           query: {
-            select: "id,participant_id,round_id,round_seed_number,score,created_at",
+            select: "id,participant_id,round_id,round_seed_number,score,source_edge_id,source_rank,created_at",
             limit: "0",
           },
         },
@@ -598,6 +598,7 @@ export async function getTournamentDetail(
 
   return {
     ...mapTournamentRow(tournament),
+    formatConfig: tournament.format_config,
     startRequirement: getTournamentStartRequirement(tournament.format_config),
     currentRoundNumber: currentRound?.round_number ?? null,
     registrations: registrations.map(mapTournamentRegistrationRow),
@@ -610,6 +611,8 @@ export async function getTournamentDetail(
       isCheckmate:
         getConfiguredRound(tournament.format_config, round.format_round_id)?.winCondition?.type ===
         "checkmate",
+      configuredGames:
+        getConfiguredRound(tournament.format_config, round.format_round_id)?.games ?? null,
       status: round.status,
     })),
     lobbies: mappedLobbies,
@@ -630,10 +633,15 @@ export async function getTournamentDetail(
           roundId: String(score.round_id),
           roundSeedNumber: score.round_seed_number,
           score: score.score,
+          sourceEdgeId:
+            score.source_edge_id === null || score.source_edge_id === undefined
+              ? null
+              : String(score.source_edge_id),
+          sourceRank: score.source_rank ?? null,
           createdAt: score.created_at,
         };
       })
-      .filter((score): score is TournamentScore => score !== null)
+      .filter((score): score is NonNullable<typeof score> => score !== null)
       .sort((a, b) => a.seedNumber - b.seedNumber),
     roundProgress,
     progressionAction,

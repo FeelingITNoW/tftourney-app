@@ -222,3 +222,23 @@ ranked contiguous seeds are assigned; this preserves the unique
 `(round_id, round_seed_number)` index during reseeding. Empty destinations are
 marked `skipped` and propagate zero-player edges. `randomize_pending_lobby_results(tournament_id, node_id)`
 is the graph-aware test helper.
+
+## Google Sheets exports
+
+The `tournament_sheet_exports` table stores one public workbook publication per
+tournament. Tournament and result mutations mark an existing export dirty and
+increment `desired_revision`; `claim_tournament_sheet_exports` leases queued
+rows to the scheduled worker. The worker calls
+`complete_tournament_sheet_export` after writing the Players, Scores, and
+Checkmate tabs, or `fail_tournament_sheet_export` with retry and re-auth state.
+
+`organizer_google_connections` stores organizer metadata and encrypted refresh
+tokens. Refresh tokens must be encrypted before persistence and are never
+returned by application endpoints.
+
+Lobby numbers are unique per `(round_id, game_number, lobby_number)`. The
+forward migration `20260727000000_fix_lobby_game_uniqueness.sql` removes the
+legacy two-column uniqueness rule so multi-game rounds can reuse lobby numbers.
+The targeted `claim_tournament_sheet_export` function leases one queued export
+for an explicit Generate/Publish request; the scheduled batch claim remains
+responsible for retries and automatic dirty revisions.
