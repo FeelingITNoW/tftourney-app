@@ -42,6 +42,7 @@ test("GET sheet export status returns not_created for an owned tournament", asyn
     assert.equal(response.status, 200);
     assert.deepEqual(await response.json(), {
       tournamentId: "tournament-1",
+      connectionState: "disconnected",
       state: "not_created",
       spreadsheetId: null,
       spreadsheetUrl: null,

@@ -126,11 +126,16 @@ export function GoogleSheetsPublishingPanel({
   const basePath = `/api/tournaments/${encodeURIComponent(tournamentId)}/google-sheets`;
   const stateLabel = needsLogin
     ? "Sign in required"
-    : status?.state === "not_created"
-      ? "Not generated"
-      : status?.state === "needs_reauth"
-        ? "Reconnect Google"
-        : status?.state ?? "Loading";
+    : status?.connectionState === "disconnected"
+        ? "Connect Google Drive"
+      : status?.connectionState === "needs_reauth"
+        ? "Reconnect Google Drive"
+        : status?.state === "not_created"
+          ? "Not generated"
+          : status?.state === "needs_reauth"
+            ? "Reconnect Google"
+            : status?.state ?? "Loading";
+  const needsDrive = !needsLogin && Boolean(status && status.connectionState !== "connected");
 
   return (
     <section className="rounded-lg border border-indigo-200 bg-indigo-50 p-5 shadow-sm" aria-label="Google Sheets publishing">
@@ -143,20 +148,22 @@ export function GoogleSheetsPublishingPanel({
       </div>
       {status?.lastSyncedAt ? <p className="mt-3 text-xs text-indigo-800">Last synced {new Date(status.lastSyncedAt).toLocaleString()}</p> : null}
       {status?.lastError ? <p className="mt-3 text-sm font-medium text-red-700" role="alert">{status.lastError.message}</p> : null}
-      {authSuccess ? <p className="mt-3 text-sm font-medium text-emerald-800" role="status">Google account connected.</p> : null}
+      {authSuccess ? <p className="mt-3 text-sm font-medium text-emerald-800" role="status">Google Drive connected.</p> : null}
       {authError ? <p className="mt-3 text-sm font-medium text-red-700" role="alert">{AUTH_ERRORS[authError] ?? "Google sign-in failed. Please try again."}</p> : null}
       {error ? <p className="mt-3 text-sm font-medium text-red-700" role="alert">{error}</p> : null}
       {needsLogin ? <p className="mt-3 text-sm text-indigo-900">Sign in with Google to create and publish this workbook.</p> : null}
+      {needsDrive ? <p className="mt-3 text-sm text-indigo-900">Connect Google Drive when you are ready to create the shareable workbook.</p> : null}
       {pollTimedOut ? <p className="mt-3 text-sm text-indigo-900">The export is still processing. Refresh status to check again.</p> : null}
       <div className="mt-4 flex flex-wrap gap-2">
-        {needsLogin ? <a className="rounded-md border border-indigo-300 bg-white px-4 py-2 text-sm font-semibold text-indigo-900 hover:bg-indigo-100" href={`/api/auth/google?returnTo=${encodeURIComponent(`/tournaments/${tournamentId}`)}`}>Sign in with Google</a> : null}
+        {needsLogin ? <a className="rounded-md border border-indigo-300 bg-white px-4 py-2 text-sm font-semibold text-indigo-900 hover:bg-indigo-100" href={`/api/auth/google?intent=signin&returnTo=${encodeURIComponent(`/tournaments/${tournamentId}`)}`}>Sign in with Google</a> : null}
+        {needsDrive ? <a className="rounded-md border border-indigo-300 bg-white px-4 py-2 text-sm font-semibold text-indigo-900 hover:bg-indigo-100" href={`/api/auth/google?intent=sheets&returnTo=${encodeURIComponent(`/tournaments/${tournamentId}`)}`}>{status?.connectionState === "needs_reauth" ? "Reconnect Google Drive" : "Connect Google Drive"}</a> : null}
         {!needsLogin && status?.spreadsheetUrl ? (
           <a className="rounded-md bg-indigo-700 px-4 py-2 text-sm font-semibold text-white hover:bg-indigo-800" href={status.spreadsheetUrl} rel="noreferrer" target="_blank">Open public workbook</a>
         ) : null}
-        {!needsLogin ? <button className="rounded-md border border-indigo-300 bg-white px-4 py-2 text-sm font-semibold text-indigo-900 hover:bg-indigo-100 disabled:cursor-not-allowed disabled:opacity-50" disabled={busy || ((status?.state === "queued" || status?.state === "syncing") && !pollTimedOut)} onClick={() => void queueExport(basePath)} type="button">
+        {!needsLogin && !needsDrive ? <button className="rounded-md border border-indigo-300 bg-white px-4 py-2 text-sm font-semibold text-indigo-900 hover:bg-indigo-100 disabled:cursor-not-allowed disabled:opacity-50" disabled={busy || ((status?.state === "queued" || status?.state === "syncing") && !pollTimedOut)} onClick={() => void queueExport(basePath)} type="button">
           {pollTimedOut && !status?.spreadsheetId ? "Retry generation" : status?.spreadsheetId ? "Publish latest scores" : status?.state === "queued" || status?.state === "syncing" ? "Generating…" : "Generate Google Sheet"}
         </button> : null}
-        {!needsLogin && status?.spreadsheetId && status.state !== "queued" && status.state !== "syncing" ? (
+        {!needsLogin && !needsDrive && status?.spreadsheetId && status.state !== "queued" && status.state !== "syncing" ? (
           <button className="rounded-md border border-indigo-300 bg-white px-4 py-2 text-sm font-semibold text-indigo-900 hover:bg-indigo-100 disabled:cursor-not-allowed disabled:opacity-50" disabled={busy} onClick={() => void queueExport(`${basePath}/sync`)} type="button">Retry sync</button>
         ) : null}
         {!needsLogin && pollTimedOut ? <button className="rounded-md border border-indigo-300 bg-white px-4 py-2 text-sm font-semibold text-indigo-900 hover:bg-indigo-100 disabled:cursor-not-allowed disabled:opacity-50" disabled={busy} onClick={refreshStatus} type="button">Refresh status</button> : null}

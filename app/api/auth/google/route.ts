@@ -13,6 +13,10 @@ function safeReturnPath(value: string | null): string {
     : "/";
 }
 
+function authIntent(value: string | null): "signin" | "sheets" {
+  return value === "sheets" ? "sheets" : "signin";
+}
+
 export async function GET(request: Request) {
   const requestUrl = new URL(request.url);
   const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL ?? process.env.SUPABASE_URL;
@@ -20,7 +24,8 @@ export async function GET(request: Request) {
   if (!supabaseUrl || !supabaseKey) return Response.json({ error: "Supabase Auth is not configured." }, { status: 503 });
 
   const returnTo = safeReturnPath(requestUrl.searchParams.get("returnTo"));
-  if (!process.env.GOOGLE_TOKEN_ENCRYPTION_KEY) {
+  const intent = authIntent(requestUrl.searchParams.get("intent"));
+  if (intent === "sheets" && !process.env.GOOGLE_TOKEN_ENCRYPTION_KEY) {
     const destination = new URL(returnTo, request.url);
     destination.searchParams.set("authError", "google_token_encryption_missing");
     return NextResponse.redirect(destination);
@@ -34,9 +39,11 @@ export async function GET(request: Request) {
   authorize.searchParams.set("redirect_to", callback);
   authorize.searchParams.set("code_challenge", challenge);
   authorize.searchParams.set("code_challenge_method", "S256");
-  authorize.searchParams.set("scopes", "https://www.googleapis.com/auth/drive.file");
-  authorize.searchParams.set("access_type", "offline");
-  authorize.searchParams.set("prompt", "consent");
+  if (intent === "sheets") {
+    authorize.searchParams.set("scopes", "https://www.googleapis.com/auth/drive.file");
+    authorize.searchParams.set("access_type", "offline");
+    authorize.searchParams.set("prompt", "consent");
+  }
 
   const response = NextResponse.redirect(authorize);
   response.cookies.set("tftourney-google-pkce", verifier, {
@@ -47,6 +54,13 @@ export async function GET(request: Request) {
     path: "/api/auth/google",
   });
   response.cookies.set("tftourney-google-return-to", returnTo, {
+    httpOnly: true,
+    maxAge: 600,
+    sameSite: "lax",
+    secure: process.env.NODE_ENV === "production",
+    path: "/api/auth/google",
+  });
+  response.cookies.set("tftourney-google-intent", intent, {
     httpOnly: true,
     maxAge: 600,
     sameSite: "lax",

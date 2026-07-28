@@ -47,8 +47,6 @@ import { parseRiotGameTag } from "../../tournament/players/api";
 
 export const TOURNAMENT_STATUS_ACCEPTING_PLAYERS = "accepting_players";
 
-const STANDARD_HOST_USER_ID = 1;
-
 const tournamentSelect =
   "id,host_user_id,name,max_players,format_id,status,current_round_id,format_config,created_at";
 
@@ -208,6 +206,7 @@ function mapTournamentRow(row: TournamentRow): Omit<
 > {
   return {
     id: String(row.id),
+    hostUserId: String(row.host_user_id ?? 1),
     name: row.name,
     playerCount: row.max_players,
     formatId: row.format_id,
@@ -267,7 +266,7 @@ export async function createTournament(
     },
     prefer: "return=representation",
     body: {
-      host_user_id: STANDARD_HOST_USER_ID,
+      host_user_id: input.hostUserId,
       name: input.name,
       max_players: input.playerCount,
       format_id: input.formatId,
@@ -311,10 +310,11 @@ export async function deleteTournament(
   }
 }
 
-export async function listTournaments(): Promise<TournamentSummary[]> {
+export async function listTournaments(hostUserId?: string): Promise<TournamentSummary[]> {
   const tournaments = await supabaseRestRequest<TournamentRow[]>("tournaments", {
     query: {
       select: tournamentSelect,
+      ...(hostUserId ? { host_user_id: `eq.${hostUserId}` } : {}),
       order: "created_at.desc",
     },
   });
@@ -370,6 +370,22 @@ export async function listTournaments(): Promise<TournamentSummary[]> {
     registeredPlayerCount:
       playerCountByTournamentId.get(String(tournament.id)) ?? 0,
   }));
+}
+
+export async function listHostedTournaments(hostUserId: string): Promise<TournamentSummary[]> {
+  return listTournaments(hostUserId);
+}
+
+export async function assertTournamentHost(tournamentId: string, hostUserId: string): Promise<void> {
+  const rows = await supabaseRestRequest<Pick<TournamentRow, "id" | "host_user_id">[]>("tournaments", {
+    query: {
+      select: "id,host_user_id",
+      id: `eq.${tournamentId}`,
+      host_user_id: `eq.${hostUserId}`,
+      limit: "1",
+    },
+  });
+  if (!rows[0]) throw new Error("TOURNAMENT_NOT_FOUND");
 }
 
 export async function getTournamentDetail(

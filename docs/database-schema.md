@@ -5,6 +5,7 @@
 CREATE TABLE public.users (
   id bigint GENERATED ALWAYS AS IDENTITY NOT NULL,
   email character varying NOT NULL UNIQUE,
+  auth_user_id uuid UNIQUE,
   created_at timestamptz NOT NULL DEFAULT now(),
   updated_at timestamptz NOT NULL DEFAULT now(),
   CONSTRAINT users_pkey PRIMARY KEY (id)
@@ -24,6 +25,8 @@ CREATE TABLE public.tournaments (
   created_at timestamptz NOT NULL DEFAULT now(),
   updated_at timestamptz NOT NULL DEFAULT now(),
   CONSTRAINT tournaments_pkey PRIMARY KEY (id),
+  CONSTRAINT tournaments_host_user_id_fkey
+    FOREIGN KEY (host_user_id) REFERENCES public.users(id) ON DELETE RESTRICT,
   CONSTRAINT tournaments_current_round_id_fkey
     FOREIGN KEY (current_round_id) REFERENCES public.rounds(id) ON DELETE SET NULL
 );
