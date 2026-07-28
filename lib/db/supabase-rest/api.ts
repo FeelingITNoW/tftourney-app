@@ -79,5 +79,16 @@ export async function supabaseRestRequest<T>(
     return null as T;
   }
 
-  return (await response.json()) as T;
+  const responseBody = await response.text();
+  if (!responseBody.trim()) {
+    return null as T;
+  }
+
+  try {
+    return JSON.parse(responseBody) as T;
+  } catch {
+    throw new DatabaseRequestError(
+      `Database response from ${table} was not valid JSON.`,
+    );
+  }
 }
