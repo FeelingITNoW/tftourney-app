@@ -1,5 +1,4 @@
 import Link from "next/link";
-import { cookies } from "next/headers";
 import { notFound } from "next/navigation";
 import {
   addRandomSeededPlayersAction,
@@ -15,10 +14,12 @@ import { RoundTabs } from "@/components/tournaments/round-tabs";
 import { Scoresheet } from "@/components/tournaments/scoresheet";
 import { TournamentDetails } from "@/components/tournaments/tournament-details";
 import { GoogleSheetsPublishingPanel } from "@/components/tournaments/google-sheets-publishing-panel";
+import { AccountHeader } from "@/components/account/account-header";
 import {
   getTournamentDetail,
   TOURNAMENT_STATUS_ACCEPTING_PLAYERS,
 } from "@/lib/db/tournaments/api";
+import { getOrganizerSession } from "@/lib/auth/session";
 import { selectTournamentEntrants } from "@/lib/tournament/start/api";
 
 export const dynamic = "force-dynamic";
@@ -42,6 +43,7 @@ type TournamentPageSearchParams = Promise<{
   node?: string | string[];
   authError?: string | string[];
   authSuccess?: string | string[];
+  authorizationError?: string | string[];
 }>;
 
 function getSearchValue(value: string | string[] | undefined): string {
@@ -74,10 +76,9 @@ export default async function TournamentPage({
   const deleteError = getSearchValue(query.deleteError);
   const requestedNode = getSearchValue(query.node);
   const authError = getSearchValue(query.authError);
-  const authSuccess = getSearchValue(query.authSuccess) === "google";
-  const hasSheetSession =
-    process.env.TFT_REQUIRE_AUTH === "false" ||
-    Boolean((await cookies()).get("tftourney-session")?.value);
+  const authSuccess = getSearchValue(query.authSuccess) === "google_sheets";
+  const authorizationError = getSearchValue(query.authorizationError);
+  const organizer = await getOrganizerSession();
   let tournament:
     | Awaited<ReturnType<typeof getTournamentDetail>>
     | undefined;
@@ -98,6 +99,8 @@ export default async function TournamentPage({
 
   const isAcceptingPlayers =
     tournament?.status === TOURNAMENT_STATUS_ACCEPTING_PLAYERS;
+  const isTournamentHost = Boolean(tournament && organizer && organizer.hostUserId === tournament.hostUserId);
+  const hasSheetSession = isTournamentHost;
   const currentRoundLabel = tournament?.selectedNodeId
     ? tournament.nodes.find((node) => node.id === tournament.selectedNodeId)?.name ?? `Node ${tournament.selectedNodeId}`
     : "Not started";
@@ -162,12 +165,7 @@ export default async function TournamentPage({
               Registered players and tournament status
             </p>
           </div>
-          <Link
-            className="rounded-md border border-zinc-200 bg-white px-3 py-2 text-sm font-medium text-zinc-600 shadow-sm hover:bg-zinc-50"
-            href="/"
-          >
-            Back to tournaments
-          </Link>
+          <div className="flex items-center gap-4"><Link className="rounded-md border border-zinc-200 bg-white px-3 py-2 text-sm font-medium text-zinc-600 shadow-sm hover:bg-zinc-50" href="/">Back to tournaments</Link><AccountHeader returnTo={`/tournaments/${tournamentId}`} /></div>
         </header>
 
         {databaseError ? (
@@ -182,15 +180,13 @@ export default async function TournamentPage({
         ) : tournament ? (
           <>
             <div className="py-6">
-              <GoogleSheetsPublishingPanel
-                authError={authError}
-                authSuccess={authSuccess}
-                initiallyAuthenticated={hasSheetSession}
-                tournamentId={tournament.id}
-              />
+              {!isTournamentHost ? <div className="mb-4 rounded-md border border-zinc-200 bg-white p-4 text-sm text-zinc-600">You are viewing this tournament publicly. Sign in as its host to manage players, results, or Sheets publishing.</div> : null}
+              {isTournamentHost ? <GoogleSheetsPublishingPanel authError={authError} authSuccess={authSuccess} initiallyAuthenticated={hasSheetSession} tournamentId={tournament.id} /> : <div className="rounded-lg border border-indigo-200 bg-indigo-50 p-5 text-sm text-indigo-900"><p className="font-semibold">Google Sheets scoreboard</p><p className="mt-1">The tournament host can connect Google Drive to generate and publish a workbook.</p></div>}
             </div>
+            {authorizationError ? <p className="mb-5 rounded-md border border-red-200 bg-red-50 p-4 text-sm font-medium text-red-800" role="alert">{authorizationError}</p> : null}
             {!tournament.hasStarted ? (
               <section className="grid gap-5 py-8 md:grid-cols-[1fr_19rem]">
+              <fieldset className={`contents ${isTournamentHost ? "" : "opacity-60"}`} disabled={!isTournamentHost}>
               <div>
                 <p className="text-sm font-semibold uppercase tracking-[0.12em] text-amber-700">
                   Tournament
@@ -431,6 +427,7 @@ export default async function TournamentPage({
                   ) : null}
                 </div>
               </div>
+              </fieldset>
               </section>
             ) : null}
 
@@ -456,6 +453,7 @@ export default async function TournamentPage({
                       startRequirement={tournament.startRequirement}
                       registrationError={registrationError}
                       startError={startError}
+                      isHost={isTournamentHost}
                       tournament={tournament}
                     />
                   }
@@ -505,7 +503,7 @@ export default async function TournamentPage({
                             <button
                               className="rounded-md border border-amber-300 bg-amber-50 px-3 py-2 text-sm font-semibold text-amber-900 transition hover:bg-amber-100 focus:outline-none focus:ring-2 focus:ring-amber-600 focus:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-40"
                               disabled={
-                                isTournamentCompleted || !hasPendingCurrentRoundLobby
+                                !isTournamentHost || isTournamentCompleted || !hasPendingCurrentRoundLobby
                               }
                               title="Temporary testing helper"
                               type="submit"

@@ -1,5 +1,7 @@
 import Link from "next/link";
 import { createTournamentAction } from "@/app/actions";
+import { AccountHeader } from "@/components/account/account-header";
+import { getOrganizerSession } from "@/lib/auth/session";
 import { listTournaments } from "@/lib/db/tournaments/api";
 import type { TournamentSummary } from "@/lib/db/tournaments/types";
 import { TOURNAMENT_FORMAT_OPTIONS } from "@/lib/tournament/formats/api";
@@ -36,6 +38,7 @@ export default async function Home({
   const playerCount = getSearchValue(query.playerCount);
   const formatId = getSearchValue(query.formatId) || "default";
   const hasSubmitted = tournamentName !== "" || playerCount !== "";
+  const organizer = await getOrganizerSession();
   const validation = hasSubmitted
     ? validateTournamentCreation({
         name: tournamentName,
@@ -67,9 +70,7 @@ export default async function Home({
               Tournament operations for Teamfight Tactics
             </p>
           </div>
-          <div className="hidden rounded-md border border-zinc-200 bg-white px-3 py-2 text-sm font-medium text-zinc-600 shadow-sm sm:block">
-            Starter setup
-          </div>
+          <AccountHeader returnTo="/dashboard" />
         </header>
 
         <section className="grid flex-1 items-center gap-10 py-12 lg:grid-cols-[1.02fr_0.98fr] lg:py-16">
@@ -112,11 +113,20 @@ export default async function Home({
                   Start with the fields needed to save a tournament draft.
                 </p>
               </div>
-              <span className="rounded-md bg-emerald-50 px-3 py-1 text-sm font-medium text-emerald-800">
-                Accepting players
+              <span className={`rounded-md px-3 py-1 text-sm font-medium ${organizer ? "bg-emerald-50 text-emerald-800" : "bg-amber-50 text-amber-900"}`}>
+                {organizer ? "Ready to create" : "Sign-in required"}
               </span>
             </div>
 
+            {!organizer ? (
+              <div className="mt-5 rounded-md border border-amber-200 bg-amber-50 p-4">
+                <p className="text-sm font-semibold text-amber-950">Sign in to create a tournament</p>
+                <p className="mt-1 text-sm leading-6 text-amber-900">Your tournaments are saved to your organizer dashboard.</p>
+                <a className="mt-3 inline-flex rounded-md bg-zinc-950 px-4 py-2 text-sm font-semibold text-white hover:bg-zinc-800" href="/api/auth/google?intent=signin&returnTo=%2Fdashboard">Sign in with Google</a>
+              </div>
+            ) : null}
+
+            <fieldset className={organizer ? "" : "mt-5 opacity-50"} disabled={!organizer}>
             <Link
               className="mt-5 flex items-center justify-center rounded-md border border-emerald-700 px-4 py-2.5 text-sm font-semibold text-emerald-800 transition hover:bg-emerald-50 focus:outline-none focus:ring-2 focus:ring-emerald-600 focus:ring-offset-2"
               href="/tournaments/new"
@@ -234,6 +244,7 @@ export default async function Home({
                 Create tournament
               </button>
             </form>
+            </fieldset>
 
             {createError ? (
               <div className="mt-6 rounded-md border border-red-200 bg-red-50 p-4">

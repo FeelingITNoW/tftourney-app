@@ -1,4 +1,5 @@
 import { supabaseRestRequest } from "../db/supabase-rest/api";
+import { getOrganizerGoogleConnection } from "../db/users/api";
 import type { TournamentRow } from "../db/tournaments/types";
 import type {
   GoogleSheetExportRow,
@@ -10,10 +11,11 @@ const STANDARD_HOST_USER_ID = "1";
 const EXPORT_SELECT =
   "id,tournament_id,host_user_id,spreadsheet_id,spreadsheet_url,players_sheet_id,scores_sheet_id,checkmate_sheet_id,state,desired_revision,synced_revision,dirty_at,last_synced_at,next_attempt_at,retry_count,lease_until,last_error_code,last_error_message";
 
-function mapExportRow(tournamentId: string, row?: GoogleSheetExportRow): GoogleSheetExportStatus {
+function mapExportRow(tournamentId: string, row: GoogleSheetExportRow | undefined, connectionState: GoogleSheetExportStatus["connectionState"]): GoogleSheetExportStatus {
   if (!row) {
     return {
       tournamentId,
+      connectionState,
       state: "not_created",
       spreadsheetId: null,
       spreadsheetUrl: null,
@@ -27,6 +29,7 @@ function mapExportRow(tournamentId: string, row?: GoogleSheetExportRow): GoogleS
   }
   return {
     tournamentId,
+    connectionState,
     state: row.state,
     spreadsheetId: row.spreadsheet_id,
     spreadsheetUrl: row.spreadsheet_url,
@@ -57,6 +60,7 @@ export async function getGoogleSheetExportStatus(
   hostUserId = STANDARD_HOST_USER_ID,
 ): Promise<GoogleSheetExportStatus> {
   await assertTournamentHost(tournamentId, hostUserId);
+  const connectionState = await getOrganizerGoogleConnection(hostUserId);
   const rows = await supabaseRestRequest<GoogleSheetExportRow[]>("tournament_sheet_exports", {
     query: {
       select: EXPORT_SELECT,
@@ -64,7 +68,7 @@ export async function getGoogleSheetExportStatus(
       limit: "1",
     },
   });
-  return mapExportRow(tournamentId, rows[0]);
+  return mapExportRow(tournamentId, rows[0], connectionState);
 }
 
 export async function requestGoogleSheetExport(
@@ -104,5 +108,5 @@ export async function requestGoogleSheetExport(
         prefer: "resolution=merge-duplicates,return=representation",
         body: { ...body, synced_revision: 0 },
       });
-  return mapExportRow(input.tournamentId, rows[0] ?? { ...body, id: "pending", spreadsheet_id: null, spreadsheet_url: null, players_sheet_id: null, scores_sheet_id: null, checkmate_sheet_id: null, synced_revision: 0, last_synced_at: null, last_error_code: null, last_error_message: null, next_attempt_at: null } as GoogleSheetExportRow);
+  return mapExportRow(input.tournamentId, rows[0] ?? { ...body, id: "pending", spreadsheet_id: null, spreadsheet_url: null, players_sheet_id: null, scores_sheet_id: null, checkmate_sheet_id: null, synced_revision: 0, last_synced_at: null, last_error_code: null, last_error_message: null, next_attempt_at: null } as GoogleSheetExportRow, "connected");
 }

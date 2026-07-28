@@ -1,9 +1,12 @@
 import Link from "next/link";
+import { AccountHeader } from "@/components/account/account-header";
+import { requireOrganizer } from "@/lib/auth/session";
 import { TournamentFormatBuilder } from "@/components/tournaments/tournament-format-builder";
 
 export const dynamic = "force-dynamic";
 
-export default function NewTournamentPage() {
+export default async function NewTournamentPage() {
+  await requireOrganizer("/tournaments/new");
   return (
     <main className="min-h-screen bg-stone-50 text-zinc-950">
       <div className="mx-auto w-full max-w-[1440px] px-6 py-6 sm:px-8 lg:px-10">
@@ -12,9 +15,7 @@ export default function NewTournamentPage() {
             <p className="text-sm font-semibold uppercase tracking-[0.12em] text-emerald-700">TFTourney</p>
             <p className="mt-1 text-sm text-zinc-500">Graphical tournament format builder</p>
           </div>
-          <Link className="text-sm font-semibold text-emerald-800 hover:text-emerald-950" href="/">
-            Back to tournaments
-          </Link>
+          <div className="flex items-center gap-4"><Link className="text-sm font-semibold text-emerald-800 hover:text-emerald-950" href="/">Back to tournaments</Link><AccountHeader returnTo="/tournaments/new" /></div>
         </header>
 
         <section className="py-8">

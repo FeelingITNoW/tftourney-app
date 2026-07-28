@@ -14,6 +14,7 @@ type TournamentDetailsProps = {
   registrationError: string;
   startError: string;
   deleteError: string;
+  isHost: boolean;
 };
 
 export function TournamentDetails({
@@ -25,6 +26,7 @@ export function TournamentDetails({
   registrationError,
   startError,
   deleteError,
+  isHost,
 }: TournamentDetailsProps) {
   const isAcceptingPlayers = tournament.status === "accepting_players";
   const isTournamentCompleted = tournament.status === "completed";
@@ -78,6 +80,7 @@ export function TournamentDetails({
         </div>
 
         <div className="space-y-4">
+          {!isHost ? <div className="rounded-lg border border-zinc-200 bg-zinc-100 p-5 text-sm font-medium text-zinc-700">Only the tournament host can change players, start the event, or delete it.</div> : null}
           <div className="rounded-lg border border-zinc-200 bg-white p-5 shadow-sm">
             <h2 className="text-lg font-semibold text-zinc-950">
               Start tournament
@@ -103,7 +106,7 @@ export function TournamentDetails({
                         ? "cursor-not-allowed bg-zinc-200 text-zinc-500"
                         : "bg-emerald-700 text-white hover:bg-emerald-800"
                     }`}
-                    disabled={tournament.registrations.length === 0 || !meetsStartRequirement}
+                    disabled={!isHost || tournament.registrations.length === 0 || !meetsStartRequirement}
                     type="submit"
                   >
                     Start tournament
@@ -143,11 +146,13 @@ export function TournamentDetails({
                     name="gameTag"
                     placeholder="GameName#TAG"
                     required
+                    disabled={!isHost}
                     type="text"
                   />
                 </div>
                 <button
                   className="flex h-11 w-full items-center justify-center rounded-md bg-zinc-950 px-4 text-sm font-semibold text-white transition hover:bg-zinc-800 focus:outline-none focus:ring-2 focus:ring-emerald-600 focus:ring-offset-2"
+                  disabled={!isHost}
                   type="submit"
                 >
                   Verify and register player
@@ -190,12 +195,14 @@ export function TournamentDetails({
                   pattern="DELETE"
                   placeholder="DELETE"
                   required
+                  disabled={!isHost}
                   spellCheck={false}
                   type="text"
                 />
               </div>
               <button
                 className="flex h-11 w-full items-center justify-center rounded-md bg-red-700 px-4 text-sm font-semibold text-white transition hover:bg-red-800 focus:outline-none focus:ring-2 focus:ring-red-600 focus:ring-offset-2"
+                disabled={!isHost}
                 type="submit"
               >
                 Delete tournament permanently

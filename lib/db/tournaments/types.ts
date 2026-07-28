@@ -27,6 +27,7 @@ export type TournamentRoundProgress = {
 
 export type TournamentSummary = {
   id: string;
+  hostUserId: string;
   name: string;
   playerCount: number;
   formatId: string;
@@ -230,6 +231,7 @@ export type StartTournamentResult = {
 };
 
 export type CreateTournamentInput = {
+  hostUserId: string;
   name: string;
   playerCount: number;
   formatId: string;

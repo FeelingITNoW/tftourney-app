@@ -28,6 +28,7 @@ export type GoogleSheetExportState =
 
 export type GoogleSheetExportStatus = {
   tournamentId: string;
+  connectionState: "connected" | "needs_reauth" | "disconnected";
   state: GoogleSheetExportState;
   spreadsheetId: string | null;
   spreadsheetUrl: string | null;

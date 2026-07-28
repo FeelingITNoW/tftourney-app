@@ -56,7 +56,13 @@ The easiest way to deploy your Next.js app is to use the [Vercel Platform](https
 
 Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
 
-## Google Sheets publishing
+## Organizer sign-in and Google Sheets publishing
+
+Organizers sign in with Google from the shared account control and manage their
+own tournaments from `/dashboard`. Ordinary sign-in requests identity access
+only. The Google Sheets panel requests separate Drive consent when a host first
+chooses to connect Google Drive. Apply all Supabase migrations, including the
+latest organizer ownership migration, before enabling deployed sign-in.
 
 The tournament page can queue a public Google Sheets workbook with `Players`,
 `Scores`, and `Checkmate` tabs. Apply the Google Sheets export migration, then

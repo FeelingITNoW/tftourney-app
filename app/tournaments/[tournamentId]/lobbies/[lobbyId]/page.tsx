@@ -1,4 +1,6 @@
 import Link from "next/link";
+import { AccountHeader } from "@/components/account/account-header";
+import { getOrganizerSession } from "@/lib/auth/session";
 import { notFound } from "next/navigation";
 import { updateLobbyScoresAction } from "@/app/actions";
 import { RandomizeLobbyScoresButton } from "@/components/tournaments/randomize-lobby-scores-button";
@@ -17,6 +19,7 @@ type LobbyPageSearchParams = Promise<{
   scoreError?: string | string[];
   saved?: string | string[];
   node?: string | string[];
+  authorizationError?: string | string[];
 }>;
 
 function getSearchValue(value: string | string[] | undefined): string {
@@ -35,11 +38,13 @@ export default async function LobbyScoresPage({
   searchParams: LobbyPageSearchParams;
 }) {
   const { tournamentId, lobbyId } = await params;
+  const organizer = await getOrganizerSession();
   const query = await searchParams;
   const returnGame = getSearchValue(query.game);
   const returnPage = getSearchValue(query.page);
   const scoreError = getSearchValue(query.scoreError);
   const saved = getSearchValue(query.saved) === "true";
+  const authorizationError = getSearchValue(query.authorizationError);
   const requestedNode = getSearchValue(query.node);
   let tournament:
     | Awaited<ReturnType<typeof getTournamentDetail>>
@@ -67,7 +72,8 @@ export default async function LobbyScoresPage({
       .filter((score) => score.roundId === lobby?.roundId)
       .map((score) => [score.participantId, score.score]) ?? [],
   );
-  const isReadOnly = tournament?.status === "completed";
+  const isTournamentHost = Boolean(tournament && organizer && organizer.hostUserId === tournament.hostUserId);
+  const isReadOnly = tournament?.status === "completed" || !isTournamentHost;
   const backQuery = new URLSearchParams();
   if (returnGame) {
     backQuery.set("game", returnGame);
@@ -97,12 +103,7 @@ export default async function LobbyScoresPage({
               Inspect the lobby and record official results
             </p>
           </div>
-          <Link
-            className="rounded-md border border-zinc-200 bg-white px-3 py-2 text-sm font-medium text-zinc-600 shadow-sm hover:bg-zinc-50"
-            href={backToTournamentHref}
-          >
-            Back to lobby browser
-          </Link>
+          <div className="flex items-center gap-4"><Link className="rounded-md border border-zinc-200 bg-white px-3 py-2 text-sm font-medium text-zinc-600 shadow-sm hover:bg-zinc-50" href={backToTournamentHref}>Back to lobby browser</Link><AccountHeader returnTo={backToTournamentHref} /></div>
         </header>
 
         {databaseError ? (
@@ -165,9 +166,11 @@ export default async function LobbyScoresPage({
               </div>
             ) : null}
 
+            {authorizationError ? <div className="mb-5 rounded-md border border-red-200 bg-red-50 p-4 text-sm font-medium text-red-800" role="alert">{authorizationError}</div> : null}
+
             {isReadOnly ? (
               <div className="mb-5 rounded-md border border-zinc-200 bg-zinc-100 p-4 text-sm font-medium text-zinc-700">
-                This tournament is complete. Results are read-only.
+                {tournament.status === "completed" ? "This tournament is complete. Results are read-only." : "Only the tournament host can enter results. This is a public read-only view."}
               </div>
             ) : null}
 
