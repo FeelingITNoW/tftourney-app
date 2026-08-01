@@ -2,6 +2,7 @@ import {
   DatabaseRequestError,
   supabaseRestRequest,
 } from "../supabase-rest/api";
+import { unstable_cache } from "next/cache";
 import type {
   CreateTournamentInput,
   DeleteTournamentInput,
@@ -9,7 +10,14 @@ import type {
   StartTournamentInput,
   StartTournamentResult,
   TournamentDetail,
+  TournamentOverview,
+  TournamentRoundDetail,
+  TournamentLobbyDetail,
+  TournamentLobbyRoster,
+  TournamentLobbyRosterParticipant,
   TournamentGameScore,
+  TournamentRound,
+  TournamentScore,
   TournamentLobby,
   TournamentLobbyParticipantRow,
   TournamentLobbyRow,
@@ -388,103 +396,120 @@ export async function assertTournamentHost(tournamentId: string, hostUserId: str
   if (!rows[0]) throw new Error("TOURNAMENT_NOT_FOUND");
 }
 
-export async function getTournamentDetail(
-  tournamentId: string,
-  selectedNodeId?: string,
-): Promise<TournamentDetail | null> {
-  const tournaments = await supabaseRestRequest<TournamentRow[]>("tournaments", {
-    query: {
-      select: tournamentSelect,
-      id: `eq.${tournamentId}`,
-      limit: "1",
-    },
-  });
+function mapTournamentRound(
+  row: TournamentRoundRow,
+  formatConfig: unknown,
+  graph = getFormatGraph(formatConfig),
+): TournamentRound {
+  const configuredRound = getConfiguredRound(formatConfig, row.format_round_id);
+  return {
+    id: String(row.id),
+    roundNumber: row.round_number,
+    formatNodeId: row.format_round_id,
+    name:
+      row.stage_name ??
+      graph.nodes.find((node) => node.id === row.format_round_id)?.name ??
+      row.format_round_id,
+    isCheckmate: configuredRound?.winCondition?.type === "checkmate",
+    configuredGames: configuredRound?.games ?? null,
+    status: row.status,
+  };
+}
 
-  const tournament = tournaments[0];
+function mapTournamentScoreRow(
+  row: TournamentScoreRow,
+  participantById: Map<string, TournamentParticipant>,
+): TournamentScore | null {
+  const participant = participantById.get(row.participant_id);
+  if (!participant) return null;
+  return {
+    id: row.id,
+    participantId: row.participant_id,
+    displayName: participant.displayName,
+    seedNumber: participant.seedNumber,
+    roundId: String(row.round_id),
+    roundSeedNumber: row.round_seed_number,
+    score: row.score,
+    sourceEdgeId:
+      row.source_edge_id === null || row.source_edge_id === undefined
+        ? null
+        : String(row.source_edge_id),
+    sourceRank: row.source_rank ?? null,
+    createdAt: row.created_at,
+  };
+}
 
-  if (!tournament) {
-    return null;
-  }
-
-  const registrations = await supabaseRestRequest<TournamentRegistrationRow[]>(
-    "tournament_registrations",
-    {
-      query: {
-        select: "id,tournament_id,display_name,riot_puuid,registration_status,created_at",
-        tournament_id: `eq.${tournamentId}`,
-        order: "created_at.asc",
-      },
-    },
+function tournamentIsGraphFormat(formatConfig: unknown): boolean {
+  return (
+    typeof formatConfig === "object" &&
+    formatConfig !== null &&
+    Array.isArray((formatConfig as { nodes?: unknown }).nodes)
   );
-  const participants = await supabaseRestRequest<TournamentParticipantRow[]>(
+}
+
+function emptyScoreQuery(): { query: { select: string; limit: string } } {
+  return {
+    query: {
+      select:
+        "id,participant_id,round_id,round_seed_number,score,source_edge_id,source_rank,created_at",
+      limit: "0",
+    },
+  };
+}
+
+async function fetchParticipantsByIds(
+  participantIds: string[],
+  tournamentId?: string,
+): Promise<TournamentParticipantRow[]> {
+  if (participantIds.length === 0) return [];
+  return supabaseRestRequest<TournamentParticipantRow[]>(
     "tournament_participants",
     {
       query: {
         select:
           "id,tournament_id,registration_id,seed_number,display_name_at_start,created_at",
-        tournament_id: `eq.${tournamentId}`,
+        id: `in.(${participantIds.join(",")})`,
+        ...(tournamentId ? { tournament_id: `eq.${tournamentId}` } : {}),
         order: "seed_number.asc",
       },
     },
   );
-  const participantIds = participants.map((participant) => participant.id);
-  const scores = await supabaseRestRequest<TournamentScoreRow[]>(
-    "participant_round_scores",
-    participantIds.length
-      ? {
-          query: {
-            select: "id,participant_id,round_id,round_seed_number,score,source_edge_id,source_rank,created_at",
-            participant_id: `in.(${participantIds.join(",")})`,
-          },
-        }
-      : {
-          query: {
-            select: "id,participant_id,round_id,round_seed_number,score,source_edge_id,source_rank,created_at",
-            limit: "0",
-          },
-        },
-  );
-  const rounds = await supabaseRestRequest<TournamentRoundRow[]>("rounds", {
-    query: {
-      select: "id,round_number,format_round_id,status",
-      tournament_id: `eq.${tournamentId}`,
-      order: "round_number.asc",
-    },
-  });
-  const isGraphFormat =
-    typeof tournament.format_config === "object" &&
-    tournament.format_config !== null &&
-    Array.isArray((tournament.format_config as { nodes?: unknown }).nodes);
-  const edgeRows = isGraphFormat
-    ? await supabaseRestRequest<TournamentEdgeRow[]>("tournament_edges", {
-        query: {
-          select:
-            "id,tournament_id,format_edge_id,source_round_id,destination_round_id,priority,condition,status,advanced_player_count",
-          tournament_id: `eq.${tournamentId}`,
-          order: "priority.asc,id.asc",
-        },
-      })
-    : [];
-  const currentRound = rounds.find(
-    (round) => String(round.id) === String(selectedNodeId ?? tournament.current_round_id),
-  ) ?? rounds.find((round) => round.status === "active") ?? null;
-  const roundIds = rounds.map((round) => round.id);
-  const allLobbies = roundIds.length
-    ? await supabaseRestRequest<TournamentLobbyRow[]>("lobbies", {
-        query: {
-          select: "id,round_id,game_number,lobby_number",
-          round_id: `in.(${roundIds.join(",")})`,
-          order: "game_number.asc,lobby_number.asc",
-        },
-      })
-    : [];
-  const lobbies = allLobbies.filter(
-    (lobby) => String(lobby.round_id) === String(currentRound?.id ?? tournament.current_round_id),
-  );
-  const lobbyIds = allLobbies.map((lobby) => lobby.id);
-  const lobbyParticipants = lobbyIds.length
+}
+
+async function loadTournamentRoundDetail(
+  tournament: TournamentRow,
+  round: TournamentRoundRow,
+): Promise<TournamentRoundDetail> {
+  const [lobbyRows, scoreRows] = await Promise.all([
+    supabaseRestRequest<TournamentLobbyRow[]>("lobbies", {
+      query: {
+        select: "id,round_id,game_number,lobby_number",
+        round_id: `eq.${round.id}`,
+        order: "game_number.asc,lobby_number.asc",
+      },
+    }),
+    supabaseRestRequest<TournamentScoreRow[]>("participant_round_scores", {
+      query: {
+        select:
+          "id,participant_id,round_id,round_seed_number,score,source_edge_id,source_rank,created_at",
+        round_id: `eq.${round.id}`,
+      },
+    }),
+  ]);
+  const lobbyIds = lobbyRows.map((lobby) => lobby.id);
+  const lobbyParticipantRows = lobbyIds.length
     ? await fetchLobbyParticipants(lobbyIds)
     : [];
+  const participantIds = [
+    ...new Set([
+      ...scoreRows.map((score) => score.participant_id),
+      ...lobbyParticipantRows.map((participant) => participant.participant_id),
+    ]),
+  ];
+  const participants = await fetchParticipantsByIds(
+    participantIds,
+    String(tournament.id),
+  );
   const participantById = new Map(
     participants.map((participant) => [
       participant.id,
@@ -492,26 +517,19 @@ export async function getTournamentDetail(
     ]),
   );
   const lobbyById = new Map(
-    allLobbies.map((lobby) => [String(lobby.id), lobby]),
+    lobbyRows.map((lobby) => [String(lobby.id), lobby]),
   );
-  const roundSeedByParticipantRound = new Map(
-    scores.map((score) => [
-      `${String(score.round_id)}:${score.participant_id}`,
-      score.round_seed_number,
-    ]),
+  const roundSeedByParticipant = new Map(
+    scoreRows.map((score) => [score.participant_id, score.round_seed_number]),
   );
   const lobbyParticipantsByLobbyId = new Map<
     string,
     TournamentLobby["participants"]
   >();
 
-  for (const lobbyParticipant of lobbyParticipants) {
+  for (const lobbyParticipant of lobbyParticipantRows) {
     const participant = participantById.get(lobbyParticipant.participant_id);
-
-    if (!participant) {
-      continue;
-    }
-
+    if (!participant) continue;
     const lobbyId = String(lobbyParticipant.lobby_id);
     const assignedParticipants =
       lobbyParticipantsByLobbyId.get(lobbyId) ?? [];
@@ -520,9 +538,7 @@ export async function getTournamentDetail(
       displayName: participant.displayName,
       seedNumber: participant.seedNumber,
       roundSeedNumber:
-        roundSeedByParticipantRound.get(
-          `${String(lobbyById.get(lobbyId)?.round_id ?? tournament.current_round_id)}:${participant.id}`,
-        ) ?? participant.seedNumber,
+        roundSeedByParticipant.get(participant.id) ?? participant.seedNumber,
       slotNumber: lobbyParticipant.slot_number,
       placement: lobbyParticipant.placement,
       points: lobbyParticipant.points,
@@ -531,15 +547,20 @@ export async function getTournamentDetail(
     lobbyParticipantsByLobbyId.set(lobbyId, assignedParticipants);
   }
 
-  const gameScores = lobbyParticipants
+  const lobbies = lobbyRows.map((lobby) => ({
+    id: String(lobby.id),
+    roundId: String(lobby.round_id),
+    gameNumber: lobby.game_number,
+    lobbyNumber: lobby.lobby_number,
+    participants: [
+      ...(lobbyParticipantsByLobbyId.get(String(lobby.id)) ?? []),
+    ].sort((first, second) => first.slotNumber - second.slotNumber),
+  }));
+  const gameScores = lobbyParticipantRows
     .map((lobbyParticipant) => {
       const participant = participantById.get(lobbyParticipant.participant_id);
       const lobby = lobbyById.get(String(lobbyParticipant.lobby_id));
-
-      if (!participant || !lobby) {
-        return null;
-      }
-
+      if (!participant || !lobby) return null;
       return {
         participantId: participant.id,
         displayName: participant.displayName,
@@ -555,50 +576,152 @@ export async function getTournamentDetail(
       };
     })
     .filter((score): score is TournamentGameScore => score !== null);
-  const mappedLobbies = lobbies.map((lobby) => ({
-    id: String(lobby.id),
-    roundId: String(lobby.round_id),
-    gameNumber: lobby.game_number,
-    lobbyNumber: lobby.lobby_number,
-    participants: [
-      ...(lobbyParticipantsByLobbyId.get(String(lobby.id)) ?? []),
-    ].sort((first, second) => first.slotNumber - second.slotNumber),
-  }));
-  const currentFormatRound = getConfiguredRound(
-    tournament.format_config,
-    currentRound?.format_round_id,
+  const mappedScores = scoreRows
+    .map((score) => mapTournamentScoreRow(score, participantById))
+    .filter((score): score is TournamentScore => score !== null)
+    .sort((first, second) => first.seedNumber - second.seedNumber);
+  const mappedRound = mapTournamentRound(round, tournament.format_config);
+  const roundProgress = getRoundProgress(
+    lobbies,
+    getConfiguredRound(tournament.format_config, round.format_round_id),
   );
-  const roundProgress = getRoundProgress(mappedLobbies, currentFormatRound);
-  const activeNodeIds = rounds
-    .filter((round) => round.status === "active")
-    .map((round) => String(round.id));
   const progressionAction: TournamentProgressionAction =
     tournament.status === "in_progress" &&
-    currentRound?.status === "active" &&
+    round.status === "active" &&
     roundProgress?.isComplete &&
-    isGraphFormat
+    tournamentIsGraphFormat(tournament.format_config)
       ? "finalize_node"
       : null;
 
+  return {
+    round: mappedRound,
+    lobbies,
+    gameScores,
+    scores: mappedScores,
+    roundProgress,
+    progressionAction,
+  };
+}
+
+async function loadTournamentRow(
+  tournamentId: string,
+): Promise<TournamentRow | null> {
+  const rows = await supabaseRestRequest<TournamentRow[]>("tournaments", {
+    query: {
+      select: tournamentSelect,
+      id: `eq.${tournamentId}`,
+      limit: "1",
+    },
+  });
+  return rows[0] ?? null;
+}
+
+async function loadRoundRow(
+  tournamentId: string,
+  roundId: string,
+): Promise<TournamentRoundRow | null> {
+  const rows = await supabaseRestRequest<TournamentRoundRow[]>("rounds", {
+    query: {
+      select: "id,tournament_id,round_number,format_round_id,stage_name,status",
+      id: `eq.${roundId}`,
+      tournament_id: `eq.${tournamentId}`,
+      limit: "1",
+    },
+  });
+  return rows[0] ?? null;
+}
+
+const getCachedCompletedRound = unstable_cache(
+  async (tournamentId: string, roundId: string): Promise<TournamentRoundDetail | null> => {
+    const [tournament, round] = await Promise.all([
+      loadTournamentRow(tournamentId),
+      loadRoundRow(tournamentId, roundId),
+    ]);
+    if (!tournament || !round || round.status !== "completed") return null;
+    return loadTournamentRoundDetail(tournament, round);
+  },
+  ["tournament-completed-round"],
+  { revalidate: false },
+);
+
+async function readCompletedRound(
+  tournamentId: string,
+  roundId: string,
+): Promise<TournamentRoundDetail | null> {
+  try {
+    return await getCachedCompletedRound(tournamentId, roundId);
+  } catch (error) {
+    // The repository is also exercised by the plain Node test runner, where
+    // Next's request cache is not installed. Keep the same query semantics in
+    // that environment while using the persistent cache in the app runtime.
+    if (
+      error instanceof Error &&
+      error.message.includes("incrementalCache missing in unstable_cache")
+    ) {
+      const [tournament, round] = await Promise.all([
+        loadTournamentRow(tournamentId),
+        loadRoundRow(tournamentId, roundId),
+      ]);
+      if (!tournament || !round || round.status !== "completed") return null;
+      return loadTournamentRoundDetail(tournament, round);
+    }
+    throw error;
+  }
+}
+
+export async function getTournamentOverview(
+  tournamentId: string,
+): Promise<TournamentOverview | null> {
+  const tournament = await loadTournamentRow(tournamentId);
+  if (!tournament) return null;
+  const [registrations, participants, rounds, edgeRows] = await Promise.all([
+    supabaseRestRequest<TournamentRegistrationRow[]>("tournament_registrations", {
+      query: {
+        select: "id,tournament_id,display_name,riot_puuid,registration_status,created_at",
+        tournament_id: `eq.${tournamentId}`,
+        order: "created_at.asc",
+      },
+    }),
+    supabaseRestRequest<TournamentParticipantRow[]>("tournament_participants", {
+      query: {
+        select:
+          "id,tournament_id,registration_id,seed_number,display_name_at_start,created_at",
+        tournament_id: `eq.${tournamentId}`,
+        order: "seed_number.asc",
+      },
+    }),
+    supabaseRestRequest<TournamentRoundRow[]>("rounds", {
+      query: {
+        select: "id,tournament_id,round_number,format_round_id,stage_name,status",
+        tournament_id: `eq.${tournamentId}`,
+        order: "round_number.asc",
+      },
+    }),
+    tournamentIsGraphFormat(tournament.format_config)
+      ? supabaseRestRequest<TournamentEdgeRow[]>("tournament_edges", {
+          query: {
+            select:
+              "id,tournament_id,format_edge_id,source_round_id,destination_round_id,priority,condition,status,advanced_player_count",
+            tournament_id: `eq.${tournamentId}`,
+            order: "priority.asc,id.asc",
+          },
+        })
+      : Promise.resolve([]),
+  ]);
   const graph = getFormatGraph(tournament.format_config);
-  const nodes: TournamentNode[] = rounds.length
-    ? rounds.map((round) => {
-    const nodeScores = scores.filter((score) => String(score.round_id) === String(round.id));
-    const nodeGames = allLobbies.filter((lobby) => String(lobby.round_id) === String(round.id)).map((lobby) => lobby.game_number);
-    return {
-      id: String(round.id),
-      roundNumber: round.round_number,
-      formatNodeId: round.format_round_id,
-      name:
-        graph.nodes.find((node) => node.id === round.format_round_id)?.name ??
-        round.format_round_id,
-      status: round.status,
-      entrantCount: nodeScores.length,
-      completedGames: new Set(nodeGames).size,
-      configuredGames: getConfiguredRound(tournament.format_config, round.format_round_id)?.games ?? null,
-      position: getConfiguredRound(tournament.format_config, round.format_round_id)?.position ?? null,
-    };
-  })
+  const mappedRounds = rounds.map((round) =>
+    mapTournamentRound(round, tournament.format_config, graph),
+  );
+  const nodes: TournamentNode[] = mappedRounds.length
+    ? mappedRounds.map((round) => ({
+        ...round,
+        entrantCount: 0,
+        completedGames: 0,
+        configuredGames: round.configuredGames ?? null,
+        position:
+          getConfiguredRound(tournament.format_config, round.formatNodeId)?.position ??
+          null,
+      }))
     : graph.nodes.map((node, index) => ({
         id: node.id,
         roundNumber: index + 1,
@@ -611,72 +734,340 @@ export async function getTournamentDetail(
         configuredGames: node.games ?? null,
         position: node.position ?? null,
       }));
+  const currentRoundNumber = mappedRounds.find(
+    (round) => round.id === String(tournament.current_round_id),
+  )?.roundNumber ?? null;
+  const activeNodeIds = mappedRounds
+    .filter((round) => round.status === "active")
+    .map((round) => round.id);
+  const mappedEdges = edgeRows.length
+    ? edgeRows.map(mapTournamentEdgeRow)
+    : graph.edges.map((edge) => ({
+        id: edge.id,
+        formatEdgeId: edge.id,
+        sourceNodeId: edge.sourceNodeId,
+        destinationNodeId: edge.destinationNodeId,
+        priority: edge.priority,
+        condition: edge.condition,
+        status: "pending" as const,
+        advancedPlayerCount: 0,
+      }));
 
   return {
     ...mapTournamentRow(tournament),
     formatConfig: tournament.format_config,
     startRequirement: getTournamentStartRequirement(tournament.format_config),
-    currentRoundNumber: currentRound?.round_number ?? null,
+    currentRoundNumber,
     registrations: registrations.map(mapTournamentRegistrationRow),
     participants: participants.map(mapTournamentParticipantRow),
-    rounds: rounds.map((round) => ({
-      id: String(round.id),
-      roundNumber: round.round_number,
-      formatNodeId: round.format_round_id,
-      name: graph.nodes.find((node) => node.id === round.format_round_id)?.name ?? null,
-      isCheckmate:
-        getConfiguredRound(tournament.format_config, round.format_round_id)?.winCondition?.type ===
-        "checkmate",
-      configuredGames:
-        getConfiguredRound(tournament.format_config, round.format_round_id)?.games ?? null,
-      status: round.status,
-    })),
-    lobbies: mappedLobbies,
-    gameScores,
-    scores: scores
-      .map((score) => {
-        const participant = participantById.get(score.participant_id);
+    rounds: mappedRounds,
+    nodes,
+    edges: mappedEdges,
+    activeNodeIds,
+    selectedNodeId: null,
+  };
+}
 
-        if (!participant) {
-          return null;
+async function getRoundDetailForOverview(
+  tournamentId: string,
+  overview: TournamentOverview,
+  round: TournamentRound,
+): Promise<TournamentRoundDetail | null> {
+  if (round.status === "completed") {
+    return readCompletedRound(tournamentId, round.id);
+  }
+  const row: TournamentRoundRow = {
+    id: round.id,
+    tournament_id: tournamentId,
+    round_number: round.roundNumber,
+    format_round_id: round.formatNodeId ?? null,
+    stage_name: round.name ?? null,
+    status: round.status ?? "pending",
+  };
+  const tournament: TournamentRow = {
+    id: overview.id,
+    host_user_id: overview.hostUserId,
+    name: overview.name,
+    max_players: overview.playerCount,
+    format_id: overview.formatId,
+    status: overview.status,
+    current_round_id: overview.currentRoundId,
+    format_config: overview.formatConfig,
+    created_at: overview.createdAt,
+  };
+  return loadTournamentRoundDetail(tournament, row);
+}
+
+function buildNodesFromRoundDetails(
+  overview: TournamentOverview,
+  roundDetails: TournamentRoundDetail[],
+): TournamentNode[] {
+  const detailsByRoundId = new Map(
+    roundDetails.map((detail) => [detail.round.id, detail]),
+  );
+  return overview.nodes.map((node) => {
+    const detail = detailsByRoundId.get(node.id);
+    return detail
+      ? {
+          ...node,
+          entrantCount: detail.scores.length,
+          completedGames: new Set(
+            detail.lobbies.map((lobby) => lobby.gameNumber),
+          ).size,
         }
+      : node;
+  });
+}
 
+export async function getTournamentPageData(
+  tournamentId: string,
+  selectedNodeId?: string,
+): Promise<TournamentDetail | null> {
+  const overview = await getTournamentOverview(tournamentId);
+  if (!overview) return null;
+  const roundDetails = overview.hasStarted
+    ? (
+        await Promise.all(
+          overview.rounds.map((round) =>
+            getRoundDetailForOverview(tournamentId, overview, round),
+          ),
+        )
+      ).filter((detail): detail is TournamentRoundDetail => detail !== null)
+    : [];
+  const currentRound = overview.rounds.find(
+    (round) =>
+      round.id === String(selectedNodeId ?? overview.currentRoundId),
+  ) ?? overview.rounds.find((round) => round.status === "active") ?? null;
+  const selectedDetail = currentRound
+    ? roundDetails.find((detail) => detail.round.id === currentRound.id) ?? null
+    : null;
+  const scores = roundDetails
+    .flatMap((detail) => detail.scores)
+    .sort((first, second) => first.seedNumber - second.seedNumber);
+  return {
+    ...overview,
+    currentRoundNumber: currentRound?.roundNumber ?? overview.currentRoundNumber,
+    lobbies: selectedDetail?.lobbies ?? [],
+    gameScores: roundDetails.flatMap((detail) => detail.gameScores),
+    scores,
+    roundProgress: selectedDetail?.roundProgress ?? null,
+    progressionAction: selectedDetail?.progressionAction ?? null,
+    nodes: buildNodesFromRoundDetails(overview, roundDetails),
+    selectedNodeId: selectedDetail?.round.id ?? null,
+  };
+}
+
+async function loadLobbyRoster(
+  tournamentId: string,
+  lobbyId: string,
+): Promise<TournamentLobbyRoster | null> {
+  const lobbies = await supabaseRestRequest<TournamentLobbyRow[]>("lobbies", {
+    query: {
+      select: "id,round_id,game_number,lobby_number",
+      id: `eq.${lobbyId}`,
+      limit: "1",
+    },
+  });
+  const lobby = lobbies[0];
+  if (!lobby) return null;
+  const participantRows = await supabaseRestRequest<
+    TournamentLobbyParticipantRow[]
+  >("lobby_participants", {
+    query: {
+      select: "id,lobby_id,participant_id,slot_number,placement,points,result_status",
+      lobby_id: `eq.${lobbyId}`,
+      order: "slot_number.asc,id.asc",
+    },
+  });
+  const participants = await fetchParticipantsByIds(
+    participantRows.map((participant) => participant.participant_id),
+    tournamentId,
+  );
+  const participantById = new Map(
+    participants.map((participant) => [
+      participant.id,
+      mapTournamentParticipantRow(participant),
+    ]),
+  );
+  return {
+    id: String(lobby.id),
+    roundId: String(lobby.round_id),
+    gameNumber: lobby.game_number,
+    lobbyNumber: lobby.lobby_number,
+    participants: participantRows
+      .map((participant) => {
+        const player = participantById.get(participant.participant_id);
+        if (!player) return null;
         return {
-          id: score.id,
-          participantId: score.participant_id,
-          displayName: participant.displayName,
-          seedNumber: participant.seedNumber,
-          roundId: String(score.round_id),
-          roundSeedNumber: score.round_seed_number,
-          score: score.score,
-          sourceEdgeId:
-            score.source_edge_id === null || score.source_edge_id === undefined
-              ? null
-              : String(score.source_edge_id),
-          sourceRank: score.source_rank ?? null,
-          createdAt: score.created_at,
+          id: player.id,
+          displayName: player.displayName,
+          seedNumber: player.seedNumber,
+          slotNumber: participant.slot_number,
         };
       })
-      .filter((score): score is NonNullable<typeof score> => score !== null)
-      .sort((a, b) => a.seedNumber - b.seedNumber),
-    roundProgress,
-    progressionAction,
-    nodes,
-    edges: edgeRows.length
-      ? edgeRows.map(mapTournamentEdgeRow)
-      : graph.edges.map((edge) => ({
-          id: edge.id,
-          formatEdgeId: edge.id,
-          sourceNodeId: edge.sourceNodeId,
-          destinationNodeId: edge.destinationNodeId,
-          priority: edge.priority,
-          condition: edge.condition,
-          status: "pending" as const,
-          advancedPlayerCount: 0,
-        })),
-    activeNodeIds,
-    selectedNodeId: currentRound ? String(currentRound.id) : null,
+      .filter(
+        (participant): participant is TournamentLobbyRosterParticipant =>
+          participant !== null,
+      ),
   };
+}
+
+const getCachedLobbyRoster = unstable_cache(
+  async (tournamentId: string, lobbyId: string) =>
+    loadLobbyRoster(tournamentId, lobbyId),
+  ["tournament-lobby-roster"],
+  { revalidate: false },
+);
+
+async function readLobbyRoster(
+  tournamentId: string,
+  lobbyId: string,
+): Promise<TournamentLobbyRoster | null> {
+  try {
+    return await getCachedLobbyRoster(tournamentId, lobbyId);
+  } catch (error) {
+    if (
+      error instanceof Error &&
+      error.message.includes("incrementalCache missing in unstable_cache")
+    ) {
+      return loadLobbyRoster(tournamentId, lobbyId);
+    }
+    throw error;
+  }
+}
+
+export async function getTournamentRoundDetail(
+  tournamentId: string,
+  roundId: string,
+): Promise<TournamentRoundDetail | null> {
+  const [tournament, round] = await Promise.all([
+    loadTournamentRow(tournamentId),
+    loadRoundRow(tournamentId, roundId),
+  ]);
+  if (!tournament || !round) return null;
+  if (round.status === "completed") {
+    return readCompletedRound(tournamentId, roundId);
+  }
+  return loadTournamentRoundDetail(tournament, round);
+}
+
+export async function getTournamentLobbyDetail(
+  tournamentId: string,
+  lobbyId: string,
+): Promise<TournamentLobbyDetail | null> {
+  const [tournament, lobbyRows] = await Promise.all([
+    loadTournamentRow(tournamentId),
+    supabaseRestRequest<TournamentLobbyRow[]>("lobbies", {
+      query: {
+        select: "id,round_id,game_number,lobby_number",
+        id: `eq.${lobbyId}`,
+        limit: "1",
+      },
+    }),
+  ]);
+  const lobbyRow = lobbyRows[0];
+  if (!tournament || !lobbyRow) return null;
+  const round = await loadRoundRow(tournamentId, String(lobbyRow.round_id));
+  if (!round) return null;
+  const roster = await readLobbyRoster(tournamentId, lobbyId);
+  if (!roster) return null;
+  const participantRows = await supabaseRestRequest<
+    TournamentLobbyParticipantRow[]
+  >("lobby_participants", {
+    query: {
+      select: "id,lobby_id,participant_id,slot_number,placement,points,result_status",
+      lobby_id: `eq.${lobbyId}`,
+      order: "slot_number.asc,id.asc",
+    },
+  });
+  const participantIds = roster.participants.map((participant) => participant.id);
+  const scoreRows = participantIds.length
+    ? await supabaseRestRequest<TournamentScoreRow[]>("participant_round_scores", {
+        query: {
+          select:
+            "id,participant_id,round_id,round_seed_number,score,source_edge_id,source_rank,created_at",
+          round_id: `eq.${round.id}`,
+          participant_id: `in.(${participantIds.join(",")})`,
+        },
+      })
+    : await supabaseRestRequest<TournamentScoreRow[]>(
+        "participant_round_scores",
+        emptyScoreQuery(),
+      );
+  const scoreByParticipantId = new Map(
+    scoreRows.map((score) => [score.participant_id, score]),
+  );
+  const resultByParticipantId = new Map(
+    participantRows.map((participant) => [participant.participant_id, participant]),
+  );
+  const mappedLobby: TournamentLobby = {
+    ...roster,
+    participants: roster.participants
+      .map((participant) => {
+        const result = resultByParticipantId.get(participant.id);
+        const score = scoreByParticipantId.get(participant.id);
+        return {
+          ...participant,
+          roundSeedNumber: score?.round_seed_number ?? participant.seedNumber,
+          placement: result?.placement ?? null,
+          points: result?.points ?? null,
+          resultStatus: result?.result_status ?? "pending",
+        };
+      })
+      .sort((first, second) => first.slotNumber - second.slotNumber),
+  };
+  const mappedRound = mapTournamentRound(round, tournament.format_config);
+  const participantById = new Map(
+    roster.participants.map((participant) => [participant.id, participant]),
+  );
+  const scores = scoreRows
+    .map((score): TournamentScore | null => {
+      const participant = participantById.get(score.participant_id);
+      if (!participant) return null;
+      return {
+        id: score.id,
+        participantId: score.participant_id,
+        displayName: participant.displayName,
+        seedNumber: participant.seedNumber,
+        roundId: String(score.round_id),
+        roundSeedNumber: score.round_seed_number,
+        score: score.score,
+        sourceEdgeId:
+          score.source_edge_id === null || score.source_edge_id === undefined
+            ? null
+            : String(score.source_edge_id),
+        sourceRank: score.source_rank ?? null,
+        createdAt: score.created_at,
+      };
+    })
+    .filter((score): score is TournamentScore => score !== null);
+  const summary = mapTournamentRow(tournament);
+  return {
+    tournament: {
+      id: summary.id,
+      hostUserId: summary.hostUserId,
+      name: summary.name,
+      status: summary.status,
+      hasStarted: summary.hasStarted,
+    },
+    round: mappedRound,
+    lobby: mappedLobby,
+    scores,
+  };
+}
+
+export async function getTournamentExportDetail(
+  tournamentId: string,
+): Promise<TournamentDetail | null> {
+  return getTournamentPageData(tournamentId);
+}
+
+/** @deprecated Use the scoped query functions or getTournamentExportDetail. */
+export async function getTournamentDetail(
+  tournamentId: string,
+  selectedNodeId?: string,
+): Promise<TournamentDetail | null> {
+  return getTournamentPageData(tournamentId, selectedNodeId);
 }
 
 export async function getTournamentNodeIdForLobby(lobbyId: string): Promise<string | null> {

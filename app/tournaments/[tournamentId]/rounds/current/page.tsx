@@ -4,7 +4,7 @@ import { getOrganizerSession } from "@/lib/auth/session";
 import { notFound, redirect } from "next/navigation";
 import { CurrentRoundViewTabs } from "@/components/tournaments/current-round-view-tabs";
 import { Scoresheet } from "@/components/tournaments/scoresheet";
-import { getTournamentDetail } from "@/lib/db/tournaments/api";
+import { getTournamentPageData } from "@/lib/db/tournaments/api";
 
 export const dynamic = "force-dynamic";
 
@@ -21,12 +21,12 @@ export default async function CurrentRoundPage({
   const tournamentPath = `/tournaments/${tournamentId}`;
   const organizer = await getOrganizerSession();
   let tournament:
-    | Awaited<ReturnType<typeof getTournamentDetail>>
+    | Awaited<ReturnType<typeof getTournamentPageData>>
     | undefined;
   let databaseError = "";
 
   try {
-    tournament = await getTournamentDetail(tournamentId);
+    tournament = await getTournamentPageData(tournamentId);
   } catch (error) {
     databaseError =
       error instanceof Error

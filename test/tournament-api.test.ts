@@ -2,7 +2,8 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import {
   deleteTournament,
-  getTournamentDetail,
+  getTournamentLobbyDetail,
+  getTournamentRoundDetail,
 } from "../lib/db/tournaments/api";
 
 test("deletes a tournament through the database aggregate boundary", async () => {
@@ -59,7 +60,7 @@ test("deletes a tournament through the database aggregate boundary", async () =>
   }
 });
 
-test("loads every lobby participant when the relationship exceeds the REST row cap", async () => {
+test("loads only the requested round and batches its lobby participants", async () => {
   const originalFetch = globalThis.fetch;
   const originalEnvironment = {
     NEXT_PUBLIC_SUPABASE_URL: process.env.NEXT_PUBLIC_SUPABASE_URL,
@@ -162,7 +163,10 @@ test("loads every lobby participant when the relationship exceeds the REST row c
             format_config: formatConfig,
             created_at: "2026-07-18T00:00:00.000Z",
           },
-        ];
+        ].filter((tournament) => {
+          const idFilter = url.searchParams.get("id");
+          return !idFilter || String(tournament.id) === idFilter.replace("eq.", "");
+        });
         break;
       case "tournament_registrations":
         response = [];
@@ -171,24 +175,46 @@ test("loads every lobby participant when the relationship exceeds the REST row c
         response = participants;
         break;
       case "participant_round_scores":
-        response = scores;
+        response = scores.filter((score) => {
+          const roundFilter = url.searchParams.get("round_id");
+          const participantFilter = url.searchParams.get("participant_id");
+          const participantIds = participantFilter
+            ?.replace(/^in\.\(|\)$/g, "")
+            .split(",");
+          return (
+            (!roundFilter || String(score.round_id) === roundFilter.replace("eq.", "")) &&
+            (!participantIds || participantIds.includes(score.participant_id))
+          );
+        });
         break;
       case "rounds":
         response = [
-          { id: 1, round_number: 1, format_round_id: "opening-round", status: "completed" },
+          { id: 1, round_number: 1, format_round_id: "opening-round", status: "active" },
           { id: 2, round_number: 2, format_round_id: "second-round", status: "active" },
-        ];
+        ].filter((round) => {
+          const roundFilter = url.searchParams.get("id");
+          return !roundFilter || String(round.id) === roundFilter.replace("eq.", "");
+        });
         break;
       case "tournament_edges":
         response = [];
         break;
       case "lobbies":
-        response = lobbies;
+        response = lobbies.filter((lobby) => {
+          const roundFilter = url.searchParams.get("round_id");
+          const idFilter = url.searchParams.get("id");
+          return (
+            (!roundFilter || String(lobby.round_id) === roundFilter.replace("eq.", "")) &&
+            (!idFilter || String(lobby.id) === idFilter.replace("eq.", ""))
+          );
+        });
         break;
       case "lobby_participants": {
-        lobbyParticipantRequests.push(url.search);
         const filter = url.searchParams.get("lobby_id") ?? "";
-        const ids = filter.replace(/^in\.\(|\)$/g, "").split(",");
+        lobbyParticipantRequests.push(filter);
+        const ids = filter.startsWith("eq.")
+          ? [filter.replace("eq.", "")]
+          : filter.replace(/^in\.\(|\)$/g, "").split(",");
         response = lobbyParticipants.filter((participant) =>
           ids.includes(String(participant.lobby_id)),
         );
@@ -205,10 +231,22 @@ test("loads every lobby participant when the relationship exceeds the REST row c
   };
 
   try {
-    const detail = await getTournamentDetail(tournamentId);
+    const openingRound = await getTournamentRoundDetail(tournamentId, "1");
+    const detail = await getTournamentRoundDetail(tournamentId, "2");
 
     assert.ok(detail);
-    assert.equal(lobbyParticipantRequests.length, 2);
+    assert.ok(openingRound);
+    assert.equal(openingRound.lobbies.length, 96);
+    assert.equal(detail.lobbies.length, 32);
+    assert.equal(lobbyParticipantRequests.length, 3);
+    assert.equal(
+      lobbyParticipantRequests.filter((request) => !request.startsWith("in.(97")).length,
+      2,
+    );
+    assert.equal(
+      lobbyParticipantRequests.filter((request) => request.startsWith("in.(97")).length,
+      1,
+    );
     const affectedLobby = detail.lobbies.find(
       (lobby) => lobby.roundId === "2" && lobby.gameNumber === 2 && lobby.lobbyNumber === 1,
     );
@@ -225,6 +263,33 @@ test("loads every lobby participant when the relationship exceeds the REST row c
           score.participantId === "participant-8",
       )?.score,
       8,
+    );
+
+    const lobbyParticipantRequestCount = lobbyParticipantRequests.length;
+    const lobbyDetail = await getTournamentLobbyDetail(tournamentId, "105");
+    assert.ok(lobbyDetail);
+    assert.equal(lobbyDetail.lobby.id, "105");
+    assert.equal(lobbyDetail.lobby.roundId, "2");
+    assert.equal(lobbyDetail.lobby.participants.length, 8);
+    assert.equal(
+      lobbyDetail.lobby.participants.find(
+        (participant) => participant.slotNumber === 8,
+      )?.points,
+      8,
+    );
+    assert.equal(lobbyDetail.scores.length, 8);
+    assert.equal(
+      lobbyParticipantRequests.length,
+      lobbyParticipantRequestCount + 2,
+    );
+    assert.ok(
+      lobbyParticipantRequests
+        .slice(-2)
+        .every((request) => request === "eq.105"),
+    );
+    assert.equal(
+      await getTournamentLobbyDetail("missing-tournament", "105"),
+      null,
     );
   } finally {
     globalThis.fetch = originalFetch;
