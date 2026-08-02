@@ -16,7 +16,7 @@ import { TournamentDetails } from "@/components/tournaments/tournament-details";
 import { GoogleSheetsPublishingPanel } from "@/components/tournaments/google-sheets-publishing-panel";
 import { AccountHeader } from "@/components/account/account-header";
 import {
-  getTournamentDetail,
+  getTournamentPageData,
   TOURNAMENT_STATUS_ACCEPTING_PLAYERS,
 } from "@/lib/db/tournaments/api";
 import { getOrganizerSession } from "@/lib/auth/session";
@@ -80,12 +80,12 @@ export default async function TournamentPage({
   const authorizationError = getSearchValue(query.authorizationError);
   const organizer = await getOrganizerSession();
   let tournament:
-    | Awaited<ReturnType<typeof getTournamentDetail>>
+    | Awaited<ReturnType<typeof getTournamentPageData>>
     | undefined;
   let databaseError = "";
 
   try {
-    tournament = await getTournamentDetail(tournamentId, requestedNode || undefined);
+    tournament = await getTournamentPageData(tournamentId, requestedNode || undefined);
   } catch (error) {
     databaseError =
       error instanceof Error

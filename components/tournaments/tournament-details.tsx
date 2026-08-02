@@ -3,13 +3,13 @@ import {
   registerPlayerAction,
   startTournamentAction,
 } from "@/app/actions";
-import type { TournamentDetail } from "@/lib/db/tournaments/types";
+import type { TournamentOverview } from "@/lib/db/tournaments/types";
 
 type TournamentDetailsProps = {
-  tournament: TournamentDetail;
+  tournament: TournamentOverview;
   currentRoundLabel: string;
   potentialEntrantCount: number;
-  startRequirement: TournamentDetail["startRequirement"];
+  startRequirement: TournamentOverview["startRequirement"];
   enteredRegistrationIds: Set<string>;
   registrationError: string;
   startError: string;

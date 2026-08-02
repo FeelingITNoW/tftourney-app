@@ -4,7 +4,7 @@ import { getOrganizerSession } from "@/lib/auth/session";
 import { notFound } from "next/navigation";
 import { updateLobbyScoresAction } from "@/app/actions";
 import { RandomizeLobbyScoresButton } from "@/components/tournaments/randomize-lobby-scores-button";
-import { getTournamentDetail, getTournamentNodeIdForLobby } from "@/lib/db/tournaments/api";
+import { getTournamentLobbyDetail } from "@/lib/db/tournaments/api";
 
 export const dynamic = "force-dynamic";
 
@@ -45,15 +45,13 @@ export default async function LobbyScoresPage({
   const scoreError = getSearchValue(query.scoreError);
   const saved = getSearchValue(query.saved) === "true";
   const authorizationError = getSearchValue(query.authorizationError);
-  const requestedNode = getSearchValue(query.node);
   let tournament:
-    | Awaited<ReturnType<typeof getTournamentDetail>>
+    | Awaited<ReturnType<typeof getTournamentLobbyDetail>>
     | undefined;
   let databaseError = "";
 
   try {
-    const nodeId = requestedNode || await getTournamentNodeIdForLobby(lobbyId);
-    tournament = await getTournamentDetail(tournamentId, nodeId ?? undefined);
+    tournament = await getTournamentLobbyDetail(tournamentId, lobbyId);
   } catch (error) {
     databaseError =
       error instanceof Error
@@ -61,19 +59,22 @@ export default async function LobbyScoresPage({
         : "Lobby data could not be loaded.";
   }
 
-  const lobby = tournament?.lobbies.find((item) => item.id === lobbyId);
+  const lobby = tournament?.lobby;
+  const tournamentHeader = tournament?.tournament;
 
-  if (!databaseError && (!tournament || !lobby)) {
+  if (!databaseError && (!tournamentHeader || !lobby)) {
     notFound();
   }
 
   const roundScoresByParticipantId = new Map(
-    tournament?.scores
-      .filter((score) => score.roundId === lobby?.roundId)
-      .map((score) => [score.participantId, score.score]) ?? [],
+    tournament?.scores.map((score) => [score.participantId, score.score]) ?? [],
   );
-  const isTournamentHost = Boolean(tournament && organizer && organizer.hostUserId === tournament.hostUserId);
-  const isReadOnly = tournament?.status === "completed" || !isTournamentHost;
+  const isTournamentHost = Boolean(
+    tournamentHeader &&
+      organizer &&
+      organizer.hostUserId === tournamentHeader.hostUserId,
+  );
+  const isReadOnly = tournamentHeader?.status === "completed" || !isTournamentHost;
   const backQuery = new URLSearchParams();
   if (returnGame) {
     backQuery.set("game", returnGame);
@@ -81,8 +82,8 @@ export default async function LobbyScoresPage({
   if (returnPage) {
     backQuery.set("page", returnPage);
   }
-  if (tournament?.selectedNodeId) {
-    backQuery.set("node", tournament.selectedNodeId);
+  if (tournament?.round.id) {
+    backQuery.set("node", tournament.round.id);
   }
   const backToTournamentHref = `/tournaments/${tournamentId}${
     backQuery.toString() ? `?${backQuery.toString()}` : ""
@@ -115,11 +116,11 @@ export default async function LobbyScoresPage({
               <p className="mt-2 text-sm text-amber-900">{databaseError}</p>
             </div>
           </section>
-        ) : tournament && lobby ? (
+        ) : tournamentHeader && tournament && lobby ? (
           <>
             <section className="py-8">
               <p className="text-sm font-semibold uppercase tracking-[0.12em] text-amber-700">
-                {tournament.name}
+                {tournamentHeader.name}
               </p>
               <h1 className="mt-3 text-4xl font-semibold tracking-normal text-zinc-950">
                 Game {lobby.gameNumber} · Lobby {lobby.lobbyNumber} results
@@ -128,9 +129,7 @@ export default async function LobbyScoresPage({
                 <div className="border-l-4 border-zinc-800 bg-white px-4 py-3 shadow-sm">
                   <dt className="text-zinc-500">Round</dt>
                   <dd className="mt-1 font-semibold text-zinc-950">
-                    {tournament.selectedNodeId
-                      ? tournament.nodes.find((node) => node.id === tournament.selectedNodeId)?.name ?? tournament.selectedNodeId
-                      : lobby.roundId}
+                    {tournament.round.name ?? tournament.round.id}
                   </dd>
                 </div>
                 <div className="border-l-4 border-sky-600 bg-white px-4 py-3 shadow-sm">
@@ -170,7 +169,7 @@ export default async function LobbyScoresPage({
 
             {isReadOnly ? (
               <div className="mb-5 rounded-md border border-zinc-200 bg-zinc-100 p-4 text-sm font-medium text-zinc-700">
-                {tournament.status === "completed" ? "This tournament is complete. Results are read-only." : "Only the tournament host can enter results. This is a public read-only view."}
+                {tournamentHeader.status === "completed" ? "This tournament is complete. Results are read-only." : "Only the tournament host can enter results. This is a public read-only view."}
               </div>
             ) : null}
 
@@ -186,11 +185,11 @@ export default async function LobbyScoresPage({
               </div>
 
               <form action={updateLobbyScoresAction} className="mt-5">
-                <input name="tournamentId" type="hidden" value={tournament.id} />
+                <input name="tournamentId" type="hidden" value={tournamentHeader.id} />
                 <input name="lobbyId" type="hidden" value={lobby.id} />
                 <input name="returnGame" type="hidden" value={returnGame} />
                 <input name="returnPage" type="hidden" value={returnPage} />
-                <input name="returnNode" type="hidden" value={tournament.selectedNodeId ?? ""} />
+                <input name="returnNode" type="hidden" value={tournament.round.id} />
                 <div className="overflow-x-auto rounded-lg border border-zinc-200 bg-white shadow-sm">
                   <table className="w-full min-w-[32rem] border-collapse text-left text-sm">
                     <thead className="bg-zinc-50 text-zinc-600">

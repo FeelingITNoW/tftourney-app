@@ -125,6 +125,39 @@ export type TournamentLobby = {
   participants: TournamentLobbyParticipant[];
 };
 
+export type TournamentLobbyRosterParticipant = Pick<
+  TournamentLobbyParticipant,
+  "id" | "displayName" | "seedNumber" | "slotNumber"
+>;
+
+export type TournamentLobbyRoster = Omit<TournamentLobby, "participants"> & {
+  participants: TournamentLobbyRosterParticipant[];
+};
+
+export type TournamentOverview = Omit<
+  TournamentDetail,
+  "lobbies" | "gameScores" | "scores" | "roundProgress" | "progressionAction"
+>;
+
+export type TournamentRoundDetail = {
+  round: TournamentRound;
+  lobbies: TournamentLobby[];
+  gameScores: TournamentGameScore[];
+  scores: TournamentScore[];
+  roundProgress: TournamentRoundProgress | null;
+  progressionAction: TournamentProgressionAction;
+};
+
+export type TournamentLobbyDetail = {
+  tournament: Pick<
+    TournamentSummary,
+    "id" | "hostUserId" | "name" | "status" | "hasStarted"
+  >;
+  round: TournamentRound;
+  lobby: TournamentLobby;
+  scores: TournamentScore[];
+};
+
 export type TournamentDetail = Omit<
   TournamentSummary,
   "registeredPlayerCount"
@@ -203,6 +236,7 @@ export type TournamentRoundRow = {
   tournament_id?: string | number;
   round_number: number;
   format_round_id: string | null;
+  stage_name?: string | null;
   status: "pending" | "active" | "completed" | "cancelled" | "skipped";
 };
 
