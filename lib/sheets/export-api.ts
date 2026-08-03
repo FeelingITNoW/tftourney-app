@@ -1,5 +1,4 @@
 import { supabaseRestRequest } from "../db/supabase-rest/api";
-import { getOrganizerGoogleConnection } from "../db/users/api";
 import type { TournamentRow } from "../db/tournaments/types";
 import type {
   GoogleSheetExportRow,
@@ -59,16 +58,45 @@ export async function getGoogleSheetExportStatus(
   tournamentId: string,
   hostUserId = STANDARD_HOST_USER_ID,
 ): Promise<GoogleSheetExportStatus> {
-  await assertTournamentHost(tournamentId, hostUserId);
-  const connectionState = await getOrganizerGoogleConnection(hostUserId);
-  const rows = await supabaseRestRequest<GoogleSheetExportRow[]>("tournament_sheet_exports", {
-    query: {
-      select: EXPORT_SELECT,
-      tournament_id: `eq.${tournamentId}`,
-      limit: "1",
+  const rows = await supabaseRestRequest<Array<{ view_model?: Record<string, unknown> }>>(
+    "rpc/get_google_sheet_export_status_view_model",
+    {
+      method: "POST",
+      body: { p_tournament_id: tournamentId, p_host_user_id: hostUserId },
     },
-  });
-  return mapExportRow(tournamentId, rows[0], connectionState);
+  );
+  const row = rows[0]?.view_model;
+  if (!row) {
+    return {
+      tournamentId,
+      connectionState: "disconnected",
+      state: "not_created",
+      spreadsheetId: null,
+      spreadsheetUrl: null,
+      desiredRevision: 0,
+      syncedRevision: 0,
+      dirtyAt: null,
+      lastSyncedAt: null,
+      nextAttemptAt: null,
+      lastError: null,
+    };
+  }
+  const lastError = row.last_error as Record<string, unknown> | null | undefined;
+  return {
+    tournamentId: String(row.tournament_id ?? tournamentId),
+    connectionState: (row.connection_state ?? "disconnected") as GoogleSheetExportStatus["connectionState"],
+    state: (row.state ?? "not_created") as GoogleSheetExportStatus["state"],
+    spreadsheetId: (row.spreadsheet_id ?? null) as string | null,
+    spreadsheetUrl: (row.spreadsheet_url ?? null) as string | null,
+    desiredRevision: Number(row.desired_revision ?? 0),
+    syncedRevision: Number(row.synced_revision ?? 0),
+    dirtyAt: (row.dirty_at ?? null) as string | null,
+    lastSyncedAt: (row.last_synced_at ?? null) as string | null,
+    nextAttemptAt: (row.next_attempt_at ?? null) as string | null,
+    lastError: lastError
+      ? { code: String(lastError.code ?? "SHEET_EXPORT_ERROR"), message: String(lastError.message ?? "Sheet export failed.") }
+      : null,
+  };
 }
 
 export async function requestGoogleSheetExport(

@@ -4,7 +4,7 @@ import { getOrganizerSession } from "@/lib/auth/session";
 import { notFound } from "next/navigation";
 import { updateLobbyScoresAction } from "@/app/actions";
 import { RandomizeLobbyScoresButton } from "@/components/tournaments/randomize-lobby-scores-button";
-import { getTournamentLobbyDetail } from "@/lib/db/tournaments/api";
+import { getTournamentLobbyViewModel } from "@/lib/db/tournaments/api";
 
 export const dynamic = "force-dynamic";
 
@@ -46,12 +46,12 @@ export default async function LobbyScoresPage({
   const saved = getSearchValue(query.saved) === "true";
   const authorizationError = getSearchValue(query.authorizationError);
   let tournament:
-    | Awaited<ReturnType<typeof getTournamentLobbyDetail>>
+    | Awaited<ReturnType<typeof getTournamentLobbyViewModel>>
     | undefined;
   let databaseError = "";
 
   try {
-    tournament = await getTournamentLobbyDetail(tournamentId, lobbyId);
+    tournament = await getTournamentLobbyViewModel(tournamentId, lobbyId);
   } catch (error) {
     databaseError =
       error instanceof Error
@@ -104,7 +104,7 @@ export default async function LobbyScoresPage({
               Inspect the lobby and record official results
             </p>
           </div>
-          <div className="flex items-center gap-4"><Link className="rounded-md border border-zinc-200 bg-white px-3 py-2 text-sm font-medium text-zinc-600 shadow-sm hover:bg-zinc-50" href={backToTournamentHref}>Back to lobby browser</Link><AccountHeader returnTo={backToTournamentHref} /></div>
+          <div className="flex items-center gap-4"><Link className="rounded-md border border-zinc-200 bg-white px-3 py-2 text-sm font-medium text-zinc-600 shadow-sm hover:bg-zinc-50" href={backToTournamentHref}>Back to lobby browser</Link><AccountHeader organizer={organizer} returnTo={backToTournamentHref} /></div>
         </header>
 
         {databaseError ? (

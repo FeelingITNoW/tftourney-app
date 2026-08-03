@@ -1,7 +1,14 @@
 import Link from "next/link";
+import { redirect } from "next/navigation";
 import { AccountHeader } from "@/components/account/account-header";
+import { TournamentPagination } from "@/components/tournaments/tournament-pagination";
 import { requireOrganizer } from "@/lib/auth/session";
-import { listHostedTournaments } from "@/lib/db/tournaments/api";
+import {
+  listHostedTournaments,
+  TOURNAMENT_PAGE_SIZE,
+} from "@/lib/db/tournaments/api";
+import { buildPageHref, parsePageParam } from "@/lib/pagination";
+import type { TournamentListPageViewModel } from "@/lib/db/tournaments/types";
 
 export const dynamic = "force-dynamic";
 
@@ -9,15 +16,41 @@ function formatDate(value: string): string {
   return new Intl.DateTimeFormat("en", { dateStyle: "medium" }).format(new Date(value));
 }
 
-export default async function DashboardPage() {
+type DashboardSearchParams = Promise<{
+  page?: string | string[];
+}>;
+
+export default async function DashboardPage({
+  searchParams,
+}: {
+  searchParams: DashboardSearchParams;
+}) {
+  const query = await searchParams;
+  const parsedPage = parsePageParam(query.page);
+  if (parsedPage.redirectPage !== null) {
+    redirect(buildPageHref("/dashboard", parsedPage.redirectPage));
+  }
   const organizer = await requireOrganizer("/dashboard");
-  let tournaments = [] as Awaited<ReturnType<typeof listHostedTournaments>>;
+  let tournamentPage: TournamentListPageViewModel = {
+    items: [],
+    page: parsedPage.page,
+    pageSize: TOURNAMENT_PAGE_SIZE,
+    totalCount: 0,
+    totalPages: 1,
+  };
   let databaseError = "";
   try {
-    tournaments = await listHostedTournaments(organizer.hostUserId);
+    tournamentPage = await listHostedTournaments(organizer.hostUserId, {
+      page: parsedPage.page,
+      pageSize: TOURNAMENT_PAGE_SIZE,
+    });
   } catch (error) {
     databaseError = error instanceof Error ? error.message : "Your tournaments could not be loaded.";
   }
+  if (!databaseError && parsedPage.page > tournamentPage.totalPages) {
+    redirect(buildPageHref("/dashboard", tournamentPage.totalPages));
+  }
+  const tournaments = tournamentPage.items;
 
   return (
     <main className="min-h-screen bg-stone-50 text-zinc-950">
@@ -27,7 +60,7 @@ export default async function DashboardPage() {
             <Link className="text-sm font-semibold uppercase tracking-[0.12em] text-emerald-700" href="/">TFTourney</Link>
             <p className="mt-1 text-sm text-zinc-500">Your tournament dashboard</p>
           </div>
-          <AccountHeader returnTo="/dashboard" />
+          <AccountHeader organizer={organizer} returnTo="/dashboard" />
         </header>
 
         <section className="flex items-end justify-between gap-4 py-10">
@@ -64,6 +97,13 @@ export default async function DashboardPage() {
                   ))}
                 </tbody>
               </table>
+              <TournamentPagination
+                page={tournamentPage.page}
+                pageSize={tournamentPage.pageSize}
+                pathname="/dashboard"
+                totalCount={tournamentPage.totalCount}
+                totalPages={tournamentPage.totalPages}
+              />
             </div>
           </section>
         )}

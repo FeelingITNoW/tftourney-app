@@ -1,4 +1,4 @@
-import { getTournamentExportDetail } from "../db/tournaments/api";
+import { getTournamentExportViewModel } from "../db/tournaments/api";
 import { supabaseRestRequest } from "../db/supabase-rest/api";
 import { decryptGoogleRefreshToken } from "./crypto";
 import { GoogleApiError, GoogleSheetsHttpAdapter, refreshGoogleAccessToken } from "./google-api";
@@ -121,7 +121,7 @@ async function failExport(exportRow: GoogleSheetExportRow, error: unknown) {
 
 export async function syncTournamentSheetExport(exportRow: GoogleSheetExportRow): Promise<SyncResult> {
   try {
-    const detail = await getTournamentExportDetail(String(exportRow.tournament_id));
+    const detail = await getTournamentExportViewModel(String(exportRow.tournament_id));
     if (!detail) throw new Error("Tournament was not found.");
     const refreshToken = await getRefreshToken(String(exportRow.host_user_id ?? 1));
     const credentials = googleClientCredentials();

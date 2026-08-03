@@ -1,4 +1,4 @@
-import type { TournamentDetail, TournamentRound } from "../db/tournaments/types";
+import type { TournamentExportViewModel, TournamentRound } from "../db/tournaments/types";
 import { resolveCheckmateOutcome } from "../tournament/checkmate/api";
 import type { CheckmateGameResult, CheckmateWinCondition } from "../tournament/checkmate/types";
 import { sortScoresHighestFirst } from "../tournament/scoring/api";
@@ -22,13 +22,13 @@ function titleRows(title: string, generatedAt: string): SheetCell[][] {
   ];
 }
 
-function orderedRounds(detail: TournamentDetail): TournamentRound[] {
+function orderedRounds(detail: TournamentExportViewModel): TournamentRound[] {
   return [...detail.rounds].sort(
     (first, second) => first.roundNumber - second.roundNumber || first.id.localeCompare(second.id),
   );
 }
 
-function roundName(detail: TournamentDetail, round: TournamentRound): string {
+function roundName(detail: TournamentExportViewModel, round: TournamentRound): string {
   return round.name?.trim() || `Round ${round.roundNumber}`;
 }
 
@@ -36,7 +36,7 @@ function hasCheckmate(round: TournamentRound): boolean {
   return round.isCheckmate === true;
 }
 
-function standardRows(detail: TournamentDetail): StandardScore[] {
+function standardRows(detail: TournamentExportViewModel): StandardScore[] {
   const standardRoundIds = new Set(
     detail.rounds.filter((round) => !hasCheckmate(round)).map((round) => round.id),
   );
@@ -68,7 +68,7 @@ function standardRows(detail: TournamentDetail): StandardScore[] {
 }
 
 function gameValue(
-  detail: TournamentDetail,
+  detail: TournamentExportViewModel,
   participantId: string,
   roundId: string,
   gameNumber: number,
@@ -82,7 +82,7 @@ function gameValue(
   return game?.score ?? null;
 }
 
-function configuredGameCount(round: TournamentRound, detail: TournamentDetail): number {
+function configuredGameCount(round: TournamentRound, detail: TournamentExportViewModel): number {
   if (round.configuredGames && round.configuredGames > 0) return round.configuredGames;
   return Math.max(
     ...detail.gameScores
@@ -92,7 +92,7 @@ function configuredGameCount(round: TournamentRound, detail: TournamentDetail): 
   );
 }
 
-function advancementStatus(detail: TournamentDetail, participantId: string): string {
+function advancementStatus(detail: TournamentExportViewModel, participantId: string): string {
   const participantScores = detail.scores.filter((score) => score.participantId === participantId);
   const rounds = orderedRounds(detail);
 
@@ -117,7 +117,7 @@ function advancementStatus(detail: TournamentDetail, participantId: string): str
   return `Completed ${roundName(detail, destination)}`;
 }
 
-function playersTab(detail: TournamentDetail, generatedAt: string): SheetTabModel {
+function playersTab(detail: TournamentExportViewModel, generatedAt: string): SheetTabModel {
   const participantByRegistration = new Map(
     detail.participants.map((participant) => [participant.registrationId, participant]),
   );
@@ -139,7 +139,7 @@ function playersTab(detail: TournamentDetail, generatedAt: string): SheetTabMode
   return { title: "Players", rows, frozenRows: 4, filterRow: 3 };
 }
 
-function scoresTab(detail: TournamentDetail, generatedAt: string): SheetTabModel {
+function scoresTab(detail: TournamentExportViewModel, generatedAt: string): SheetTabModel {
   const rounds = orderedRounds(detail).filter((round) => !hasCheckmate(round));
   const columns = rounds.flatMap((round) =>
     Array.from({ length: configuredGameCount(round, detail) }, (_, index) => ({
@@ -175,7 +175,7 @@ function scoresTab(detail: TournamentDetail, generatedAt: string): SheetTabModel
   return { title: "Scores", rows, frozenRows: 4, filterRow: 3 };
 }
 
-function checkmateCondition(detail: TournamentDetail, round: TournamentRound): CheckmateWinCondition {
+function checkmateCondition(detail: TournamentExportViewModel, round: TournamentRound): CheckmateWinCondition {
   const formatConfig = detail.formatConfig as
     | { nodes?: Array<{ id: string; winCondition?: CheckmateWinCondition }> }
     | undefined;
@@ -185,7 +185,7 @@ function checkmateCondition(detail: TournamentDetail, round: TournamentRound): C
     : { type: "checkmate", threshold: 18, rankingMetric: "points" };
 }
 
-function checkmateTab(detail: TournamentDetail, generatedAt: string): SheetTabModel {
+function checkmateTab(detail: TournamentExportViewModel, generatedAt: string): SheetTabModel {
   const rounds = orderedRounds(detail).filter((round) => hasCheckmate(round));
   const rows = [...titleRows(`${detail.name} — Checkmate`, generatedAt)];
 
@@ -250,7 +250,7 @@ function checkmateTab(detail: TournamentDetail, generatedAt: string): SheetTabMo
 }
 
 export function buildTournamentWorkbook(
-  detail: TournamentDetail,
+  detail: TournamentExportViewModel,
   generatedAt = new Date().toISOString(),
 ): TournamentWorkbookModel {
   return {

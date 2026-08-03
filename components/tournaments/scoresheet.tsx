@@ -1,22 +1,14 @@
 "use client";
 
 import { useState } from "react";
-import type { TournamentGameScore, TournamentRound, TournamentScore } from "@/lib/db/tournaments/types";
-import {
-  buildScoresheetTabs,
-  OVERALL_TAB_ID,
-} from "@/lib/tournament/scoring/scoresheet";
+import type { ScoresheetTab } from "@/lib/tournament/scoring/scoresheet";
+import { OVERALL_TAB_ID } from "@/lib/tournament/scoring/scoresheet";
 
 type ScoresheetProps = {
-  gameScores: TournamentGameScore[];
-  rounds: TournamentRound[];
-  scores: TournamentScore[];
+  tabs: ScoresheetTab[];
 };
 
-export function Scoresheet({ gameScores, rounds, scores }: ScoresheetProps) {
-  const [tabs] = useState(() =>
-    buildScoresheetTabs(rounds, scores, gameScores),
-  );
+export function Scoresheet({ tabs }: ScoresheetProps) {
   const [activeTabId, setActiveTabId] = useState(OVERALL_TAB_ID);
   const activeTab = tabs.find((tab) => tab.id === activeTabId) ?? tabs[0];
 

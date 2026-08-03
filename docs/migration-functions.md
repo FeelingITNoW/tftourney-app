@@ -23,6 +23,27 @@ The normal tournament flow is:
 
 ## Tournament and format functions
 
+### public.list_tournament_summaries
+
+    list_tournament_summaries(
+      p_page integer default 1,
+      p_page_size integer default 10,
+      p_host_user_id bigint default null
+    )
+    returns table (
+      items jsonb,
+      total_count bigint,
+      page integer,
+      page_size integer,
+      total_pages integer
+    )
+
+Returns one page of tournament summary view-model items for the public list or
+the requested organizer. The function uses deterministic newest-first ordering
+with the tournament ID as a tie-breaker, computes registered-player counts and
+active node IDs in the database, and clamps page inputs to safe bounds. It is
+granted only to `service_role`.
+
 ### public.start_tournament
 
     start_tournament(
@@ -185,6 +206,46 @@ Testing-only helper for graph tournaments. It locks the tournament and selected
 active node, finds the first pending game block, creates valid random
 placements for its lobbies, and routes them through update_lobby_results.
 Existing results are preserved and completed tournaments are rejected.
+
+## Route-scoped read functions
+
+### public.get_tournament_page_view_model
+
+    get_tournament_page_view_model(
+      p_tournament_id text, p_view text, p_selected_node_id text,
+      p_game_number integer, p_lobby_page integer, p_lobby_page_size integer,
+      p_host_user_id bigint
+    ) returns table (view_model jsonb)
+
+Returns the common tournament shell and exactly one `lobbies`, `scoresheet`,
+`graph`, or `details` panel. Lobby pages are clamped to a safe page size of
+eight. The function is executable only by `service_role`.
+
+### public.get_tournament_lobby_view_model
+
+    get_tournament_lobby_view_model(p_tournament_id text, p_lobby_id text)
+    returns table (view_model jsonb)
+
+Returns the tournament, round, roster, and round scores needed by the lobby
+editor in one request.
+
+### public.get_tournament_export_view_model
+
+    get_tournament_export_view_model(p_tournament_id text)
+    returns table (view_model jsonb)
+
+Returns registrations, participants, rounds, scores, game scores, and format
+configuration for the workbook worker. No graph or lobby duplication is sent.
+
+### public.get_google_sheet_export_status_view_model
+
+    get_google_sheet_export_status_view_model(
+      p_tournament_id text, p_host_user_id bigint
+    ) returns table (view_model jsonb)
+
+Returns connection/export state only for the verified tournament host. All four
+functions revoke `public`, `anon`, and `authenticated` execution and grant it
+to `service_role`.
 
 ## Integrity and trigger functions
 

@@ -1,9 +1,15 @@
 import Link from "next/link";
+import { redirect } from "next/navigation";
 import { createTournamentAction } from "@/app/actions";
 import { AccountHeader } from "@/components/account/account-header";
+import { TournamentPagination } from "@/components/tournaments/tournament-pagination";
 import { getOrganizerSession } from "@/lib/auth/session";
-import { listTournaments } from "@/lib/db/tournaments/api";
-import type { TournamentSummary } from "@/lib/db/tournaments/types";
+import {
+  listTournaments,
+  TOURNAMENT_PAGE_SIZE,
+} from "@/lib/db/tournaments/api";
+import { buildPageHref, parsePageParam } from "@/lib/pagination";
+import type { TournamentListPageViewModel } from "@/lib/db/tournaments/types";
 import { TOURNAMENT_FORMAT_OPTIONS } from "@/lib/tournament/formats/api";
 import {
   PLAYERS_PER_TFT_LOBBY,
@@ -17,6 +23,7 @@ type HomeSearchParams = Promise<{
   formatId?: string | string[];
   tournamentName?: string | string[];
   playerCount?: string | string[];
+  page?: string | string[];
 }>;
 
 function getSearchValue(value: string | string[] | undefined): string {
@@ -33,6 +40,10 @@ export default async function Home({
   searchParams: HomeSearchParams;
 }) {
   const query = await searchParams;
+  const parsedPage = parsePageParam(query.page);
+  if (parsedPage.redirectPage !== null) {
+    redirect(buildPageHref("/", parsedPage.redirectPage));
+  }
   const createError = getSearchValue(query.createError);
   const tournamentName = getSearchValue(query.tournamentName);
   const playerCount = getSearchValue(query.playerCount);
@@ -46,17 +57,32 @@ export default async function Home({
         formatId,
       })
     : null;
-  let tournaments: TournamentSummary[] = [];
+  let tournamentPage: TournamentListPageViewModel = {
+    items: [],
+    page: parsedPage.page,
+    pageSize: TOURNAMENT_PAGE_SIZE,
+    totalCount: 0,
+    totalPages: 1,
+  };
   let databaseError = "";
 
   try {
-    tournaments = await listTournaments();
+    tournamentPage = await listTournaments({
+      page: parsedPage.page,
+      pageSize: TOURNAMENT_PAGE_SIZE,
+    });
   } catch (error) {
     databaseError =
       error instanceof Error
         ? error.message
         : "Tournament data could not be loaded.";
   }
+
+  if (!databaseError && parsedPage.page > tournamentPage.totalPages) {
+    redirect(buildPageHref("/", tournamentPage.totalPages));
+  }
+
+  const tournaments = tournamentPage.items;
 
   return (
     <main className="min-h-screen bg-stone-50 text-zinc-950">
@@ -70,7 +96,7 @@ export default async function Home({
               Tournament operations for Teamfight Tactics
             </p>
           </div>
-          <AccountHeader returnTo="/dashboard" />
+          <AccountHeader organizer={organizer} returnTo="/dashboard" />
         </header>
 
         <section className="grid flex-1 items-center gap-10 py-12 lg:grid-cols-[1.02fr_0.98fr] lg:py-16">
@@ -343,6 +369,13 @@ export default async function Home({
                   ))}
                 </tbody>
               </table>
+              <TournamentPagination
+                page={tournamentPage.page}
+                pageSize={tournamentPage.pageSize}
+                pathname="/"
+                totalCount={tournamentPage.totalCount}
+                totalPages={tournamentPage.totalPages}
+              />
             </div>
           )}
         </section>

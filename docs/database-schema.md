@@ -126,6 +126,12 @@ CREATE TABLE public.participant_round_scores (
 );
 
 -- Important unique indexes:
+-- tournaments(created_at desc, id desc)
+-- tournaments(host_user_id, created_at desc, id desc)
+-- tournament_registrations(tournament_id) where registration_status = 'registered'
+-- rounds(tournament_id, id) where status = 'active'
+-- rounds(tournament_id, status, round_number, id)
+-- tournament_edges(tournament_id, priority, id)
 -- tournament_registrations(tournament_id, riot_puuid) where riot_puuid is not null
 -- tournament_participants(tournament_id, registration_id)
 -- tournament_participants(tournament_id, seed_number)
@@ -134,6 +140,17 @@ CREATE TABLE public.participant_round_scores (
 -- lobby_participants(lobby_id, participant_id)
 -- participant_round_scores(participant_id, round_id)
 -- participant_round_scores(round_id, round_seed_number)
+
+The tournament list pages use the service-role-only RPC
+`list_tournament_summaries(p_page, p_page_size, p_host_user_id)`. It returns one
+row containing the JSON `items` page plus `total_count`, `page`, `page_size`,
+and `total_pages`. Results are ordered by `created_at desc, id desc`; a null
+host filter returns public tournaments and a host ID returns only that
+organizer's tournaments. Each item includes the current round number, active
+runtime node IDs, and a count of registrations whose status is `registered`.
+The RPC clamps pages to at least 1 and page sizes to 1–100. Supporting indexes
+cover the public and host ordering, registered-registration counts, and active
+round lookup.
 
 ## Compact graph tournament formats
 
@@ -245,3 +262,16 @@ legacy two-column uniqueness rule so multi-game rounds can reuse lobby numbers.
 The targeted `claim_tournament_sheet_export` function leases one queued export
 for an explicit Generate/Publish request; the scheduled batch claim remains
 responsible for retries and automatic dirty revisions.
+
+## Route-scoped read models
+
+`20260803010000_route_scoped_view_models.sql` adds composite lookup indexes for
+ordered rounds (`rounds(tournament_id, status, round_number, id)`) and runtime
+edges (`tournament_edges(tournament_id, priority, id)`). It also adds four
+service-role-only JSON read functions: `get_tournament_page_view_model` returns
+one selected server tab and at most eight lobbies for one game/page;
+`get_tournament_lobby_view_model` returns one lobby editor projection;
+`get_tournament_export_view_model` returns the minimal workbook projection; and
+`get_google_sheet_export_status_view_model` returns Sheets state only when the
+requested host owns the tournament. IDs are serialized as text and refresh
+tokens are never included.
