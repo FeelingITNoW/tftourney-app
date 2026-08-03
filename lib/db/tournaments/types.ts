@@ -40,6 +40,37 @@ export type TournamentSummary = {
   registeredPlayerCount: number;
 };
 
+export type TournamentListPageViewModel = {
+  items: TournamentSummary[];
+  page: number;
+  pageSize: number;
+  totalCount: number;
+  totalPages: number;
+};
+
+export type TournamentSummaryRpcItem = {
+  id: string | number;
+  host_user_id: string | number;
+  name: string;
+  max_players: number;
+  format_id: string;
+  status: TournamentStatus;
+  has_started: boolean;
+  current_round_id: string | number | null;
+  current_round_number: number | null;
+  active_node_ids: Array<string | number>;
+  created_at: string;
+  registered_player_count: number;
+};
+
+export type TournamentSummaryRpcRow = {
+  items: TournamentSummaryRpcItem[];
+  total_count: number | string;
+  page: number | string;
+  page_size: number | string;
+  total_pages: number | string;
+};
+
 export type TournamentRegistration = {
   id: string;
   displayName: string;
@@ -157,6 +188,70 @@ export type TournamentLobbyDetail = {
   lobby: TournamentLobby;
   scores: TournamentScore[];
 };
+
+export type TournamentPanelView = "lobbies" | "scoresheet" | "graph" | "details";
+
+export type TournamentSheetStatus = import("@/lib/sheets/types").GoogleSheetExportStatus;
+
+export type TournamentLobbiesPanelViewModel = {
+  view: "lobbies";
+  round: TournamentRound | null;
+  lobbies: TournamentLobby[];
+  gameSummaries: Array<{ gameNumber: number; lobbyCount: number; completedLobbyCount: number }>;
+  selectedGameNumber: number | null;
+  page: number;
+  pageSize: number;
+  totalCount: number;
+  totalPages: number;
+  roundProgress: TournamentRoundProgress | null;
+  progressionAction: TournamentProgressionAction;
+};
+
+export type TournamentScoresheetPanelViewModel = {
+  view: "scoresheet";
+  tabs: import("@/lib/tournament/scoring/scoresheet").ScoresheetTab[];
+};
+
+export type TournamentGraphPanelViewModel = {
+  view: "graph";
+  nodes: TournamentNode[];
+  edges: TournamentEdge[];
+};
+
+export type TournamentDetailsPanelViewModel = {
+  view: "details";
+  registrations: TournamentRegistration[];
+  participants: TournamentParticipant[];
+};
+
+export type TournamentDetailPageShellViewModel = Omit<
+  TournamentSummary,
+  "registeredPlayerCount"
+> & {
+  formatConfig?: unknown;
+  startRequirement: TournamentStartRequirement;
+  rounds: TournamentRound[];
+  nodes: TournamentNode[];
+  edges: TournamentEdge[];
+  activeNodeIds: string[];
+  selectedNodeId: string | null;
+  sheetStatus: TournamentSheetStatus | null;
+};
+
+export type TournamentDetailPageViewModel = TournamentDetailPageShellViewModel & {
+  panel:
+    | TournamentLobbiesPanelViewModel
+    | TournamentScoresheetPanelViewModel
+    | TournamentGraphPanelViewModel
+    | TournamentDetailsPanelViewModel;
+};
+
+export type TournamentLobbyPageViewModel = TournamentLobbyDetail;
+
+export type TournamentExportViewModel = Pick<
+  TournamentDetail,
+  "id" | "hostUserId" | "name" | "status" | "formatConfig" | "registrations" | "participants" | "rounds" | "scores" | "gameScores"
+>;
 
 export type TournamentDetail = Omit<
   TournamentSummary,

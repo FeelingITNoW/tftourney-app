@@ -1,5 +1,5 @@
 import Link from "next/link";
-import { notFound } from "next/navigation";
+import { notFound, redirect } from "next/navigation";
 import {
   addRandomSeededPlayersAction,
   deleteTournamentAction,
@@ -16,9 +16,10 @@ import { TournamentDetails } from "@/components/tournaments/tournament-details";
 import { GoogleSheetsPublishingPanel } from "@/components/tournaments/google-sheets-publishing-panel";
 import { AccountHeader } from "@/components/account/account-header";
 import {
-  getTournamentPageData,
+  getTournamentPageViewModel,
   TOURNAMENT_STATUS_ACCEPTING_PLAYERS,
 } from "@/lib/db/tournaments/api";
+import type { TournamentDetail, TournamentDetailPageViewModel, TournamentPanelView } from "@/lib/db/tournaments/types";
 import { getOrganizerSession } from "@/lib/auth/session";
 import { selectTournamentEntrants } from "@/lib/tournament/start/api";
 
@@ -29,6 +30,7 @@ type TournamentPageParams = Promise<{
 }>;
 
 type TournamentPageSearchParams = Promise<{
+  view?: string | string[];
   game?: string | string[];
   page?: string | string[];
   randomized?: string | string[];
@@ -65,6 +67,7 @@ export default async function TournamentPage({
   const query = await searchParams;
   const requestedGame = Number.parseInt(getSearchValue(query.game), 10);
   const requestedPage = Number.parseInt(getSearchValue(query.page), 10);
+  const parsedPage = Number.isSafeInteger(requestedPage) && requestedPage > 0 ? requestedPage : 1;
   const randomized = getSearchValue(query.randomized) === "true";
   const registrationError = getSearchValue(query.registrationError);
   const randomPlayerError = getSearchValue(query.randomPlayerError);
@@ -75,17 +78,44 @@ export default async function TournamentPage({
   const progressed = getSearchValue(query.progressed) === "true";
   const deleteError = getSearchValue(query.deleteError);
   const requestedNode = getSearchValue(query.node);
+  const requestedView = getSearchValue(query.view);
   const authError = getSearchValue(query.authError);
   const authSuccess = getSearchValue(query.authSuccess) === "google_sheets";
   const authorizationError = getSearchValue(query.authorizationError);
   const organizer = await getOrganizerSession();
-  let tournament:
-    | Awaited<ReturnType<typeof getTournamentPageData>>
-    | undefined;
+  const view: TournamentPanelView = requestedView === "scoresheet" || requestedView === "graph" || requestedView === "details" || requestedView === "lobbies"
+    ? requestedView
+    : "lobbies";
+  let tournament: (TournamentDetailPageViewModel & Pick<TournamentDetail, "registrations" | "participants" | "lobbies" | "gameScores" | "scores" | "roundProgress" | "progressionAction">) | null | undefined;
   let databaseError = "";
 
   try {
-    tournament = await getTournamentPageData(tournamentId, requestedNode || undefined);
+    const pageModel = await getTournamentPageViewModel(tournamentId, {
+      view,
+      selectedNodeId: requestedNode || undefined,
+      gameNumber: Number.isInteger(requestedGame) && requestedGame > 0 ? requestedGame : undefined,
+      page: Number.isInteger(requestedPage) && requestedPage > 0 ? requestedPage : 1,
+      pageSize: 8,
+      hostUserId: organizer?.hostUserId,
+    });
+    if (pageModel) {
+      const details = pageModel.panel.view === "details" ? pageModel.panel : null;
+      const lobbies = pageModel.panel.view === "lobbies" ? pageModel.panel : null;
+      const scorePanel = pageModel.panel.view === "scoresheet" ? pageModel.panel : null;
+      tournament = {
+        ...pageModel,
+        registrations: details?.registrations ?? [],
+        participants: details?.participants ?? [],
+        lobbies: lobbies?.lobbies ?? [],
+        gameScores: [],
+        scores: [],
+        roundProgress: lobbies?.roundProgress ?? null,
+        progressionAction: lobbies?.progressionAction ?? null,
+        ...(scorePanel ? { scores: [], gameScores: [] } : {}),
+      };
+    } else {
+      tournament = null;
+    }
   } catch (error) {
     databaseError =
       error instanceof Error
@@ -96,6 +126,33 @@ export default async function TournamentPage({
   if (!databaseError && !tournament) {
     notFound();
   }
+
+  const lobbyPanel = tournament?.panel.view === "lobbies" ? tournament.panel : null;
+  const scoresheetPanel = tournament?.panel.view === "scoresheet" ? tournament.panel : null;
+  const graphPanel = tournament?.panel.view === "graph" ? tournament.panel : null;
+
+  if (tournament) {
+    const canonicalView: TournamentPanelView = tournament.hasStarted ? view : "details";
+    const pageIsMalformed = Array.isArray(query.page) || (getSearchValue(query.page) !== "" && !/^[1-9]\d*$/.test(getSearchValue(query.page)));
+    const gameIsMalformed = Array.isArray(query.game) || (getSearchValue(query.game) !== "" && !/^[1-9]\d*$/.test(getSearchValue(query.game)));
+    const viewIsMalformed = Array.isArray(query.view);
+    const nodeIsRepeated = Array.isArray(query.node);
+    const canonicalParams = new URLSearchParams();
+    if (canonicalView !== "lobbies" && tournament.hasStarted) canonicalParams.set("view", canonicalView);
+    if (canonicalView === "lobbies" && requestedNode && tournament.selectedNodeId) canonicalParams.set("node", tournament.selectedNodeId);
+    if (canonicalView === "lobbies" && Number.isInteger(requestedGame) && requestedGame > 0 && lobbyPanel?.selectedGameNumber) canonicalParams.set("game", String(lobbyPanel.selectedGameNumber));
+    if (!pageIsMalformed && !gameIsMalformed && lobbyPanel && parsedPage > lobbyPanel.totalPages) {
+      if (lobbyPanel.totalPages > 1) canonicalParams.set("page", String(lobbyPanel.totalPages));
+      redirect(`/tournaments/${tournamentId}${canonicalParams.toString() ? `?${canonicalParams}` : ""}`);
+    }
+    const invalidNode = canonicalView === "lobbies" && Boolean(requestedNode) && requestedNode !== tournament.selectedNodeId;
+    const invalidGame = canonicalView === "lobbies" && Number.isInteger(requestedGame) && requestedGame > 0 && requestedGame !== lobbyPanel?.selectedGameNumber;
+    const unrelatedPanelParams = canonicalView !== "lobbies" && Boolean(requestedNode || getSearchValue(query.game) || getSearchValue(query.page));
+    if (pageIsMalformed || gameIsMalformed || viewIsMalformed || nodeIsRepeated || getSearchValue(query.page) === "1" || requestedView === "lobbies" || (requestedView && requestedView !== canonicalView) || invalidNode || invalidGame || unrelatedPanelParams) {
+      redirect(`/tournaments/${tournamentId}${canonicalParams.toString() ? `?${canonicalParams}` : ""}`);
+    }
+  }
+
 
   const isAcceptingPlayers =
     tournament?.status === TOURNAMENT_STATUS_ACCEPTING_PLAYERS;
@@ -120,30 +177,13 @@ export default async function TournamentPage({
       [],
   );
   const hasPendingCurrentRoundLobby =
-    tournament?.lobbies.some(
+    lobbyPanel?.lobbies.some(
       (lobby) =>
         lobby.participants.length > 0 &&
         lobby.participants.every(
           (participant) => participant.resultStatus === "pending",
         ),
     ) ?? false;
-  const scoresheetVersion = (tournament?.scores ?? [])
-    .map((score) => `${score.id}:${score.roundId}:${score.score}`)
-    .concat(
-      tournament?.gameScores.map(
-        (score) =>
-          `${score.participantId}:${score.roundId}:game-${score.gameNumber}:${score.placement ?? "pending"}:${score.score ?? "pending"}`,
-      ) ?? [],
-    )
-    .concat(
-      tournament?.rounds.map(
-        (round) => `${round.id}:round-${round.roundNumber}`,
-      ) ?? [],
-    )
-    .concat([
-      `checkmate:${tournament?.roundProgress?.winnerParticipantId ?? "none"}:${tournament?.roundProgress?.decisiveGame ?? "none"}`,
-    ])
-    .join("|");
   const isTournamentCompleted = tournament?.status === "completed";
   const remainingRegistrationSlots = tournament
     ? Math.max(tournament.playerCount - tournament.registrations.length, 0)
@@ -165,7 +205,7 @@ export default async function TournamentPage({
               Registered players and tournament status
             </p>
           </div>
-          <div className="flex items-center gap-4"><Link className="rounded-md border border-zinc-200 bg-white px-3 py-2 text-sm font-medium text-zinc-600 shadow-sm hover:bg-zinc-50" href="/">Back to tournaments</Link><AccountHeader returnTo={`/tournaments/${tournamentId}`} /></div>
+          <div className="flex items-center gap-4"><Link className="rounded-md border border-zinc-200 bg-white px-3 py-2 text-sm font-medium text-zinc-600 shadow-sm hover:bg-zinc-50" href="/">Back to tournaments</Link><AccountHeader organizer={organizer} returnTo={`/tournaments/${tournamentId}`} /></div>
         </header>
 
         {databaseError ? (
@@ -181,7 +221,7 @@ export default async function TournamentPage({
           <>
             <div className="py-6">
               {!isTournamentHost ? <div className="mb-4 rounded-md border border-zinc-200 bg-white p-4 text-sm text-zinc-600">You are viewing this tournament publicly. Sign in as its host to manage players, results, or Sheets publishing.</div> : null}
-              {isTournamentHost ? <GoogleSheetsPublishingPanel authError={authError} authSuccess={authSuccess} initiallyAuthenticated={hasSheetSession} tournamentId={tournament.id} /> : <div className="rounded-lg border border-indigo-200 bg-indigo-50 p-5 text-sm text-indigo-900"><p className="font-semibold">Google Sheets scoreboard</p><p className="mt-1">The tournament host can connect Google Drive to generate and publish a workbook.</p></div>}
+              {isTournamentHost ? <GoogleSheetsPublishingPanel authError={authError} authSuccess={authSuccess} initialStatus={tournament.sheetStatus} initiallyAuthenticated={hasSheetSession} tournamentId={tournament.id} /> : <div className="rounded-lg border border-indigo-200 bg-indigo-50 p-5 text-sm text-indigo-900"><p className="font-semibold">Google Sheets scoreboard</p><p className="mt-1">The tournament host can connect Google Drive to generate and publish a workbook.</p></div>}
             </div>
             {authorizationError ? <p className="mb-5 rounded-md border border-red-200 bg-red-50 p-4 text-sm font-medium text-red-800" role="alert">{authorizationError}</p> : null}
             {!tournament.hasStarted ? (
@@ -444,7 +484,11 @@ export default async function TournamentPage({
                   </div>
                 ) : null}
                 <RoundTabs
-                  details={
+                  activeView={view}
+                  query={{ node: requestedNode || null, game: Number.isInteger(requestedGame) ? requestedGame : null, page: Number.isInteger(requestedPage) ? requestedPage : null }}
+                  tournamentId={tournament.id}
+                >
+                  {view === "details" ? (
                     <TournamentDetails
                       currentRoundLabel={currentRoundLabel}
                       deleteError={deleteError}
@@ -456,17 +500,17 @@ export default async function TournamentPage({
                       isHost={isTournamentHost}
                       tournament={tournament}
                     />
-                  }
-                  graph={
+                  ) : view === "graph" ? (
                     <TournamentGraph
-                      edges={tournament.edges}
-                      nodes={tournament.nodes}
+                      edges={graphPanel?.edges ?? tournament.edges}
+                      nodes={graphPanel?.nodes ?? tournament.nodes}
                       selectedNodeId={tournament.selectedNodeId}
                       started
                       tournamentId={tournament.id}
                     />
-                  }
-                  lobbies={
+                  ) : view === "scoresheet" ? (
+                    <Scoresheet tabs={scoresheetPanel?.tabs ?? []} />
+                  ) : tournament.panel.view === "lobbies" ? (
                     <div className="pt-6">
                       <div>
                         <div className="flex flex-col gap-4 sm:flex-row sm:items-end sm:justify-between">
@@ -477,10 +521,10 @@ export default async function TournamentPage({
                                 : "Current round lobbies"}
                             </h2>
                             <p className="mt-1 text-sm text-zinc-500">
-                              {tournament.roundProgress?.roundFormat === "checkmate"
-                                ? `${tournament.roundProgress.completedGames} game${tournament.roundProgress.completedGames === 1 ? "" : "s"} complete${tournament.roundProgress.maxGames ? ` of ${tournament.roundProgress.maxGames}` : ""}.`
-                                : tournament.roundProgress
-                                  ? `${tournament.roundProgress.completedGames} of ${tournament.roundProgress.configuredGames} games complete.`
+                              {lobbyPanel?.roundProgress?.roundFormat === "checkmate"
+                                ? `${lobbyPanel.roundProgress.completedGames} game${lobbyPanel.roundProgress.completedGames === 1 ? "" : "s"} complete${lobbyPanel.roundProgress.maxGames ? ` of ${lobbyPanel.roundProgress.maxGames}` : ""}.`
+                                : lobbyPanel?.roundProgress
+                                  ? `${lobbyPanel.roundProgress.completedGames} of ${lobbyPanel.roundProgress.configuredGames} games complete.`
                                 : "Players are assigned when the round starts."}
                             </p>
                           </div>
@@ -526,25 +570,25 @@ export default async function TournamentPage({
                         </div>
                       ) : null}
 
-                      {tournament.roundProgress?.nextReseedGame ? (
+                      {lobbyPanel?.roundProgress?.nextReseedGame ? (
                         <p className="mt-3 text-sm font-medium text-cyan-800">
-                          Automatic reseed begins at Game {tournament.roundProgress.nextReseedGame} after
+                          Automatic reseed begins at Game {lobbyPanel.roundProgress.nextReseedGame} after
                           the current block is complete.
                         </p>
                       ) : null}
 
-                      {tournament.roundProgress?.roundFormat === "checkmate" ? (
+                      {lobbyPanel?.roundProgress?.roundFormat === "checkmate" ? (
                         <p className="mt-3 text-sm font-medium text-violet-800">
-                          Checkmate threshold: above {tournament.roundProgress.checkmateThreshold} points before a game.
-                          {tournament.roundProgress.winnerParticipantId
-                            ? ` Decisive game: ${tournament.roundProgress.decisiveGame}.`
-                            : tournament.roundProgress.maxGames
-                              ? ` The round falls back to points after ${tournament.roundProgress.maxGames} games.`
+                          Checkmate threshold: above {lobbyPanel.roundProgress.checkmateThreshold} points before a game.
+                          {lobbyPanel.roundProgress.winnerParticipantId
+                            ? ` Decisive game: ${lobbyPanel.roundProgress.decisiveGame}.`
+                            : lobbyPanel.roundProgress.maxGames
+                              ? ` The round falls back to points after ${lobbyPanel.roundProgress.maxGames} games.`
                               : " Games continue until an eligible first place is recorded."}
                         </p>
                       ) : null}
 
-                      {tournament.progressionAction ? (
+                      {lobbyPanel?.progressionAction ? (
                         <div className="mt-5 rounded-lg border border-amber-200 bg-amber-50 p-5">
                           <h3 className="text-lg font-semibold text-amber-950">Finalize current node</h3>
                           <p className="mt-2 text-sm text-amber-900">
@@ -569,23 +613,10 @@ export default async function TournamentPage({
                         </p>
                       ) : null}
 
-                      <LobbyBrowser
-                        initialGameNumber={Number.isInteger(requestedGame) ? requestedGame : null}
-                        initialPage={Number.isInteger(requestedPage) && requestedPage > 0 ? requestedPage : 1}
-                        lobbies={tournament.lobbies}
-                        tournamentId={tournament.id}
-                      />
+                      {lobbyPanel ? <LobbyBrowser panel={lobbyPanel} tournamentId={tournament.id} /> : null}
                     </div>
-                  }
-                  scoresheet={
-                    <Scoresheet
-                      gameScores={tournament.gameScores}
-                      key={scoresheetVersion}
-                      rounds={tournament.rounds}
-                      scores={tournament.scores}
-                    />
-                  }
-                />
+                  ) : null}
+                </RoundTabs>
               </>
             ) : null}
 

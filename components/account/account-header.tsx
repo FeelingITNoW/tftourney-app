@@ -1,12 +1,12 @@
 import Link from "next/link";
-import { getOrganizerSession } from "@/lib/auth/session";
+import type { OrganizerSession } from "@/lib/auth/session";
 
 type Props = {
+  organizer: OrganizerSession | null;
   returnTo?: string;
 };
 
-export async function AccountHeader({ returnTo = "/dashboard" }: Props) {
-  const organizer = await getOrganizerSession();
+export function AccountHeader({ organizer, returnTo = "/dashboard" }: Props) {
   if (organizer?.isLocal) {
     return <div className="flex items-center gap-3"><span className="rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-sm font-medium text-amber-900">Local organizer mode</span><a className="text-sm font-semibold text-emerald-800 hover:text-emerald-950" href={`/api/auth/google?intent=signin&returnTo=${encodeURIComponent(returnTo)}`}>Sign in with Google</a></div>;
   }

@@ -2,9 +2,61 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import {
   deleteTournament,
+  getTournamentExportViewModel,
+  getTournamentLobbyViewModel,
+  getTournamentPageViewModel,
   getTournamentLobbyDetail,
   getTournamentRoundDetail,
 } from "../lib/db/tournaments/api";
+
+test("route view-model readers each use one scoped RPC", async () => {
+  const originalFetch = globalThis.fetch;
+  const originalEnvironment = {
+    NEXT_PUBLIC_SUPABASE_URL: process.env.NEXT_PUBLIC_SUPABASE_URL,
+    SUPABASE_URL: process.env.SUPABASE_URL,
+    SUPABASE_SERVICE_ROLE_KEY: process.env.SUPABASE_SERVICE_ROLE_KEY,
+  };
+  delete process.env.NEXT_PUBLIC_SUPABASE_URL;
+  const requests: Array<{ path: string; body: unknown }> = [];
+  process.env.SUPABASE_URL = "https://database.example";
+  process.env.SUPABASE_SERVICE_ROLE_KEY = "test-service-role-key";
+  globalThis.fetch = async (input, options) => {
+    const url = new URL(String(input));
+    requests.push({ path: url.pathname, body: options?.body ? JSON.parse(String(options.body)) : null });
+    const path = url.pathname;
+    const viewModel = path.endsWith("get_tournament_page_view_model")
+      ? { view: "details", tournament: { id: "1", host_user_id: "7", name: "Test", max_players: 8, format_id: "default", status: "accepting_players", has_started: false, current_round_id: null, created_at: "2026-01-01T00:00:00Z" }, rounds: [], registrations: [], participants: [] }
+      : path.endsWith("get_tournament_lobby_view_model")
+        ? { tournament: { id: "1", host_user_id: "7", name: "Test", status: "in_progress", has_started: true }, format_config: {}, round: { id: "2", round_number: 1, format_round_id: null, status: "active" }, lobby: { id: "3", round_id: "2", game_number: 1, lobby_number: 1, participants: [] }, participants: [], scores: [] }
+        : { tournament: { id: "1", host_user_id: "7", name: "Test", status: "completed", format_config: {} }, registrations: [], participants: [], rounds: [], scores: [], game_scores: [] };
+    return new Response(JSON.stringify([{ view_model: viewModel }]), { status: 200 });
+  };
+  try {
+    await getTournamentPageViewModel("1", { view: "details", hostUserId: "7" });
+    await getTournamentLobbyViewModel("1", "3");
+    await getTournamentExportViewModel("1");
+    assert.deepEqual(requests.map((request) => request.path), [
+      "/rest/v1/rpc/get_tournament_page_view_model",
+      "/rest/v1/rpc/get_tournament_lobby_view_model",
+      "/rest/v1/rpc/get_tournament_export_view_model",
+    ]);
+    assert.deepEqual(requests[0]?.body, {
+      p_tournament_id: "1",
+      p_view: "details",
+      p_selected_node_id: null,
+      p_game_number: null,
+      p_lobby_page: 1,
+      p_lobby_page_size: 8,
+      p_host_user_id: "7",
+    });
+  } finally {
+    globalThis.fetch = originalFetch;
+    for (const [key, value] of Object.entries(originalEnvironment)) {
+      if (value === undefined) delete process.env[key];
+      else process.env[key] = value;
+    }
+  }
+});
 
 test("deletes a tournament through the database aggregate boundary", async () => {
   const originalFetch = globalThis.fetch;

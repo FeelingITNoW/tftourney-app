@@ -29,6 +29,13 @@ import type {
   TournamentScoreRow,
   TournamentRow,
   TournamentSummary,
+  TournamentListPageViewModel,
+  TournamentDetailPageViewModel,
+  TournamentLobbyPageViewModel,
+  TournamentExportViewModel,
+  TournamentPanelView,
+  TournamentSummaryRpcItem,
+  TournamentSummaryRpcRow,
   TournamentRoundProgress,
   TournamentProgressionAction,
   TournamentEdge,
@@ -52,8 +59,11 @@ import {
 } from "../../riot/accounts/api";
 import { SEEDED_RIOT_IDS, selectRandomSeededRiotIds } from "../../riot/accounts/seed";
 import { parseRiotGameTag } from "../../tournament/players/api";
+import { buildScoresheetTabs } from "../../tournament/scoring/scoresheet";
+import type { GoogleSheetExportStatus } from "../../sheets/types";
 
 export const TOURNAMENT_STATUS_ACCEPTING_PLAYERS = "accepting_players";
+export const TOURNAMENT_PAGE_SIZE = 10;
 
 const tournamentSelect =
   "id,host_user_id,name,max_players,format_id,status,current_round_id,format_config,created_at";
@@ -228,6 +238,28 @@ function mapTournamentRow(row: TournamentRow): Omit<
   };
 }
 
+function mapTournamentSummaryRpcItem(
+  row: TournamentSummaryRpcItem,
+): TournamentSummary {
+  return {
+    id: String(row.id),
+    hostUserId: String(row.host_user_id),
+    name: row.name,
+    playerCount: row.max_players,
+    formatId: row.format_id,
+    status: row.status,
+    hasStarted: row.has_started,
+    currentRoundId:
+      row.current_round_id === null ? null : String(row.current_round_id),
+    currentRoundNumber: row.current_round_number,
+    activeNodeIds: Array.isArray(row.active_node_ids)
+      ? row.active_node_ids.map(String)
+      : [],
+    createdAt: row.created_at,
+    registeredPlayerCount: row.registered_player_count,
+  };
+}
+
 function mapTournamentEdgeRow(row: TournamentEdgeRow): TournamentEdge {
   return {
     id: String(row.id),
@@ -318,70 +350,489 @@ export async function deleteTournament(
   }
 }
 
-export async function listTournaments(hostUserId?: string): Promise<TournamentSummary[]> {
-  const tournaments = await supabaseRestRequest<TournamentRow[]>("tournaments", {
-    query: {
-      select: tournamentSelect,
-      ...(hostUserId ? { host_user_id: `eq.${hostUserId}` } : {}),
-      order: "created_at.desc",
-    },
-  });
+export type TournamentListOptions = {
+  page?: number;
+  pageSize?: number;
+  hostUserId?: string;
+};
 
-  if (tournaments.length === 0) {
-    return [];
+function normalizePositiveInteger(value: number | undefined, fallback: number): number {
+  if (value === undefined || !Number.isSafeInteger(value) || value <= 0) {
+    return fallback;
   }
 
-  const tournamentIds = tournaments.map((tournament) => tournament.id);
-  const registrations = await supabaseRestRequest<
-    Pick<TournamentRegistrationRow, "tournament_id">[]
-  >("tournament_registrations", {
-    query: {
-      select: "tournament_id",
-      tournament_id: `in.(${tournamentIds.join(",")})`,
-    },
-  });
-
-  const playerCountByTournamentId = new Map<string, number>();
-
-  for (const registration of registrations) {
-    const tournamentId = String(registration.tournament_id);
-    playerCountByTournamentId.set(
-      tournamentId,
-      (playerCountByTournamentId.get(tournamentId) ?? 0) + 1,
-    );
-  }
-
-  const rounds = tournamentIds.length
-    ? await supabaseRestRequest<Pick<TournamentRoundRow, "id" | "round_number" | "tournament_id" | "status">[]>("rounds", {
-        query: {
-          select: "id,round_number,tournament_id,status",
-          tournament_id: `in.(${tournamentIds.join(",")})`,
-        },
-      })
-    : [];
-  const currentRoundNumberById = new Map(rounds.map((round) => [String(round.id), round.round_number]));
-  const activeNodeIdsByTournament = new Map<string, string[]>();
-  for (const round of rounds) {
-    if (round.status !== "active") continue;
-    const key = String(round.tournament_id);
-    activeNodeIdsByTournament.set(key, [...(activeNodeIdsByTournament.get(key) ?? []), String(round.id)]);
-  }
-
-  return tournaments.map((tournament) => ({
-    ...mapTournamentRow(tournament),
-    currentRoundNumber:
-      tournament.current_round_id === null
-        ? null
-        : currentRoundNumberById.get(String(tournament.current_round_id)) ?? null,
-    activeNodeIds: activeNodeIdsByTournament.get(String(tournament.id)) ??
-      (tournament.current_round_id === null ? [] : [String(tournament.current_round_id)]),
-    registeredPlayerCount:
-      playerCountByTournamentId.get(String(tournament.id)) ?? 0,
-  }));
+  return value;
 }
 
-export async function listHostedTournaments(hostUserId: string): Promise<TournamentSummary[]> {
-  return listTournaments(hostUserId);
+export async function listTournaments(
+  options: TournamentListOptions = {},
+): Promise<TournamentListPageViewModel> {
+  const page = normalizePositiveInteger(options.page, 1);
+  const pageSize = Math.min(
+    normalizePositiveInteger(options.pageSize, TOURNAMENT_PAGE_SIZE),
+    100,
+  );
+  const rows = await supabaseRestRequest<TournamentSummaryRpcRow[]>(
+    "rpc/list_tournament_summaries",
+    {
+      method: "POST",
+      body: {
+        p_page: page,
+        p_page_size: pageSize,
+        p_host_user_id: options.hostUserId ?? null,
+      },
+    },
+  );
+  const row = rows[0];
+
+  if (!row) {
+    throw new Error("Database did not return the tournament list.");
+  }
+
+  const totalCount = Number(row.total_count);
+  const returnedPage = Number(row.page);
+  const returnedPageSize = Number(row.page_size);
+  const totalPages = Math.max(1, Number(row.total_pages));
+
+  return {
+    items: Array.isArray(row.items)
+      ? row.items.map(mapTournamentSummaryRpcItem)
+      : [],
+    page: Number.isSafeInteger(returnedPage) && returnedPage > 0 ? returnedPage : page,
+    pageSize:
+      Number.isSafeInteger(returnedPageSize) && returnedPageSize > 0
+        ? returnedPageSize
+        : pageSize,
+    totalCount: Number.isFinite(totalCount) && totalCount >= 0 ? totalCount : 0,
+    totalPages: Number.isSafeInteger(totalPages) ? totalPages : 1,
+  };
+}
+
+export async function listHostedTournaments(
+  hostUserId: string,
+  options: Omit<TournamentListOptions, "hostUserId"> = {},
+): Promise<TournamentListPageViewModel> {
+  return listTournaments({ ...options, hostUserId });
+}
+
+type RouteViewModelRpcRow = { view_model?: unknown };
+
+function asRecord(value: unknown): Record<string, unknown> {
+  return typeof value === "object" && value !== null
+    ? (value as Record<string, unknown>)
+    : {};
+}
+
+function valueAt(record: Record<string, unknown>, snake: string, camel = snake): unknown {
+  return record[camel] ?? record[snake];
+}
+
+function asString(value: unknown, fallback = ""): string {
+  return value === null || value === undefined ? fallback : String(value);
+}
+
+function asNumber(value: unknown, fallback = 0): number {
+  const parsed = typeof value === "number" ? value : Number(value);
+  return Number.isFinite(parsed) ? parsed : fallback;
+}
+
+function asBoolean(value: unknown, fallback = false): boolean {
+  if (typeof value === "boolean") return value;
+  if (typeof value === "string") {
+    if (value.toLowerCase() === "true") return true;
+    if (value.toLowerCase() === "false") return false;
+  }
+  return fallback;
+}
+
+function asArray(value: unknown): unknown[] {
+  return Array.isArray(value) ? value : [];
+}
+
+function mapRpcRegistration(value: unknown): TournamentRegistration {
+  const row = asRecord(value);
+  return {
+    id: asString(valueAt(row, "id")),
+    displayName: asString(valueAt(row, "display_name", "displayName"), "Unknown player"),
+    registrationStatus: (valueAt(row, "registration_status", "registrationStatus") ?? "registered") as TournamentRegistration["registrationStatus"],
+    createdAt: asString(valueAt(row, "created_at", "createdAt")),
+  };
+}
+
+function mapRpcParticipant(value: unknown): TournamentParticipant {
+  const row = asRecord(value);
+  return {
+    id: asString(valueAt(row, "id")),
+    registrationId: asString(valueAt(row, "registration_id", "registrationId")),
+    displayName: asString(valueAt(row, "display_name_at_start", "displayName"), "Unknown player"),
+    seedNumber: asNumber(valueAt(row, "seed_number", "seedNumber")),
+    createdAt: asString(valueAt(row, "created_at", "createdAt")),
+  };
+}
+
+function mapRpcRound(value: unknown, formatConfig: unknown): TournamentRound {
+  const row = asRecord(value);
+  return mapTournamentRound(
+    {
+      id: asString(valueAt(row, "id")),
+      tournament_id: valueAt(row, "tournament_id", "tournamentId") as string | number | undefined,
+      round_number: asNumber(valueAt(row, "round_number", "roundNumber")),
+      format_round_id: (valueAt(row, "format_round_id", "formatNodeId") ?? null) as string | null,
+      stage_name: (valueAt(row, "stage_name", "name") ?? null) as string | null,
+      status: (valueAt(row, "status") ?? "pending") as TournamentRoundRow["status"],
+    },
+    formatConfig,
+  );
+}
+
+function mapRpcScore(value: unknown, participantById: Map<string, TournamentParticipant>): TournamentScore | null {
+  const row = asRecord(value);
+  const participantId = asString(valueAt(row, "participant_id", "participantId"));
+  const participant = participantById.get(participantId) ?? {
+    id: participantId,
+    registrationId: "",
+    displayName: asString(valueAt(row, "display_name", "displayName"), "Unknown player"),
+    seedNumber: asNumber(valueAt(row, "seed_number", "seedNumber")),
+    createdAt: "",
+  };
+  return {
+    id: asString(valueAt(row, "id"), `${participantId}:${asString(valueAt(row, "round_id", "roundId"))}`),
+    participantId,
+    displayName: participant.displayName,
+    seedNumber: participant.seedNumber,
+    roundId: asString(valueAt(row, "round_id", "roundId")),
+    roundSeedNumber: asNumber(valueAt(row, "round_seed_number", "roundSeedNumber"), participant.seedNumber),
+    score: asNumber(valueAt(row, "score")),
+    sourceEdgeId: valueAt(row, "source_edge_id", "sourceEdgeId") == null ? null : asString(valueAt(row, "source_edge_id", "sourceEdgeId")),
+    sourceRank: valueAt(row, "source_rank", "sourceRank") == null ? null : asNumber(valueAt(row, "source_rank", "sourceRank")),
+    createdAt: asString(valueAt(row, "created_at", "createdAt")),
+  };
+}
+
+function mapRpcGameScore(value: unknown, participantById: Map<string, TournamentParticipant>): TournamentGameScore | null {
+  const row = asRecord(value);
+  const participantId = asString(valueAt(row, "participant_id", "participantId"));
+  const participant = participantById.get(participantId) ?? {
+    id: participantId,
+    registrationId: "",
+    displayName: asString(valueAt(row, "display_name", "displayName"), "Unknown player"),
+    seedNumber: asNumber(valueAt(row, "seed_number", "seedNumber")),
+    createdAt: "",
+  };
+  const score = valueAt(row, "score");
+  return {
+    participantId,
+    displayName: participant.displayName,
+    seedNumber: participant.seedNumber,
+    roundId: asString(valueAt(row, "round_id", "roundId")),
+    gameNumber: asNumber(valueAt(row, "game_number", "gameNumber")),
+    placement: valueAt(row, "placement") == null ? null : asNumber(valueAt(row, "placement")),
+    score: score == null ? null : asNumber(score),
+  };
+}
+
+function mapRpcLobby(value: unknown, participantById: Map<string, TournamentParticipant>, scoreByParticipantRound: Map<string, TournamentScore>): TournamentLobby {
+  const row = asRecord(value);
+  const roundId = asString(valueAt(row, "round_id", "roundId"));
+  const participants = asArray(valueAt(row, "participants"))
+    .map((entry) => {
+      const participantRow = asRecord(entry);
+      const id = asString(valueAt(participantRow, "participant_id", "participantId") ?? valueAt(participantRow, "id"));
+      const participant = participantById.get(id) ?? {
+        id,
+        registrationId: "",
+        displayName: asString(valueAt(participantRow, "display_name", "displayName"), "Unknown player"),
+        seedNumber: asNumber(valueAt(participantRow, "seed_number", "seedNumber")),
+        createdAt: "",
+      };
+      const score = scoreByParticipantRound.get(`${id}:${roundId}`);
+      return {
+        id,
+        displayName: asString(valueAt(participantRow, "display_name", "displayName"), participant.displayName),
+        seedNumber: asNumber(valueAt(participantRow, "seed_number", "seedNumber"), participant.seedNumber),
+        roundSeedNumber: asNumber(valueAt(participantRow, "round_seed_number", "roundSeedNumber"), score?.roundSeedNumber ?? participant.seedNumber),
+        slotNumber: asNumber(valueAt(participantRow, "slot_number", "slotNumber")),
+        placement: valueAt(participantRow, "placement") == null ? null : asNumber(valueAt(participantRow, "placement")),
+        points: valueAt(participantRow, "points") == null ? null : asNumber(valueAt(participantRow, "points")),
+        resultStatus: (valueAt(participantRow, "result_status", "resultStatus") ?? "pending") as TournamentLobby["participants"][number]["resultStatus"],
+      };
+    })
+    .filter((participant): participant is TournamentLobby["participants"][number] => participant !== null)
+    .sort((first, second) => first.slotNumber - second.slotNumber);
+  return {
+    id: asString(valueAt(row, "id")),
+    roundId,
+    gameNumber: asNumber(valueAt(row, "game_number", "gameNumber")),
+    lobbyNumber: asNumber(valueAt(row, "lobby_number", "lobbyNumber")),
+    participants,
+  };
+}
+
+function mapRpcEdge(value: unknown): TournamentEdge {
+  const row = asRecord(value);
+  return {
+    id: asString(valueAt(row, "id")),
+    formatEdgeId: asString(valueAt(row, "format_edge_id", "formatEdgeId"), asString(valueAt(row, "id"))),
+    sourceNodeId: asString(valueAt(row, "source_round_id", "sourceNodeId")),
+    destinationNodeId: asString(valueAt(row, "destination_round_id", "destinationNodeId")),
+    priority: asNumber(valueAt(row, "priority"), 1),
+    condition: valueAt(row, "condition") ?? null,
+    status: (valueAt(row, "status") ?? "pending") as TournamentEdge["status"],
+    advancedPlayerCount: asNumber(valueAt(row, "advanced_player_count", "advancedPlayerCount")),
+  };
+}
+
+function mapRpcNode(value: unknown, formatConfig: unknown): TournamentNode {
+  const row = asRecord(value);
+  const round = mapRpcRound(value, formatConfig);
+  return {
+    ...round,
+    entrantCount: asNumber(valueAt(row, "entrant_count", "entrantCount")),
+    completedGames: asNumber(valueAt(row, "completed_games", "completedGames")),
+    configuredGames: valueAt(row, "configured_games", "configuredGames") == null ? round.configuredGames ?? null : asNumber(valueAt(row, "configured_games", "configuredGames")),
+    position: (valueAt(row, "position") ?? null) as TournamentNode["position"],
+  };
+}
+
+function mapRpcProgress(value: unknown): TournamentRoundProgress | null {
+  if (!value) return null;
+  const row = asRecord(value);
+  return {
+    roundFormat: (valueAt(row, "round_format", "roundFormat") ?? "fixed_games") as TournamentRoundProgress["roundFormat"],
+    completedGames: asNumber(valueAt(row, "completed_games", "completedGames")),
+    configuredGames: valueAt(row, "configured_games", "configuredGames") == null ? null : asNumber(valueAt(row, "configured_games", "configuredGames")),
+    checkmateThreshold: valueAt(row, "checkmate_threshold", "checkmateThreshold") == null ? null : asNumber(valueAt(row, "checkmate_threshold", "checkmateThreshold")),
+    maxGames: valueAt(row, "max_games", "maxGames") == null ? null : asNumber(valueAt(row, "max_games", "maxGames")),
+    decisiveGame: valueAt(row, "decisive_game", "decisiveGame") == null ? null : asNumber(valueAt(row, "decisive_game", "decisiveGame")),
+    winnerParticipantId: valueAt(row, "winner_participant_id", "winnerParticipantId") == null ? null : asString(valueAt(row, "winner_participant_id", "winnerParticipantId")),
+    currentBlockStartGame: valueAt(row, "current_block_start_game", "currentBlockStartGame") == null ? null : asNumber(valueAt(row, "current_block_start_game", "currentBlockStartGame")),
+    currentBlockEndGame: valueAt(row, "current_block_end_game", "currentBlockEndGame") == null ? null : asNumber(valueAt(row, "current_block_end_game", "currentBlockEndGame")),
+    nextReseedGame: valueAt(row, "next_reseed_game", "nextReseedGame") == null ? null : asNumber(valueAt(row, "next_reseed_game", "nextReseedGame")),
+    isComplete: asBoolean(valueAt(row, "is_complete", "isComplete")),
+  };
+}
+
+function mapRpcSheetStatus(value: unknown): GoogleSheetExportStatus | null {
+  if (!value) return null;
+  const row = asRecord(value);
+  const lastError = valueAt(row, "last_error", "lastError");
+  return {
+    tournamentId: asString(valueAt(row, "tournament_id", "tournamentId")),
+    connectionState: (valueAt(row, "connection_state", "connectionState") ?? "disconnected") as GoogleSheetExportStatus["connectionState"],
+    state: (valueAt(row, "state") ?? "not_created") as GoogleSheetExportStatus["state"],
+    spreadsheetId: (valueAt(row, "spreadsheet_id", "spreadsheetId") ?? null) as string | null,
+    spreadsheetUrl: (valueAt(row, "spreadsheet_url", "spreadsheetUrl") ?? null) as string | null,
+    desiredRevision: asNumber(valueAt(row, "desired_revision", "desiredRevision")),
+    syncedRevision: asNumber(valueAt(row, "synced_revision", "syncedRevision")),
+    dirtyAt: (valueAt(row, "dirty_at", "dirtyAt") ?? null) as string | null,
+    lastSyncedAt: (valueAt(row, "last_synced_at", "lastSyncedAt") ?? null) as string | null,
+    nextAttemptAt: (valueAt(row, "next_attempt_at", "nextAttemptAt") ?? null) as string | null,
+    lastError: lastError
+      ? { code: asString(valueAt(asRecord(lastError), "code"), "SHEET_EXPORT_ERROR"), message: asString(valueAt(asRecord(lastError), "message"), "Sheet export failed.") }
+      : valueAt(row, "last_error_code", "lastErrorCode") || valueAt(row, "last_error_message", "lastErrorMessage")
+        ? { code: asString(valueAt(row, "last_error_code", "lastErrorCode"), "SHEET_EXPORT_ERROR"), message: asString(valueAt(row, "last_error_message", "lastErrorMessage"), "Sheet export failed.") }
+        : null,
+  };
+}
+
+function mapRoutePageViewModel(rawValue: unknown): TournamentDetailPageViewModel {
+  const raw = asRecord(rawValue);
+  const tournament = asRecord(valueAt(raw, "tournament"));
+  const formatConfig = valueAt(tournament, "format_config", "formatConfig") ?? valueAt(raw, "format_config", "formatConfig");
+  const summary = mapTournamentSummaryRpcItem({
+    id: asString(valueAt(tournament, "id") ?? valueAt(raw, "id")),
+    host_user_id: asString(valueAt(tournament, "host_user_id", "hostUserId") ?? valueAt(raw, "host_user_id", "hostUserId")),
+    name: asString(valueAt(tournament, "name") ?? valueAt(raw, "name")),
+    max_players: asNumber(valueAt(tournament, "max_players", "playerCount") ?? valueAt(raw, "max_players", "playerCount")),
+    format_id: asString(valueAt(tournament, "format_id", "formatId") ?? valueAt(raw, "format_id", "formatId")),
+    status: (valueAt(tournament, "status") ?? valueAt(raw, "status") ?? "accepting_players") as TournamentSummary["status"],
+    has_started: asBoolean(valueAt(tournament, "has_started", "hasStarted") ?? valueAt(raw, "has_started", "hasStarted")),
+    current_round_id: (valueAt(tournament, "current_round_id", "currentRoundId") ?? valueAt(raw, "current_round_id", "currentRoundId") ?? null) as string | null,
+    current_round_number: valueAt(tournament, "current_round_number", "currentRoundNumber") == null ? null : asNumber(valueAt(tournament, "current_round_number", "currentRoundNumber")),
+    active_node_ids: asArray(valueAt(raw, "active_node_ids", "activeNodeIds")).map(String),
+    created_at: asString(valueAt(tournament, "created_at", "createdAt") ?? valueAt(raw, "created_at", "createdAt")),
+    registered_player_count: asNumber(valueAt(tournament, "registered_player_count", "registeredPlayerCount")),
+  });
+  const rounds = asArray(valueAt(raw, "rounds")).map((round) => mapRpcRound(round, formatConfig));
+  const nodes = asArray(valueAt(raw, "nodes")).map((node) => mapRpcNode(node, formatConfig));
+  const graph = getFormatGraph(formatConfig);
+  const fallbackNodes = nodes.length
+    ? nodes
+    : rounds.length
+      ? rounds.map((round) => ({ ...round, entrantCount: 0, completedGames: 0, configuredGames: round.configuredGames ?? null, position: null }))
+      : graph.nodes.map((node, index) => ({
+          id: node.id,
+          roundNumber: index + 1,
+          formatNodeId: node.id,
+          name: node.name,
+          isCheckmate: node.winCondition?.type === "checkmate",
+          status: "pending" as const,
+          entrantCount: 0,
+          completedGames: 0,
+          configuredGames: node.games ?? null,
+          position: node.position ?? null,
+        }));
+  const edges = asArray(valueAt(raw, "edges")).map(mapRpcEdge);
+  const fallbackEdges = edges.length ? edges : graph.edges.map((edge) => ({
+    id: edge.id,
+    formatEdgeId: edge.id,
+    sourceNodeId: edge.sourceNodeId,
+    destinationNodeId: edge.destinationNodeId,
+    priority: edge.priority,
+    condition: edge.condition,
+    status: "pending" as const,
+    advancedPlayerCount: 0,
+  }));
+  const requestedPanelView = valueAt(raw, "view") ?? valueAt(asRecord(valueAt(raw, "panel")), "view") ?? valueAt(asRecord(valueAt(raw, "panel")), "type");
+  const view: TournamentPanelView = ["lobbies", "scoresheet", "graph", "details"].includes(String(requestedPanelView))
+    ? String(requestedPanelView) as TournamentPanelView
+    : summary.hasStarted ? "lobbies" : "details";
+  const participants = asArray(valueAt(raw, "participants")).map(mapRpcParticipant);
+  const registrations = asArray(valueAt(raw, "registrations")).map(mapRpcRegistration);
+  const participantById = new Map(participants.map((participant) => [participant.id, participant]));
+  const scores = asArray(valueAt(raw, "scores")).map((score) => mapRpcScore(score, participantById)).filter((score): score is TournamentScore => score !== null);
+  const scoreByParticipantRound = new Map(scores.map((score) => [`${score.participantId}:${score.roundId}`, score]));
+  const gameScores = asArray(valueAt(raw, "game_scores", "gameScores")).map((score) => mapRpcGameScore(score, participantById)).filter((score): score is TournamentGameScore => score !== null);
+  let panel: TournamentDetailPageViewModel["panel"];
+  if (view === "scoresheet") {
+    panel = { view, tabs: buildScoresheetTabs(rounds, scores, gameScores) };
+  } else if (view === "graph") {
+    panel = { view, nodes: fallbackNodes, edges: fallbackEdges };
+  } else if (view === "details") {
+    panel = { view, registrations, participants };
+  } else {
+    const lobbyPanel = asRecord(valueAt(raw, "panel"));
+    const lobbies = asArray(valueAt(lobbyPanel, "lobbies") ?? valueAt(raw, "lobbies")).map((lobby) => mapRpcLobby(lobby, participantById, scoreByParticipantRound));
+    const progressLobbies = asArray(valueAt(lobbyPanel, "progress_lobbies", "progressLobbies")).map((lobby) => mapRpcLobby(lobby, participantById, scoreByParticipantRound));
+    const selectedRound = rounds.find((round) => round.id === asString(valueAt(lobbyPanel, "round_id", "roundId"))) ?? rounds.find((round) => round.id === summary.currentRoundId) ?? rounds.find((round) => round.status === "active") ?? null;
+    const configuredRound = selectedRound ? getConfiguredRound(formatConfig, selectedRound.formatNodeId) : null;
+    const progress = mapRpcProgress(valueAt(lobbyPanel, "round_progress", "roundProgress"));
+    const gameSummaries = asArray(valueAt(lobbyPanel, "game_summaries", "gameSummaries")).map((entry) => {
+      const row = asRecord(entry);
+      return { gameNumber: asNumber(valueAt(row, "game_number", "gameNumber")), lobbyCount: asNumber(valueAt(row, "lobby_count", "lobbyCount")), completedLobbyCount: asNumber(valueAt(row, "completed_lobby_count", "completedLobbyCount")) };
+    });
+    const resolvedProgress = progress ?? (configuredRound ? getRoundProgress(progressLobbies.length ? progressLobbies : lobbies, configuredRound) : null);
+    panel = {
+      view,
+      round: selectedRound,
+      lobbies,
+      gameSummaries,
+      selectedGameNumber: valueAt(lobbyPanel, "selected_game_number", "selectedGameNumber") == null ? (gameSummaries[0]?.gameNumber ?? null) : asNumber(valueAt(lobbyPanel, "selected_game_number", "selectedGameNumber")),
+      page: asNumber(valueAt(lobbyPanel, "page"), 1),
+      pageSize: asNumber(valueAt(lobbyPanel, "page_size", "pageSize"), 8),
+      totalCount: asNumber(valueAt(lobbyPanel, "total_count", "totalCount"), lobbies.length),
+      totalPages: Math.max(1, asNumber(valueAt(lobbyPanel, "total_pages", "totalPages"), 1)),
+      roundProgress: resolvedProgress,
+      progressionAction: (valueAt(lobbyPanel, "progression_action", "progressionAction") ?? (summary.status === "in_progress" && selectedRound?.status === "active" && resolvedProgress?.isComplete && tournamentIsGraphFormat(formatConfig) ? "finalize_node" : null)) as TournamentProgressionAction,
+    };
+  }
+  return {
+    ...summary,
+    currentRoundNumber: summary.currentRoundNumber ?? rounds.find((round) => round.id === summary.currentRoundId)?.roundNumber ?? null,
+    formatConfig,
+    startRequirement: getTournamentStartRequirement(formatConfig),
+    rounds,
+    nodes: fallbackNodes,
+    edges: fallbackEdges,
+    activeNodeIds: asArray(valueAt(raw, "active_node_ids", "activeNodeIds")).map(String),
+    selectedNodeId: (valueAt(raw, "selected_node_id", "selectedNodeId") ?? null) as string | null,
+    sheetStatus: mapRpcSheetStatus(valueAt(raw, "sheet_status", "sheetStatus") ?? valueAt(raw, "google_sheet_status", "googleSheetStatus")),
+    panel,
+  };
+}
+
+export type TournamentPageViewOptions = {
+  view: TournamentPanelView;
+  selectedNodeId?: string;
+  gameNumber?: number;
+  page?: number;
+  pageSize?: number;
+  hostUserId?: string;
+};
+
+export async function getTournamentPageViewModel(
+  tournamentId: string,
+  options: Partial<TournamentPageViewOptions> = {},
+): Promise<TournamentDetailPageViewModel | null> {
+  const rows = await supabaseRestRequest<RouteViewModelRpcRow[]>("rpc/get_tournament_page_view_model", {
+    method: "POST",
+    body: {
+      p_tournament_id: tournamentId,
+      p_view: options.view ?? "lobbies",
+      p_selected_node_id: options.selectedNodeId ?? null,
+      p_game_number: options.gameNumber ?? null,
+      p_lobby_page: options.page ?? 1,
+      p_lobby_page_size: options.pageSize ?? 8,
+      p_host_user_id: options.hostUserId ?? null,
+    },
+  });
+  const raw = rows[0]?.view_model;
+  return raw ? mapRoutePageViewModel(raw) : null;
+}
+
+export async function getTournamentLobbyViewModel(
+  tournamentId: string,
+  lobbyId: string,
+): Promise<TournamentLobbyPageViewModel | null> {
+  const rows = await supabaseRestRequest<RouteViewModelRpcRow[]>("rpc/get_tournament_lobby_view_model", {
+    method: "POST",
+    body: { p_tournament_id: tournamentId, p_lobby_id: lobbyId },
+  });
+  const raw = asRecord(rows[0]?.view_model);
+  if (!rows[0]?.view_model) return null;
+  const tournament = asRecord(valueAt(raw, "tournament"));
+  const formatConfig = valueAt(raw, "format_config", "formatConfig");
+  const participantRows = asArray(valueAt(raw, "participants"));
+  const participants = participantRows.map(mapRpcParticipant);
+  const participantById = new Map(participants.map((participant) => [participant.id, participant]));
+  const scoreRows = asArray(valueAt(raw, "scores"));
+  const scores = scoreRows.map((score) => mapRpcScore(score, participantById)).filter((score): score is TournamentScore => score !== null);
+  const roundRaw = valueAt(raw, "round");
+  const lobby = mapRpcLobby(valueAt(raw, "lobby"), participantById, new Map(scores.map((score) => [`${score.participantId}:${score.roundId}`, score])));
+  const lobbyParticipants = lobby.participants.length ? lobby.participants : participantRows.map((row) => {
+    const mapped = mapRpcLobby({ participants: [row], id: lobby.id, round_id: lobby.roundId, game_number: lobby.gameNumber, lobby_number: lobby.lobbyNumber }, participantById, new Map());
+    return mapped.participants[0];
+  }).filter((entry): entry is TournamentLobby["participants"][number] => Boolean(entry));
+  return {
+    tournament: {
+      id: asString(valueAt(tournament, "id")),
+      hostUserId: asString(valueAt(tournament, "host_user_id", "hostUserId")),
+      name: asString(valueAt(tournament, "name")),
+      status: (valueAt(tournament, "status") ?? "accepting_players") as TournamentSummary["status"],
+      hasStarted: asBoolean(valueAt(tournament, "has_started", "hasStarted")),
+    },
+    round: mapRpcRound(roundRaw, formatConfig),
+    lobby: { ...lobby, participants: lobbyParticipants },
+    scores,
+  };
+}
+
+export async function getTournamentExportViewModel(
+  tournamentId: string,
+): Promise<TournamentExportViewModel | null> {
+  const rows = await supabaseRestRequest<RouteViewModelRpcRow[]>("rpc/get_tournament_export_view_model", {
+    method: "POST",
+    body: { p_tournament_id: tournamentId },
+  });
+  const raw = asRecord(rows[0]?.view_model);
+  if (!rows[0]?.view_model) return null;
+  const tournament = asRecord(valueAt(raw, "tournament"));
+  const formatConfig = valueAt(tournament, "format_config", "formatConfig") ?? valueAt(raw, "format_config", "formatConfig");
+  const participants = asArray(valueAt(raw, "participants")).map(mapRpcParticipant);
+  const participantById = new Map(participants.map((participant) => [participant.id, participant]));
+  const rounds = asArray(valueAt(raw, "rounds")).map((round) => mapRpcRound(round, formatConfig));
+  return {
+    id: asString(valueAt(tournament, "id") ?? valueAt(raw, "id")),
+    hostUserId: asString(valueAt(tournament, "host_user_id", "hostUserId")),
+    name: asString(valueAt(tournament, "name")),
+    status: (valueAt(tournament, "status") ?? "accepting_players") as TournamentSummary["status"],
+    formatConfig,
+    registrations: asArray(valueAt(raw, "registrations")).map(mapRpcRegistration),
+    participants,
+    rounds,
+    scores: asArray(valueAt(raw, "scores")).map((score) => mapRpcScore(score, participantById)).filter((score): score is TournamentScore => score !== null),
+    gameScores: asArray(valueAt(raw, "game_scores", "gameScores")).map((score) => mapRpcGameScore(score, participantById)).filter((score): score is TournamentGameScore => score !== null),
+  };
 }
 
 export async function assertTournamentHost(tournamentId: string, hostUserId: string): Promise<void> {

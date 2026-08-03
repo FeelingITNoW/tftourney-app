@@ -366,7 +366,6 @@ export async function updateLobbyScoresAction(formData: FormData) {
   const lobbyId = getFormString(formData, "lobbyId");
   const detailPath = `/tournaments/${tournamentId}`;
   const lobbyPath = `${detailPath}/lobbies/${lobbyId}`;
-  const currentRoundPath = `${detailPath}/rounds/current`;
 
   if (!tournamentId || !lobbyId) {
     redirectWithParams(detailPath, {
@@ -425,7 +424,6 @@ export async function updateLobbyScoresAction(formData: FormData) {
   }
 
   revalidatePath(detailPath);
-  revalidatePath(currentRoundPath);
   revalidatePath(lobbyPath);
   revalidatePath(`${detailPath}/lobbies`, "layout");
   redirectWithParams(lobbyPath, { saved: "true", ...returnParams });

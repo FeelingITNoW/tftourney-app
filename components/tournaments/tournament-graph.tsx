@@ -158,7 +158,7 @@ export function TournamentGraph({
             );
             return (
               <div className="absolute" key={node.id} style={{ left: `${position.x}%`, top: `${position.y}%` }}>
-                {started ? <Link href={`/tournaments/${tournamentId}?node=${encodeURIComponent(node.id)}`}>{content}</Link> : content}
+                {started ? <Link href={`/tournaments/${tournamentId}?view=lobbies&node=${encodeURIComponent(node.id)}`}>{content}</Link> : content}
               </div>
             );
           })}

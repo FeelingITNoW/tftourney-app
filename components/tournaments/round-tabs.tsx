@@ -1,124 +1,60 @@
-"use client";
+import Link from "next/link";
+import type { ReactNode } from "react";
+import type { TournamentPanelView } from "@/lib/db/tournaments/types";
 
-import { useState, type ReactNode } from "react";
-
-type RoundTabsProps = {
-  details: ReactNode;
-  graph: ReactNode;
-  lobbies: ReactNode;
-  scoresheet: ReactNode;
+type TournamentViewTabsProps = {
+  tournamentId: string;
+  activeView: TournamentPanelView;
+  children: ReactNode;
+  query?: { node?: string | null; game?: number | null; page?: number | null };
 };
 
-export function RoundTabs({ details, graph, lobbies, scoresheet }: RoundTabsProps) {
-  const [activeTab, setActiveTab] = useState<
-    "lobbies" | "scoresheet" | "graph" | "details"
-  >("lobbies");
+const labels: Array<{ id: TournamentPanelView; label: string }> = [
+  { id: "lobbies", label: "Lobbies" },
+  { id: "scoresheet", label: "Scoresheet" },
+  { id: "graph", label: "Tournament graph" },
+  { id: "details", label: "Details & players" },
+];
 
+function hrefFor(
+  tournamentId: string,
+  view: TournamentPanelView,
+  query: TournamentViewTabsProps["query"],
+): string {
+  const params = new URLSearchParams();
+  if (view !== "lobbies") params.set("view", view);
+  if (view === "lobbies" && query?.node) params.set("node", query.node);
+  if (view === "lobbies" && query?.game) params.set("game", String(query.game));
+  if (view === "lobbies" && query?.page && query.page > 1) params.set("page", String(query.page));
+  const suffix = params.toString();
+  return `/tournaments/${tournamentId}${suffix ? `?${suffix}` : ""}`;
+}
+
+export function RoundTabs({ tournamentId, activeView, children, query }: TournamentViewTabsProps) {
   return (
     <section className="border-t border-zinc-200 py-8">
-      <div
-        aria-label="Current round views"
-        className="flex gap-1 border-b border-zinc-200"
-        role="tablist"
-      >
-        <button
-          aria-controls="current-round-lobbies"
-          aria-selected={activeTab === "lobbies"}
-          className={`border-b-2 px-4 py-3 text-sm font-semibold transition focus:outline-none focus:ring-2 focus:ring-emerald-600 focus:ring-offset-2 ${
-            activeTab === "lobbies"
-              ? "border-emerald-700 text-emerald-800"
-              : "border-transparent text-zinc-500 hover:border-zinc-300 hover:text-zinc-800"
-          }`}
-          onClick={() => setActiveTab("lobbies")}
-          id="current-round-lobbies-tab"
-          role="tab"
-          type="button"
-        >
-          Lobbies
-        </button>
-        <button
-          aria-controls="current-round-scoresheet"
-          aria-selected={activeTab === "scoresheet"}
-          className={`border-b-2 px-4 py-3 text-sm font-semibold transition focus:outline-none focus:ring-2 focus:ring-emerald-600 focus:ring-offset-2 ${
-            activeTab === "scoresheet"
-              ? "border-emerald-700 text-emerald-800"
-              : "border-transparent text-zinc-500 hover:border-zinc-300 hover:text-zinc-800"
-          }`}
-          onClick={() => setActiveTab("scoresheet")}
-          id="current-round-scoresheet-tab"
-          role="tab"
-          type="button"
-        >
-          Scoresheet
-        </button>
-        <button
-          aria-controls="current-round-graph"
-          aria-selected={activeTab === "graph"}
-          className={`border-b-2 px-4 py-3 text-sm font-semibold transition focus:outline-none focus:ring-2 focus:ring-emerald-600 focus:ring-offset-2 ${
-            activeTab === "graph"
-              ? "border-emerald-700 text-emerald-800"
-              : "border-transparent text-zinc-500 hover:border-zinc-300 hover:text-zinc-800"
-          }`}
-          onClick={() => setActiveTab("graph")}
-          id="current-round-graph-tab"
-          role="tab"
-          type="button"
-        >
-          Tournament graph
-        </button>
-        <button
-          aria-controls="current-round-details"
-          aria-selected={activeTab === "details"}
-          className={`border-b-2 px-4 py-3 text-sm font-semibold transition focus:outline-none focus:ring-2 focus:ring-emerald-600 focus:ring-offset-2 ${
-            activeTab === "details"
-              ? "border-emerald-700 text-emerald-800"
-              : "border-transparent text-zinc-500 hover:border-zinc-300 hover:text-zinc-800"
-          }`}
-          onClick={() => setActiveTab("details")}
-          id="current-round-details-tab"
-          role="tab"
-          type="button"
-        >
-          Details &amp; players
-        </button>
+      <div aria-label="Tournament views" className="flex flex-wrap gap-1 border-b border-zinc-200" role="tablist">
+        {labels.map((tab) => {
+          const active = tab.id === activeView;
+          return (
+            <Link
+              aria-current={active ? "page" : undefined}
+              aria-selected={active}
+              className={`border-b-2 px-4 py-3 text-sm font-semibold transition focus:outline-none focus:ring-2 focus:ring-emerald-600 focus:ring-offset-2 ${active ? "border-emerald-700 text-emerald-800" : "border-transparent text-zinc-500 hover:border-zinc-300 hover:text-zinc-800"}`}
+              href={hrefFor(tournamentId, tab.id, query)}
+              key={tab.id}
+              role="tab"
+            >
+              {tab.label}
+            </Link>
+          );
+        })}
       </div>
-
-      <div
-        aria-labelledby="current-round-lobbies-tab"
-        hidden={activeTab !== "lobbies"}
-        id="current-round-lobbies"
-        role="tabpanel"
-        tabIndex={0}
-      >
-        {lobbies}
-      </div>
-      <div
-        aria-labelledby="current-round-scoresheet-tab"
-        hidden={activeTab !== "scoresheet"}
-        id="current-round-scoresheet"
-        role="tabpanel"
-        tabIndex={0}
-      >
-        {scoresheet}
-      </div>
-      <div
-        aria-labelledby="current-round-graph-tab"
-        hidden={activeTab !== "graph"}
-        id="current-round-graph"
-        role="tabpanel"
-        tabIndex={0}
-      >
-        {graph}
-      </div>
-      <div
-        aria-labelledby="current-round-details-tab"
-        hidden={activeTab !== "details"}
-        id="current-round-details"
-        role="tabpanel"
-        tabIndex={0}
-      >
-        {details}
+      <div aria-label={`${activeView} panel`} role="tabpanel" tabIndex={0}>
+        {children}
       </div>
     </section>
   );
 }
+
+export { RoundTabs as TournamentViewTabs };

@@ -8,6 +8,7 @@ type Props = {
   authError?: string;
   authSuccess?: boolean;
   initiallyAuthenticated?: boolean;
+  initialStatus?: GoogleSheetExportStatus | null;
 };
 
 const POLL_DELAYS_MS = [2000, 4000, 8000, 15000, 15000] as const;
@@ -25,8 +26,9 @@ export function GoogleSheetsPublishingPanel({
   authError,
   authSuccess = false,
   initiallyAuthenticated = false,
+  initialStatus = null,
 }: Props) {
-  const [status, setStatus] = useState<GoogleSheetExportStatus | null>(null);
+  const [status, setStatus] = useState<GoogleSheetExportStatus | null>(initialStatus);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
   const [needsLogin, setNeedsLogin] = useState(!initiallyAuthenticated);
@@ -61,12 +63,12 @@ export function GoogleSheetsPublishingPanel({
   }, [clearPollTimer, tournamentId]);
 
   useEffect(() => {
-    if (!initiallyAuthenticated) return;
+    if (!initiallyAuthenticated || initialStatus) return;
     queueMicrotask(() => {
       void loadStatus().catch(() => setError("Google Sheet status is unavailable."));
     });
     return clearPollTimer;
-  }, [clearPollTimer, initiallyAuthenticated, loadStatus]);
+  }, [clearPollTimer, initiallyAuthenticated, initialStatus, loadStatus]);
 
   useEffect(() => {
     if (!initiallyAuthenticated || needsLogin || !status || (status.state !== "queued" && status.state !== "syncing")) return;
