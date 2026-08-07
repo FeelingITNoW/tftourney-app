@@ -1,0 +1,13 @@
+{
+  "names": ["AlphaOne", "BravoTwo", "Charlie3", "DeltaFour", "EchoFive", "FoxtrotSix", "GolfSeven", "HotelEight"],
+  "words": [
+    {"text":"AlphaOne","box":{"left":0.18,"top":0.08,"right":0.29,"bottom":0.1}}, {"text":"noise","box":{"left":0.7,"top":0.08,"right":0.75,"bottom":0.1}},
+    {"text":"BravoTwo","box":{"left":0.18,"top":0.19,"right":0.29,"bottom":0.21}}, {"text":"noise","box":{"left":0.7,"top":0.19,"right":0.75,"bottom":0.21}},
+    {"text":"Charlie3","box":{"left":0.18,"top":0.3,"right":0.29,"bottom":0.32}}, {"text":"noise","box":{"left":0.7,"top":0.3,"right":0.75,"bottom":0.32}},
+    {"text":"DeltaFour","box":{"left":0.18,"top":0.41,"right":0.3,"bottom":0.43}}, {"text":"noise","box":{"left":0.7,"top":0.41,"right":0.75,"bottom":0.43}},
+    {"text":"EchoFive","box":{"left":0.18,"top":0.52,"right":0.29,"bottom":0.54}}, {"text":"noise","box":{"left":0.7,"top":0.52,"right":0.75,"bottom":0.54}},
+    {"text":"FoxtrotSix","box":{"left":0.18,"top":0.63,"right":0.3,"bottom":0.65}}, {"text":"noise","box":{"left":0.7,"top":0.63,"right":0.75,"bottom":0.65}},
+    {"text":"GolfSeven","box":{"left":0.18,"top":0.74,"right":0.29,"bottom":0.76}}, {"text":"noise","box":{"left":0.7,"top":0.74,"right":0.75,"bottom":0.76}},
+    {"text":"HotelEight","box":{"left":0.18,"top":0.85,"right":0.3,"bottom":0.87}}, {"text":"noise","box":{"left":0.7,"top":0.85,"right":0.75,"bottom":0.87}}
+  ]
+}

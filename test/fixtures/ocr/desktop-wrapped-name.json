@@ -1,0 +1,28 @@
+{
+  "words": [
+    { "text": "1", "box": { "left": 0.048, "top": 0.206, "right": 0.060, "bottom": 0.226 } },
+    { "text": "AXM", "box": { "left": 0.140, "top": 0.210, "right": 0.170, "bottom": 0.227 } },
+    { "text": "raph1", "box": { "left": 0.176, "top": 0.210, "right": 0.211, "bottom": 0.227 } },
+    { "text": "2", "box": { "left": 0.048, "top": 0.289, "right": 0.061, "bottom": 0.310 } },
+    { "text": "AXM", "box": { "left": 0.140, "top": 0.293, "right": 0.171, "bottom": 0.309 } },
+    { "text": "Gettey", "box": { "left": 0.176, "top": 0.293, "right": 0.218, "bottom": 0.310 } },
+    { "text": "3", "box": { "left": 0.048, "top": 0.374, "right": 0.062, "bottom": 0.394 } },
+    { "text": "AXM", "box": { "left": 0.140, "top": 0.377, "right": 0.172, "bottom": 0.393 } },
+    { "text": "Maha", "box": { "left": 0.176, "top": 0.377, "right": 0.214, "bottom": 0.393 } },
+    { "text": "4", "box": { "left": 0.048, "top": 0.457, "right": 0.062, "bottom": 0.478 } },
+    { "text": "TS", "box": { "left": 0.140, "top": 0.460, "right": 0.157, "bottom": 0.478 } },
+    { "text": "Stryggar", "box": { "left": 0.161, "top": 0.460, "right": 0.217, "bottom": 0.479 } },
+    { "text": "5", "box": { "left": 0.048, "top": 0.539, "right": 0.062, "bottom": 0.560 } },
+    { "text": "AXM", "box": { "left": 0.140, "top": 0.531, "right": 0.172, "bottom": 0.548 } },
+    { "text": "Frnd", "box": { "left": 0.176, "top": 0.531, "right": 0.205, "bottom": 0.548 } },
+    { "text": "Chicken", "box": { "left": 0.140, "top": 0.556, "right": 0.192, "bottom": 0.573 } },
+    { "text": "9", "box": { "left": 0.048, "top": 0.622, "right": 0.060, "bottom": 0.644 } },
+    { "text": "numba", "box": { "left": 0.140, "top": 0.626, "right": 0.183, "bottom": 0.643 } },
+    { "text": "10", "box": { "left": 0.187, "top": 0.626, "right": 0.204, "bottom": 0.642 } },
+    { "text": "7", "box": { "left": 0.048, "top": 0.706, "right": 0.061, "bottom": 0.728 } },
+    { "text": "tokyosniper", "box": { "left": 0.140, "top": 0.710, "right": 0.216, "bottom": 0.728 } },
+    { "text": "8", "box": { "left": 0.048, "top": 0.790, "right": 0.061, "bottom": 0.811 } },
+    { "text": "TS", "box": { "left": 0.140, "top": 0.794, "right": 0.158, "bottom": 0.810 } },
+    { "text": "mode", "box": { "left": 0.161, "top": 0.794, "right": 0.197, "bottom": 0.810 } }
+  ]
+}
