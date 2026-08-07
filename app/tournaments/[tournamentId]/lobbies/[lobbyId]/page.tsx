@@ -2,8 +2,7 @@ import Link from "next/link";
 import { AccountHeader } from "@/components/account/account-header";
 import { getOrganizerSession } from "@/lib/auth/session";
 import { notFound } from "next/navigation";
-import { updateLobbyScoresAction } from "@/app/actions";
-import { RandomizeLobbyScoresButton } from "@/components/tournaments/randomize-lobby-scores-button";
+import { LobbyResultsEditor } from "@/components/tournaments/lobby-results-editor";
 import { getTournamentLobbyViewModel } from "@/lib/db/tournaments/api";
 
 export const dynamic = "force-dynamic";
@@ -184,83 +183,17 @@ export default async function LobbyScoresPage({
                 </p>
               </div>
 
-              <form action={updateLobbyScoresAction} className="mt-5">
-                <input name="tournamentId" type="hidden" value={tournamentHeader.id} />
-                <input name="lobbyId" type="hidden" value={lobby.id} />
-                <input name="returnGame" type="hidden" value={returnGame} />
-                <input name="returnPage" type="hidden" value={returnPage} />
-                <input name="returnNode" type="hidden" value={tournament.round.id} />
-                <div className="overflow-x-auto rounded-lg border border-zinc-200 bg-white shadow-sm">
-                  <table className="w-full min-w-[32rem] border-collapse text-left text-sm">
-                    <thead className="bg-zinc-50 text-zinc-600">
-                      <tr>
-                        <th className="w-20 px-4 py-3 font-medium">Slot</th>
-                        <th className="px-4 py-3 font-medium">Player</th>
-                        <th className="w-32 px-4 py-3 font-medium">Placement</th>
-                        <th className="w-32 px-4 py-3 font-medium">Round total</th>
-                      </tr>
-                    </thead>
-                    <tbody className="divide-y divide-zinc-100">
-                      {lobby.participants.map((participant) => (
-                        <tr key={participant.id}>
-                          <td className="px-4 py-3 text-zinc-500">
-                            {participant.slotNumber}
-                          </td>
-                          <td className="px-4 py-3 font-medium text-zinc-950">
-                            {participant.displayName}
-                            <input
-                              name="participantId"
-                              type="hidden"
-                              value={participant.id}
-                            />
-                          </td>
-                          <td className="px-4 py-3">
-                            <label
-                              className="sr-only"
-                              htmlFor={`placement-${participant.id}`}
-                            >
-                              Placement for {participant.displayName}
-                            </label>
-                            <input
-                              className="h-10 w-full rounded-md border border-zinc-300 bg-white px-3 text-base text-zinc-950 outline-none transition focus:border-emerald-700 focus:ring-2 focus:ring-emerald-100"
-                              defaultValue={participant.placement ?? ""}
-                              id={`placement-${participant.id}`}
-                              max={lobby.participants.length}
-                              min={1}
-                              name="placement"
-                              placeholder="1"
-                              required
-                              step={1}
-                              type="number"
-                              disabled={isReadOnly}
-                            />
-                          </td>
-                          <td className="px-4 py-3 font-semibold text-zinc-950">
-                            {roundScoresByParticipantId.get(participant.id) ?? 0}
-                          </td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
-                </div>
-
-                <div className="mt-5 flex flex-col-reverse gap-3 sm:flex-row sm:items-center sm:justify-end">
-                  <Link
-                    className="flex h-11 items-center justify-center rounded-md border border-zinc-300 bg-white px-5 text-sm font-semibold text-zinc-700 transition hover:bg-zinc-50"
-                    href={backToTournamentHref}
-                  >
-                    Cancel
-                  </Link>
-                  <RandomizeLobbyScoresButton disabled={isReadOnly} />
-                  <button
-                    className="flex h-11 items-center justify-center rounded-md bg-emerald-700 px-5 text-sm font-semibold text-white transition hover:bg-emerald-800 focus:outline-none focus:ring-2 focus:ring-emerald-600 focus:ring-offset-2 disabled:cursor-not-allowed disabled:bg-zinc-300 disabled:text-zinc-500"
-                    disabled={isReadOnly}
-                    type="submit"
-                  >
-                    Save lobby results
-                  </button>
-                </div>
-              </form>
+              <LobbyResultsEditor
+                backHref={backToTournamentHref}
+                isReadOnly={isReadOnly}
+                lobbyId={lobby.id}
+                participants={lobby.participants}
+                returnGame={returnGame}
+                returnPage={returnPage}
+                roundId={tournament.round.id}
+                roundScoresByParticipantId={Object.fromEntries(roundScoresByParticipantId)}
+                tournamentId={tournamentHeader.id}
+              />
             </section>
           </>
         ) : null}
