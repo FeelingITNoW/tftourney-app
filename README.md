@@ -96,10 +96,16 @@ The scheduled worker is exposed through the Supabase Edge Function at
 it every minute and set `TFTOURNEY_APP_URL` and `GOOGLE_SHEET_WORKER_SECRET` in
 the function secrets. Set `GOOGLE_CLIENT_ID` and `GOOGLE_CLIENT_SECRET` in the
 app to the same Google OAuth client configured in Supabase Auth. A manual
-Generate/Publish request starts its own export after the queue response, while
-the scheduled worker handles retries and score changes made later. The worker calls the protected
-`/api/internal/google-sheets/sync` route, claims dirty exports, and retries
-transient Google failures.
+Generate/Publish request and each organizer tournament mutation wake a targeted
+export after the response, while the scheduled worker handles retries and
+out-of-band changes made later. The worker calls the protected
+`/api/internal/google-sheets/sync` route, claims dirty exports, processes
+different tournaments concurrently, and retries transient Google failures.
+Set `GOOGLE_SHEET_WORKER_CONCURRENCY` in the app to tune the per-invocation
+worker count (defaults to 4 and is bounded to 1–10).
+
+For the complete synchronization flow, performance rationale, tuning guidance,
+and troubleshooting states, see [docs/google-sheets-sync.md](docs/google-sheets-sync.md).
 
 Run the deterministic tests with:
 

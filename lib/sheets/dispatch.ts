@@ -20,6 +20,9 @@ export function scheduleTournamentSheetSync(tournamentId: string, hostUserId: st
     });
   } catch (error) {
     if (error instanceof Error && error.message.includes("outside a request scope")) return;
-    throw error;
+    console.error("Could not schedule tournament sheet sync", {
+      tournamentId,
+      error: error instanceof Error ? error.message : error,
+    });
   }
 }

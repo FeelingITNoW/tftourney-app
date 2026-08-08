@@ -248,9 +248,16 @@ is the graph-aware test helper.
 The `tournament_sheet_exports` table stores one public workbook publication per
 tournament. Tournament and result mutations mark an existing export dirty and
 increment `desired_revision`; `claim_tournament_sheet_exports` leases queued
-rows to the scheduled worker. The worker calls
+rows to the scheduled worker. Organizer mutations also wake a targeted worker
+after the response, so score changes normally publish within a few seconds.
+The worker calls
 `complete_tournament_sheet_export` after writing the Players, Scores, and
 Checkmate tabs, or `fail_tournament_sheet_export` with retry and re-auth state.
+Batch claims are processed by a bounded pool across different tournaments;
+leases and the one-export-per-tournament row keep writes to one workbook
+serialized. A targeted worker drains up to three consecutive revisions when a
+new mutation arrives during an active write. The scheduled worker remains the
+backstop for retry delays and out-of-band database changes.
 
 `organizer_google_connections` stores organizer metadata and encrypted refresh
 tokens. Refresh tokens must be encrypted before persistence and are never
