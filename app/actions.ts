@@ -25,6 +25,7 @@ import {
 } from "@/lib/tournament/formats/api";
 import { analyzeTournamentFormat } from "@/lib/tournament/formats/presets";
 import type { CustomTournamentCreationState } from "@/lib/tournament/formats/creation-state";
+import { scheduleTournamentSheetSync } from "@/lib/sheets/dispatch";
 
 function getFormString(formData: FormData, fieldName: string): string {
   const value = formData.get(fieldName);
@@ -52,7 +53,7 @@ function redirectWithParams(path: string, params: Record<string, string>): never
   redirect(query ? `${path}?${query}` : path);
 }
 
-async function requireTournamentHost(tournamentId: string, returnTo: string): Promise<void> {
+async function requireTournamentHost(tournamentId: string, returnTo: string): Promise<string> {
   const organizer = await requireOrganizer(returnTo);
   try {
     await assertTournamentHost(tournamentId, organizer.hostUserId);
@@ -61,6 +62,7 @@ async function requireTournamentHost(tournamentId: string, returnTo: string): Pr
       authorizationError: "Only the tournament host can manage this tournament.",
     });
   }
+  return organizer.hostUserId;
 }
 
 export async function createTournamentAction(formData: FormData) {
@@ -230,7 +232,7 @@ export async function registerPlayerAction(formData: FormData) {
     });
   }
 
-  await requireTournamentHost(tournamentId, detailPath);
+  const hostUserId = await requireTournamentHost(tournamentId, detailPath);
 
   if (!validation.success) {
     redirectWithParams(detailPath, {
@@ -249,6 +251,7 @@ export async function registerPlayerAction(formData: FormData) {
       tournamentId,
       riotAccount,
     });
+    scheduleTournamentSheetSync(tournamentId, hostUserId);
   } catch (error) {
     redirectWithParams(detailPath, {
       registrationError:
@@ -271,7 +274,7 @@ export async function addRandomSeededPlayersAction(formData: FormData) {
     });
   }
 
-  await requireTournamentHost(tournamentId, detailPath);
+  const hostUserId = await requireTournamentHost(tournamentId, detailPath);
 
   if (!Number.isInteger(requestedCount) || requestedCount < 1) {
     redirectWithParams(detailPath, {
@@ -285,6 +288,7 @@ export async function addRandomSeededPlayersAction(formData: FormData) {
       tournamentId,
       count: requestedCount,
     });
+    scheduleTournamentSheetSync(tournamentId, hostUserId);
   } catch (error) {
     redirectWithParams(detailPath, {
       randomPlayerError:
@@ -312,10 +316,11 @@ export async function startTournamentAction(formData: FormData) {
     });
   }
 
-  await requireTournamentHost(tournamentId, detailPath);
+  const hostUserId = await requireTournamentHost(tournamentId, detailPath);
 
   try {
     await startTournament({ tournamentId });
+    scheduleTournamentSheetSync(tournamentId, hostUserId);
   } catch (error) {
     redirectWithParams(detailPath, {
       startError:
@@ -373,7 +378,7 @@ export async function updateLobbyScoresAction(formData: FormData) {
     });
   }
 
-  await requireTournamentHost(tournamentId, lobbyPath);
+  const hostUserId = await requireTournamentHost(tournamentId, lobbyPath);
 
   const participantIds = getFormStrings(formData, "participantId");
   const placements = getFormStrings(formData, "placement");
@@ -413,6 +418,7 @@ export async function updateLobbyScoresAction(formData: FormData) {
       lobbyId,
       results: validation.data,
     });
+    scheduleTournamentSheetSync(tournamentId, hostUserId);
   } catch (error) {
     redirectWithParams(lobbyPath, {
       scoreError:
@@ -445,7 +451,7 @@ export async function randomizePendingLobbyResultsAction(formData: FormData) {
       createError: "Tournament was not found.",
     });
   }
-  await requireTournamentHost(tournamentId, detailPath);
+  const hostUserId = await requireTournamentHost(tournamentId, detailPath);
   if (!nodeId) {
     redirectWithParams(detailPath, {
       progressionError: "Select a tournament node before randomizing results.",
@@ -454,6 +460,7 @@ export async function randomizePendingLobbyResultsAction(formData: FormData) {
 
   try {
     await randomizePendingLobbyResults({ tournamentId, nodeId });
+    scheduleTournamentSheetSync(tournamentId, hostUserId);
   } catch (error) {
     redirectWithParams(detailPath, {
       progressionError:
@@ -477,9 +484,10 @@ export async function finalizeTournamentNodeAction(formData: FormData) {
   if (!tournamentId || !nodeId) {
     redirectWithParams(detailPath, { progressionError: "Tournament node was not found." });
   }
-  await requireTournamentHost(tournamentId, detailPath);
+  const hostUserId = await requireTournamentHost(tournamentId, detailPath);
   try {
     await finalizeTournamentNode({ tournamentId, nodeId });
+    scheduleTournamentSheetSync(tournamentId, hostUserId);
   } catch (error) {
     redirectWithParams(detailPath, {
       progressionError:

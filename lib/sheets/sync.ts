@@ -11,7 +11,43 @@ type GoogleConnectionRow = {
   status: "connected" | "needs_reauth" | "disconnected";
 };
 
-type SyncResult = { exportId: string; state: "ready" | "queued" | "error" | "needs_reauth"; message?: string };
+export type SyncResult = { exportId: string; state: "ready" | "queued" | "error" | "needs_reauth"; message?: string };
+
+const DEFAULT_WORKER_CONCURRENCY = 4;
+const MAX_WORKER_CONCURRENCY = 10;
+const MAX_TARGETED_SYNC_PASSES = 3;
+
+function boundedWorkerConcurrency(value: number): number {
+  if (!Number.isFinite(value)) return DEFAULT_WORKER_CONCURRENCY;
+  return Math.min(Math.max(Math.trunc(value), 1), MAX_WORKER_CONCURRENCY);
+}
+
+function configuredWorkerConcurrency(): number {
+  return boundedWorkerConcurrency(Number(process.env.GOOGLE_SHEET_WORKER_CONCURRENCY ?? DEFAULT_WORKER_CONCURRENCY));
+}
+
+export async function mapWithBoundedWorkers<T, R>(
+  items: readonly T[],
+  concurrency: number,
+  work: (item: T, index: number) => Promise<R>,
+): Promise<R[]> {
+  const results = new Array<R>(items.length);
+  let nextIndex = 0;
+
+  async function runWorker(): Promise<void> {
+    while (true) {
+      const index = nextIndex;
+      nextIndex += 1;
+      const item = items[index];
+      if (item === undefined) return;
+      results[index] = await work(item, index);
+    }
+  }
+
+  const workerCount = Math.min(boundedWorkerConcurrency(concurrency), items.length);
+  await Promise.all(Array.from({ length: workerCount }, () => runWorker()));
+  return results;
+}
 
 function googleClientCredentials(): { clientId: string; clientSecret: string } {
   return {
@@ -107,6 +143,25 @@ async function failExport(exportRow: GoogleSheetExportRow, error: unknown) {
   const configurationError = error instanceof GoogleSheetConfigurationError ? error : null;
   const code = googleError?.code ?? configurationError?.code ?? "SHEET_EXPORT_ERROR";
   const message = error instanceof Error ? error.message : "Sheet export failed.";
+  if (code === "GOOGLE_REAUTH_REQUIRED") {
+    try {
+      await supabaseRestRequest("organizer_google_connections", {
+        method: "PATCH",
+        query: { user_id: `eq.${String(exportRow.host_user_id ?? 1)}` },
+        prefer: "return=minimal",
+        body: {
+          status: "needs_reauth",
+          last_error_code: code,
+          last_error_message: message,
+        },
+      });
+    } catch (connectionError) {
+      console.error("Could not mark Google connection for reauthorization", {
+        exportId: exportRow.id,
+        error: connectionError instanceof Error ? connectionError.message : connectionError,
+      });
+    }
+  }
   await supabaseRestRequest("rpc/fail_tournament_sheet_export", {
     method: "POST",
     body: {
@@ -152,27 +207,65 @@ export async function syncTournamentSheetExport(exportRow: GoogleSheetExportRow)
   }
 }
 
+export async function drainTargetedSheetExport(
+  claim: () => Promise<GoogleSheetExportRow | undefined>,
+  sync: (exportRow: GoogleSheetExportRow) => Promise<SyncResult>,
+  maxPasses = MAX_TARGETED_SYNC_PASSES,
+): Promise<SyncResult | null> {
+  let lastResult: SyncResult | null = null;
+
+  for (let pass = 0; pass < maxPasses; pass += 1) {
+    const exportRow = await claim();
+    if (!exportRow) return lastResult;
+    lastResult = await sync(exportRow);
+    if (lastResult.state !== "ready") return lastResult;
+  }
+
+  return lastResult;
+}
+
 export async function syncTournamentSheetExportForTournament(
   tournamentId: string,
   hostUserId: string,
 ): Promise<SyncResult | null> {
-  const claimed = (await supabaseRestRequest<GoogleSheetExportRow[]>("rpc/claim_tournament_sheet_export", {
-    method: "POST",
-    body: {
-      p_tournament_id: tournamentId,
-      p_host_user_id: hostUserId,
+  return drainTargetedSheetExport(
+    async () => {
+      const claimed = (await supabaseRestRequest<GoogleSheetExportRow[]>("rpc/claim_tournament_sheet_export", {
+        method: "POST",
+        body: {
+          p_tournament_id: tournamentId,
+          p_host_user_id: hostUserId,
+        },
+      })) ?? [];
+      return claimed[0];
     },
-  })) ?? [];
-  const exportRow = claimed[0];
-  return exportRow ? syncTournamentSheetExport(exportRow) : null;
+    syncTournamentSheetExport,
+  );
 }
 
-export async function runSheetSyncBatch(limit = 10): Promise<SyncResult[]> {
-  const claimed = await supabaseRestRequest<GoogleSheetExportRow[]>("rpc/claim_tournament_sheet_exports", {
+export async function runSheetSyncBatch(
+  limit = 10,
+  concurrency = configuredWorkerConcurrency(),
+): Promise<SyncResult[]> {
+  const claimed = (await supabaseRestRequest<GoogleSheetExportRow[]>("rpc/claim_tournament_sheet_exports", {
     method: "POST",
     body: { p_limit: limit },
+  })) ?? [];
+  return mapWithBoundedWorkers(claimed, concurrency, async (exportRow) => {
+    try {
+      return await syncTournamentSheetExport(exportRow);
+    } catch (error) {
+      // syncTournamentSheetExport normally converts failures into a result,
+      // but keep one unexpected failure from cancelling sibling workers.
+      console.error("Sheet worker export failed unexpectedly", {
+        exportId: exportRow.id,
+        error: error instanceof Error ? error.message : error,
+      });
+      return {
+        exportId: exportRow.id,
+        state: "error",
+        message: error instanceof Error ? error.message : "Sheet export failed.",
+      };
+    }
   });
-  const results: SyncResult[] = [];
-  for (const exportRow of claimed) results.push(await syncTournamentSheetExport(exportRow));
-  return results;
 }

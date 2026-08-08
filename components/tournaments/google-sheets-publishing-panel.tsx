@@ -137,7 +137,9 @@ export function GoogleSheetsPublishingPanel({
           : status?.state === "needs_reauth"
             ? "Reconnect Google"
             : status?.state ?? "Loading";
-  const needsDrive = !needsLogin && Boolean(status && status.connectionState !== "connected");
+  const needsDrive = !needsLogin && Boolean(
+    status && (status.connectionState !== "connected" || status.state === "needs_reauth"),
+  );
 
   return (
     <section className="rounded-lg border border-indigo-200 bg-indigo-50 p-5 shadow-sm" aria-label="Google Sheets publishing">
