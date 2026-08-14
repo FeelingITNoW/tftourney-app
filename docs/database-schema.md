@@ -270,6 +270,27 @@ The targeted `claim_tournament_sheet_export` function leases one queued export
 for an explicit Generate/Publish request; the scheduled batch claim remains
 responsible for retries and automatic dirty revisions.
 
+## Discord tournament operations
+
+The Discord migration adds `tournament_discord_configs` (one guild/category
+setup per tournament), `tournament_managers`, one-time
+`tournament_manager_invites`, `discord_lobby_threads`, durable
+`discord_score_submissions`, `discord_score_idempotency`, and
+`discord_outbox`. Registrations retain their Riot identity and may now store a
+`discord_user_id` and `checked_in_at`. Tournaments store the check-in state and
+an `ended_at` timestamp for screenshot retention cleanup.
+
+`enqueue_discord_score_submission` locks the mapped thread, enforces the
+three-item queue cap and ten-second uploader cooldown, and deduplicates Discord
+message IDs. `claim_discord_score_submission` leases the oldest eligible row,
+reserves the earliest pending game, and permits only one active worker per
+thread. `submit_lobby_results` is the shared idempotent score boundary used by
+the bot and web API; it locks the tournament/round/lobby, applies the format’s
+placement points, recalculates round totals, and increments the thread’s
+accepted-image count when a Discord submission is accepted.
+The migration also records `tournaments.ended_at` when a tournament is completed
+or cancelled so retention cleanup can remove Discord images after seven days.
+
 ## Route-scoped read models
 
 `20260803010000_route_scoped_view_models.sql` adds composite lookup indexes for

@@ -1,0 +1,13 @@
+{
+  "extends": "../tsconfig.json",
+  "compilerOptions": {
+    "module": "NodeNext",
+    "moduleResolution": "NodeNext",
+    "noEmit": false,
+    "outDir": "../.bot-build",
+    "rootDir": "..",
+    "sourceMap": true
+  },
+  "include": ["./index.ts"],
+  "exclude": ["../node_modules", "../.next", "../.bot-build"]
+}

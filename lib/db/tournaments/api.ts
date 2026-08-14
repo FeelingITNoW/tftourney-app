@@ -7,6 +7,8 @@ import type {
   CreateTournamentInput,
   DeleteTournamentInput,
   RegisterTournamentPlayerInput,
+  SubmitLobbyResultsInput,
+  SubmitLobbyResultsResult,
   StartTournamentInput,
   StartTournamentResult,
   TournamentDetail,
@@ -1562,6 +1564,7 @@ export async function registerTournamentPlayer(
           tournament_id: input.tournamentId,
           riot_puuid: input.riotAccount.puuid,
           display_name: input.riotAccount.gameTag,
+          ...(input.discordUserId ? { discord_user_id: input.discordUserId } : {}),
         },
       },
     );
@@ -1570,7 +1573,9 @@ export async function registerTournamentPlayer(
       error instanceof DatabaseRequestError &&
       error.message.includes("23505")
     ) {
-      throw new Error("That Riot account is already registered.");
+      throw new Error(error.message.includes("discord_user_id")
+        ? "This Discord user is already registered."
+        : "That Riot account is already registered.");
     }
 
     throw error;
@@ -1750,6 +1755,32 @@ export async function updateLobbyResults(
     throw new Error("Database did not return the updated lobby.");
   }
 
+  return result;
+}
+
+export async function submitLobbyResults(
+  input: SubmitLobbyResultsInput,
+): Promise<SubmitLobbyResultsResult> {
+  const rows = await supabaseRestRequest<SubmitLobbyResultsResult[]>(
+    "rpc/submit_lobby_results",
+    {
+      method: "POST",
+      body: {
+        p_tournament_id: input.tournamentId,
+        p_lobby_id: input.lobbyId,
+        p_results: input.results.map((result) => ({
+          participantId: result.participantId,
+          placement: result.placement,
+        })),
+        p_idempotency_key: input.idempotencyKey ?? null,
+        p_source: input.source ?? "web",
+        p_submission_id: input.submissionId ?? null,
+        p_mode: input.mode ?? "record",
+      },
+    },
+  );
+  const result = rows[0];
+  if (!result) throw new Error("Database did not return the submitted lobby.");
   return result;
 }
 
