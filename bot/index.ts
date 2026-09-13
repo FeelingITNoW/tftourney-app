@@ -95,17 +95,44 @@ async function ensureRole(guild: Guild, config: ReconcileConfig): Promise<string
   return role.id;
 }
 
-function overwrites(guild: Guild, managerRoleId: string, scoreChannel = false) {
+// Permissions the bot itself needs in every provisioned channel: sending the
+// signup/check-in panels, and -- critically -- creating and posting in the
+// private per-lobby result threads under the score-recording channel. Without
+// an explicit overwrite here the bot inherits the @everyone denial (below) the
+// same as any other member, since it does not hold the manager role.
+const BOT_OVERWRITE_PERMISSIONS = [
+  PermissionFlagsBits.ViewChannel,
+  PermissionFlagsBits.ReadMessageHistory,
+  PermissionFlagsBits.SendMessages,
+  PermissionFlagsBits.SendMessagesInThreads,
+  PermissionFlagsBits.CreatePrivateThreads,
+  PermissionFlagsBits.CreatePublicThreads,
+  PermissionFlagsBits.ManageThreads,
+  PermissionFlagsBits.ManageChannels,
+];
+
+function overwrites(guild: Guild, managerRoleId: string, botMemberId: string, scoreChannel = false) {
   return [
     { id: guild.roles.everyone.id, allow: [PermissionFlagsBits.ViewChannel, PermissionFlagsBits.ReadMessageHistory], deny: scoreChannel ? [PermissionFlagsBits.SendMessages, PermissionFlagsBits.CreatePrivateThreads, PermissionFlagsBits.CreatePublicThreads] : [PermissionFlagsBits.SendMessages] },
     { id: managerRoleId, allow: [PermissionFlagsBits.ViewChannel, PermissionFlagsBits.ReadMessageHistory, PermissionFlagsBits.ManageThreads, PermissionFlagsBits.SendMessages, PermissionFlagsBits.SendMessagesInThreads] },
+    { id: botMemberId, allow: BOT_OVERWRITE_PERMISSIONS },
   ];
 }
 
-async function ensureChannel(guild: Guild, id: string, name: string, categoryId: string, managerRoleId: string, existingChannels: GuildBasedChannel[], scoreChannel = false): Promise<TextChannel> {
+async function ensureChannel(guild: Guild, id: string, name: string, categoryId: string, managerRoleId: string, botMemberId: string, existingChannels: GuildBasedChannel[], scoreChannel = false): Promise<TextChannel> {
+  async function repairBotOverwrite(channel: TextChannel): Promise<TextChannel> {
+    // A channel created before this fix (or one recovered by name below) can be
+    // missing the bot's own overwrite entirely, which silently blocks thread
+    // creation and message sends in the score-recording channel. Repair it in
+    // place instead of only fixing newly-created channels.
+    const current = channel.permissionOverwrites.cache.get(botMemberId);
+    const hasAll = current ? BOT_OVERWRITE_PERMISSIONS.every((flag) => current.allow.has(flag)) : false;
+    if (!hasAll) await channel.permissionOverwrites.create(botMemberId, Object.fromEntries(BOT_OVERWRITE_PERMISSIONS.map((flag) => [flag, true]))).catch((error) => console.error(`[discord-reconcile] failed to repair bot overwrite on #${channel.name}`, error));
+    return channel;
+  }
   if (id) {
     const existing = await guild.channels.fetch(id).catch(() => null);
-    if (existing?.type === ChannelType.GuildText) return existing as TextChannel;
+    if (existing?.type === ChannelType.GuildText) return repairBotOverwrite(existing as TextChannel);
   }
   // The stored ID can be lost (e.g. a failed config write) even though the channel
   // still exists in Discord from an earlier attempt -- reuse it by name/parent
@@ -113,8 +140,8 @@ async function ensureChannel(guild: Guild, id: string, name: string, categoryId:
   const byName = existingChannels.find(
     (channel): channel is TextChannel => channel.type === ChannelType.GuildText && channel.parentId === categoryId && channel.name === name,
   );
-  if (byName) return byName;
-  return guild.channels.create({ name, type: ChannelType.GuildText, parent: categoryId, permissionOverwrites: overwrites(guild, managerRoleId, scoreChannel), reason: "TFTourney Discord tournament setup" }) as Promise<TextChannel>;
+  if (byName) return repairBotOverwrite(byName);
+  return guild.channels.create({ name, type: ChannelType.GuildText, parent: categoryId, permissionOverwrites: overwrites(guild, managerRoleId, botMemberId, scoreChannel), reason: "TFTourney Discord tournament setup" }) as Promise<TextChannel>;
 }
 
 async function ensurePanel(channel: TextChannel, messageId: string, content: string, row: ActionRowBuilder<ButtonBuilder>): Promise<string> {
@@ -143,9 +170,10 @@ async function provisionTournament(config: ReconcileConfig, guild: Guild): Promi
   }
   if (!category) category = await guild.channels.create({ name: categoryName, type: ChannelType.GuildCategory, reason: "TFTourney Discord tournament setup" });
   const managerRoleId = await ensureRole(guild, config);
-  const signup = await ensureChannel(guild, String(config.config.signup_channel_id ?? ""), "sign-up", category.id, managerRoleId, existingChannels);
-  const checkin = await ensureChannel(guild, String(config.config.checkin_channel_id ?? ""), "check-in", category.id, managerRoleId, existingChannels);
-  const scores = await ensureChannel(guild, String(config.config.score_channel_id ?? ""), "score-recording", category.id, managerRoleId, existingChannels, true);
+  const botMemberId = (guild.members.me ?? await guild.members.fetchMe().catch(() => null))?.id ?? guild.client.user.id;
+  const signup = await ensureChannel(guild, String(config.config.signup_channel_id ?? ""), "sign-up", category.id, managerRoleId, botMemberId, existingChannels);
+  const checkin = await ensureChannel(guild, String(config.config.checkin_channel_id ?? ""), "check-in", category.id, managerRoleId, botMemberId, existingChannels);
+  const scores = await ensureChannel(guild, String(config.config.score_channel_id ?? ""), "score-recording", category.id, managerRoleId, botMemberId, existingChannels, true);
   const signupMessageId = await ensurePanel(signup, String(config.config.signup_message_id ?? ""), "Submit your Riot ID once. The bot verifies it with Riot before adding you to the tournament.", buttonRow(config.tournamentId, "signup", config.status !== "accepting_players"));
   const checkinMessageId = await ensurePanel(checkin, String(config.config.checkin_message_id ?? ""), config.checkInStatus === "open" ? `Check-in is open. ${config.checkedInCount} players have checked in.` : `Check-in is ${config.checkInStatus}.`, buttonRow(config.tournamentId, "checkin", config.checkInStatus !== "open"));
   const patchResponse = await appFetch(`/api/internal/discord/config/${config.tournamentId}`, { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ category_id: category.id, signup_channel_id: signup.id, checkin_channel_id: checkin.id, score_channel_id: scores.id, manager_role_id: managerRoleId, signup_message_id: signupMessageId, checkin_message_id: checkinMessageId, state: "active", last_error: null, last_heartbeat_at: new Date().toISOString() }) });
