@@ -4,6 +4,10 @@ import {
   addRandomSeededPlayersAction,
   deleteTournamentAction,
   finalizeTournamentNodeAction,
+  closeTournamentCheckInAction,
+  openTournamentCheckInAction,
+  connectDiscordAction,
+  createManagerInviteAction,
   randomizePendingLobbyResultsAction,
   registerPlayerAction,
   startTournamentAction,
@@ -22,6 +26,8 @@ import {
 import type { TournamentDetail, TournamentDetailPageViewModel, TournamentPanelView } from "@/lib/db/tournaments/types";
 import { getOrganizerSession } from "@/lib/auth/session";
 import { selectTournamentEntrants } from "@/lib/tournament/start/api";
+import { getTournamentCheckInState, getTournamentDiscordConfig } from "@/lib/discord/api";
+import { LiveRefresh } from "@/components/tournaments/live-refresh";
 
 export const dynamic = "force-dynamic";
 
@@ -46,6 +52,11 @@ type TournamentPageSearchParams = Promise<{
   authError?: string | string[];
   authSuccess?: string | string[];
   authorizationError?: string | string[];
+  checkInError?: string | string[];
+  checkInUpdated?: string | string[];
+  discordError?: string | string[];
+  discordConnected?: string | string[];
+  managerInvite?: string | string[];
 }>;
 
 function getSearchValue(value: string | string[] | undefined): string {
@@ -82,6 +93,11 @@ export default async function TournamentPage({
   const authError = getSearchValue(query.authError);
   const authSuccess = getSearchValue(query.authSuccess) === "google_sheets";
   const authorizationError = getSearchValue(query.authorizationError);
+  const checkInError = getSearchValue(query.checkInError);
+  const checkInUpdated = getSearchValue(query.checkInUpdated);
+  const discordError = getSearchValue(query.discordError);
+  const discordConnected = getSearchValue(query.discordConnected) === "true";
+  const managerInvite = getSearchValue(query.managerInvite);
   const organizer = await getOrganizerSession();
   const view: TournamentPanelView = requestedView === "scoresheet" || requestedView === "graph" || requestedView === "details" || requestedView === "lobbies"
     ? requestedView
@@ -127,6 +143,10 @@ export default async function TournamentPage({
     notFound();
   }
 
+  const isTournamentHost = Boolean(tournament && organizer && organizer.hostUserId === tournament.hostUserId);
+  const discordConfig = tournament && isTournamentHost ? await getTournamentDiscordConfig(tournament.id).catch(() => null) : null;
+  const checkInState = discordConfig ? await getTournamentCheckInState(tournament!.id).catch(() => null) : null;
+
   const lobbyPanel = tournament?.panel.view === "lobbies" ? tournament.panel : null;
   const scoresheetPanel = tournament?.panel.view === "scoresheet" ? tournament.panel : null;
   const graphPanel = tournament?.panel.view === "graph" ? tournament.panel : null;
@@ -156,17 +176,17 @@ export default async function TournamentPage({
 
   const isAcceptingPlayers =
     tournament?.status === TOURNAMENT_STATUS_ACCEPTING_PLAYERS;
-  const isTournamentHost = Boolean(tournament && organizer && organizer.hostUserId === tournament.hostUserId);
   const hasSheetSession = isTournamentHost;
   const currentRoundLabel = tournament?.selectedNodeId
     ? tournament.nodes.find((node) => node.id === tournament.selectedNodeId)?.name ?? `Node ${tournament.selectedNodeId}`
     : "Not started";
+  const checkInRequired = Boolean(discordConfig);
   const potentialEntrantCount = tournament
-    ? selectTournamentEntrants(
-        tournament.registrations,
-        tournament.playerCount,
-      ).length
+    ? checkInRequired
+      ? Math.min(checkInState?.checkedInCount ?? 0, tournament.playerCount)
+      : selectTournamentEntrants(tournament.registrations, tournament.playerCount).length
     : 0;
+  const checkInReady = !checkInRequired || checkInState?.status === "closed";
   const meetsStartRequirement = tournament
     ? tournament.startRequirement.exactEntrants !== null
       ? potentialEntrantCount === tournament.startRequirement.exactEntrants
@@ -192,6 +212,7 @@ export default async function TournamentPage({
 
   return (
     <main className="min-h-screen bg-stone-50 text-zinc-950">
+      <LiveRefresh enabled={Boolean(tournament?.hasStarted && discordConfig)} />
       <div className="mx-auto flex min-h-screen w-full max-w-5xl flex-col px-6 py-6 sm:px-8 lg:px-10">
         <header className="flex items-center justify-between border-b border-zinc-200 pb-5">
           <div>
@@ -299,7 +320,7 @@ export default async function TournamentPage({
                               ? "cursor-not-allowed bg-zinc-200 text-zinc-500"
                               : "bg-emerald-700 text-white hover:bg-emerald-800"
                           }`}
-                          disabled={tournament.registrations.length === 0 || !meetsStartRequirement}
+                          disabled={tournament.registrations.length === 0 || !meetsStartRequirement || !checkInReady}
                           type="submit"
                         >
                           Start tournament
@@ -318,6 +339,79 @@ export default async function TournamentPage({
                       {startError}
                     </p>
                   ) : null}
+                </div>
+
+                {discordConfig ? (
+                  <div className="rounded-lg border border-cyan-200 bg-cyan-50 p-5 shadow-sm">
+                    <h2 className="text-lg font-semibold text-cyan-950">Discord check-in</h2>
+                    <p className="mt-2 text-sm text-cyan-900">
+                      {checkInState?.status === "open"
+                        ? `${checkInState.checkedInCount} players checked in. Close check-in when the roster is final.`
+                        : checkInState?.status === "closed"
+                          ? `${checkInState.checkedInCount} players checked in. Only checked-in players can start.`
+                          : "Open check-in to let registered Discord players confirm attendance."}
+                    </p>
+                    {checkInState?.status === "open" ? (
+                      <form action={closeTournamentCheckInAction} className="mt-4">
+                        <input name="tournamentId" type="hidden" value={tournament.id} />
+                        <button className="flex h-11 w-full items-center justify-center rounded-md bg-cyan-700 px-4 text-sm font-semibold text-white hover:bg-cyan-800" disabled={!isTournamentHost} type="submit">Close check-in</button>
+                      </form>
+                    ) : checkInState?.status !== "closed" ? (
+                      <form action={openTournamentCheckInAction} className="mt-4">
+                        <input name="tournamentId" type="hidden" value={tournament.id} />
+                        <button className="flex h-11 w-full items-center justify-center rounded-md bg-cyan-700 px-4 text-sm font-semibold text-white hover:bg-cyan-800" disabled={!isTournamentHost} type="submit">Open check-in</button>
+                      </form>
+                    ) : null}
+                    {checkInError ? <p className="mt-3 text-sm font-medium text-red-700" role="alert">{checkInError}</p> : null}
+                    {checkInUpdated ? <p className="mt-3 text-sm font-medium text-emerald-800" role="status">Check-in {checkInUpdated}.</p> : null}
+                  </div>
+                ) : null}
+
+                <div className="rounded-lg border border-violet-200 bg-violet-50 p-5 shadow-sm">
+                  <h2 className="text-lg font-semibold text-violet-950">Discord operations</h2>
+                  {discordConfig ? (
+                    <>
+                      {discordConfig.state === "error" ? (
+                        <p className="mt-2 rounded-md border border-red-200 bg-red-50 p-3 text-sm font-medium text-red-800" role="alert">
+                          Discord setup needs attention: {discordConfig.lastError ?? "the bot could not finish setting up this server."}
+                        </p>
+                      ) : discordConfig.state === "active" ? (
+                        <p className="mt-2 text-sm text-violet-900">Connected to server {discordConfig.guildId}. Channels are set up.</p>
+                      ) : (
+                        <p className="mt-2 text-sm text-violet-900">Connected to server {discordConfig.guildId}. The bot will reconcile the category and channels shortly.</p>
+                      )}
+                      <form action={createManagerInviteAction} className="mt-4">
+                        <input name="tournamentId" type="hidden" value={tournament.id} />
+                        <button className="flex h-11 w-full items-center justify-center rounded-md bg-violet-700 px-4 text-sm font-semibold text-white hover:bg-violet-800" disabled={!isTournamentHost} type="submit">Create manager invite link</button>
+                      </form>
+                      {managerInvite ? <p className="mt-3 break-all rounded bg-white p-3 text-xs text-violet-950">{managerInvite}</p> : null}
+                    </>
+                  ) : isTournamentHost ? (
+                    <div className="mt-4 space-y-3">
+                      <a
+                        className="flex h-11 w-full items-center justify-center rounded-md bg-violet-700 px-4 text-sm font-semibold text-white hover:bg-violet-800"
+                        href={`/api/auth/discord/bot-install?tournamentId=${tournament.id}`}
+                      >
+                        Add bot to your Discord server
+                      </a>
+                      <p className="text-xs text-violet-800">
+                        Authorizing the bot on Discord connects its server automatically&mdash;no server ID to copy.
+                      </p>
+                      <details className="text-sm text-violet-900">
+                        <summary className="cursor-pointer font-medium">Enter a server ID by hand instead</summary>
+                        <form action={connectDiscordAction} className="mt-3 space-y-3">
+                          <input name="tournamentId" type="hidden" value={tournament.id} />
+                          <label className="block text-sm font-medium text-violet-950" htmlFor="guildId">Discord server ID</label>
+                          <input className="h-11 w-full rounded-md border border-violet-300 bg-white px-3 text-base text-zinc-950" id="guildId" name="guildId" placeholder="123456789012345678" required />
+                          <button className="flex h-11 w-full items-center justify-center rounded-md bg-violet-700 px-4 text-sm font-semibold text-white hover:bg-violet-800" type="submit">Connect Discord</button>
+                        </form>
+                      </details>
+                    </div>
+                  ) : (
+                    <p className="mt-2 text-sm text-violet-900">Only the tournament host can connect Discord.</p>
+                  )}
+                  {discordError ? <p className="mt-3 text-sm font-medium text-red-700" role="alert">{discordError}</p> : null}
+                  {discordConnected ? <p className="mt-3 text-sm font-medium text-emerald-800" role="status">Discord connection queued.</p> : null}
                 </div>
 
                 <div className="rounded-lg border border-zinc-200 bg-white p-5 shadow-sm">

@@ -13,6 +13,7 @@
 # testing
 /coverage
 /.test-build
+/.bot-build
 
 # next.js
 /.next/

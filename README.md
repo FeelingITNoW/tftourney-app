@@ -119,3 +119,18 @@ check (it trashes the temporary workbook unless `KEEP_LIVE_GOOGLE_SHEET=1`):
 ```bash
 GOOGLE_LIVE_TEST_REFRESH_TOKEN=... npm run test:sheets:live
 ```
+
+## Discord tournament operations
+
+The optional Discord Gateway worker provides Riot-verified signup, tournament
+check-in, private lobby score threads, durable screenshot queues, OCR review,
+and idempotent score submission. Configure the Discord variables in
+`.env.local`, apply the latest Supabase migration, then follow
+[docs/discord-bot.md](docs/discord-bot.md) for Discord Developer Portal,
+ngrok, storage, and deployment setup.
+
+Run the worker locally with:
+
+```bash
+npm run bot:dev
+```

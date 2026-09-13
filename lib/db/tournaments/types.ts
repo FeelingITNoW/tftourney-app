@@ -374,6 +374,7 @@ export type DeleteTournamentInput = {
 export type RegisterTournamentPlayerInput = {
   tournamentId: string;
   riotAccount: VerifiedRiotAccount;
+  discordUserId?: string;
 };
 
 export type AddRandomSeededTournamentPlayersInput = {
@@ -407,6 +408,24 @@ export type UpdateLobbyResultsInput = {
 export type UpdateLobbyResultsResult = {
   updated_lobby_id: string;
   updated_participant_count: number;
+};
+
+export type LobbyScoreWriteMode = "record" | "correct";
+
+export type SubmitLobbyResultsInput = UpdateLobbyResultsInput & {
+  idempotencyKey?: string;
+  source?: "web" | "discord";
+  submissionId?: string;
+  mode?: LobbyScoreWriteMode;
+};
+
+export type SubmitLobbyResultsResult = {
+  updated_lobby_id: string;
+  updated_participant_count: number;
+  round_id: string;
+  lobby_number: number;
+  game_number: number;
+  replayed: boolean;
 };
 
 export type RandomizePendingLobbyResultsResult = {

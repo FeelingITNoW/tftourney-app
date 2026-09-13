@@ -26,6 +26,15 @@ import {
 import { analyzeTournamentFormat } from "@/lib/tournament/formats/presets";
 import type { CustomTournamentCreationState } from "@/lib/tournament/formats/creation-state";
 import { scheduleTournamentSheetSync } from "@/lib/sheets/dispatch";
+import { supabaseRestRequest } from "@/lib/db/supabase-rest/api";
+import {
+  enqueueDiscordOutbox,
+  getTournamentCheckInState,
+  getTournamentDiscordConfig,
+  prepareConnectedTournamentStart,
+  createManagerInviteToken,
+  isTournamentManager,
+} from "@/lib/discord/api";
 
 function getFormString(formData: FormData, fieldName: string): string {
   const value = formData.get(fieldName);
@@ -61,6 +70,20 @@ async function requireTournamentHost(tournamentId: string, returnTo: string): Pr
     redirectWithParams(returnTo, {
       authorizationError: "Only the tournament host can manage this tournament.",
     });
+  }
+  return organizer.hostUserId;
+}
+
+async function requireTournamentOperator(tournamentId: string, returnTo: string): Promise<string> {
+  const organizer = await requireOrganizer(returnTo);
+  try {
+    await assertTournamentHost(tournamentId, organizer.hostUserId);
+  } catch {
+    if (!(await isTournamentManager(tournamentId, organizer.hostUserId).catch(() => false))) {
+      redirectWithParams(returnTo, {
+        authorizationError: "Only a tournament host or appointed manager can record results.",
+      });
+    }
   }
   return organizer.hostUserId;
 }
@@ -319,7 +342,14 @@ export async function startTournamentAction(formData: FormData) {
   const hostUserId = await requireTournamentHost(tournamentId, detailPath);
 
   try {
+    await prepareConnectedTournamentStart(tournamentId);
     await startTournament({ tournamentId });
+    await enqueueDiscordOutbox({
+      tournamentId,
+      eventType: "sync_lobby_threads",
+      dedupeKey: `sync_lobby_threads:start:${tournamentId}:${Date.now()}`,
+      payload: { reason: "tournament_started" },
+    });
     scheduleTournamentSheetSync(tournamentId, hostUserId);
   } catch (error) {
     redirectWithParams(detailPath, {
@@ -331,6 +361,99 @@ export async function startTournamentAction(formData: FormData) {
   revalidatePath("/");
   revalidatePath(detailPath);
   redirect(detailPath);
+}
+
+export async function openTournamentCheckInAction(formData: FormData) {
+  const tournamentId = getFormString(formData, "tournamentId");
+  const detailPath = `/tournaments/${tournamentId}`;
+  if (!tournamentId) redirectWithParams("/", { createError: "Tournament was not found." });
+  await requireTournamentHost(tournamentId, detailPath);
+  try {
+    const config = await getTournamentDiscordConfig(tournamentId);
+    if (!config) throw new Error("Connect this tournament to Discord before opening check-in.");
+    const state = await getTournamentCheckInState(tournamentId);
+    if (state?.status === "open") throw new Error("Check-in is already open.");
+    await supabaseRestRequest("tournaments", {
+      method: "PATCH",
+      query: { id: `eq.${tournamentId}` },
+      prefer: "return=minimal",
+      body: { check_in_status: "open", check_in_opened_at: new Date().toISOString(), check_in_closed_at: null },
+    });
+    await supabaseRestRequest("tournament_registrations", {
+      method: "PATCH",
+      query: { tournament_id: `eq.${tournamentId}`, or: "(registration_status.eq.registered,registration_status.eq.waitlisted)" },
+      prefer: "return=minimal",
+      body: { checked_in_at: null },
+    });
+    await enqueueDiscordOutbox({ tournamentId, eventType: "checkin_opened", dedupeKey: `checkin:opened:${Date.now()}` });
+  } catch (error) {
+    redirectWithParams(detailPath, { checkInError: error instanceof Error ? error.message : "Check-in could not be opened." });
+  }
+  revalidatePath(detailPath);
+  redirectWithParams(detailPath, { checkInUpdated: "opened" });
+}
+
+export async function closeTournamentCheckInAction(formData: FormData) {
+  const tournamentId = getFormString(formData, "tournamentId");
+  const detailPath = `/tournaments/${tournamentId}`;
+  if (!tournamentId) redirectWithParams("/", { createError: "Tournament was not found." });
+  await requireTournamentHost(tournamentId, detailPath);
+  try {
+    const state = await getTournamentCheckInState(tournamentId);
+    if (!state || state.status !== "open") throw new Error("Check-in is not open.");
+    await supabaseRestRequest("tournaments", {
+      method: "PATCH",
+      query: { id: `eq.${tournamentId}` },
+      prefer: "return=minimal",
+      body: { check_in_status: "closed", check_in_closed_at: new Date().toISOString() },
+    });
+    await enqueueDiscordOutbox({ tournamentId, eventType: "checkin_closed", dedupeKey: `checkin:closed:${Date.now()}` });
+  } catch (error) {
+    redirectWithParams(detailPath, { checkInError: error instanceof Error ? error.message : "Check-in could not be closed." });
+  }
+  revalidatePath(detailPath);
+  redirectWithParams(detailPath, { checkInUpdated: "closed" });
+}
+
+export async function connectDiscordAction(formData: FormData) {
+  const tournamentId = getFormString(formData, "tournamentId");
+  const guildId = getFormString(formData, "guildId");
+  const detailPath = `/tournaments/${tournamentId}`;
+  if (!tournamentId) redirectWithParams("/", { createError: "Tournament was not found." });
+  await requireTournamentHost(tournamentId, detailPath);
+  if (!/^\d{5,25}$/.test(guildId)) redirectWithParams(detailPath, { discordError: "Enter a valid Discord server ID." });
+  try {
+    await supabaseRestRequest("tournament_discord_configs", {
+      method: "POST",
+      query: { on_conflict: "tournament_id" },
+      prefer: "resolution=merge-duplicates,return=minimal",
+      body: { tournament_id: tournamentId, guild_id: guildId, state: "pending", last_error: null },
+    });
+    await enqueueDiscordOutbox({ tournamentId, eventType: "provision_tournament", dedupeKey: `provision:${guildId}:${Date.now()}`, payload: { guildId } });
+  } catch (error) {
+    redirectWithParams(detailPath, { discordError: error instanceof Error ? error.message : "Discord could not be connected." });
+  }
+  revalidatePath(detailPath);
+  redirectWithParams(detailPath, { discordConnected: "true" });
+}
+
+export async function createManagerInviteAction(formData: FormData) {
+  const tournamentId = getFormString(formData, "tournamentId");
+  const detailPath = `/tournaments/${tournamentId}`;
+  if (!tournamentId) redirectWithParams("/", { createError: "Tournament was not found." });
+  await requireTournamentHost(tournamentId, detailPath);
+  const invite = createManagerInviteToken();
+  try {
+    await supabaseRestRequest("tournament_manager_invites", {
+      method: "POST",
+      prefer: "return=minimal",
+      body: { tournament_id: tournamentId, token_hash: invite.hash, expires_at: invite.expiresAt },
+    });
+  } catch (error) {
+    redirectWithParams(detailPath, { discordError: error instanceof Error ? error.message : "Manager invite could not be created." });
+  }
+  const baseUrl = process.env.TFTOURNEY_APP_URL ?? "http://localhost:3000";
+  redirectWithParams(detailPath, { managerInvite: `${baseUrl.replace(/\/$/, "")}/discord/manager-invites/${invite.token}` });
 }
 
 export async function deleteTournamentAction(formData: FormData) {
@@ -378,7 +501,7 @@ export async function updateLobbyScoresAction(formData: FormData) {
     });
   }
 
-  const hostUserId = await requireTournamentHost(tournamentId, lobbyPath);
+  const hostUserId = await requireTournamentOperator(tournamentId, lobbyPath);
 
   const participantIds = getFormStrings(formData, "participantId");
   const placements = getFormStrings(formData, "placement");

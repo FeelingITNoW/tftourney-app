@@ -33,6 +33,21 @@ function sessionValueFromCookieHeader(rawCookie: string | null): string | undefi
   return rawCookie?.match(new RegExp(`(?:^|;\\s*)${SESSION_COOKIE_NAME}=([^;]+)`))?.[1];
 }
 
+// Next's own cookie APIs (cookies(), NextRequest.cookies, NextResponse.cookies) already
+// encodeURIComponent a cookie's value when writing it and decodeURIComponent it when
+// reading it back (see stringifyCookie/parseCookie in @edge-runtime/cookies), so a
+// value read through those APIs arrives here already decoded -- decodeURIComponent is
+// a harmless no-op on it (there's no "%" left to unescape). A value read straight off
+// the raw `Cookie` header (sessionFromRequest below) has NOT been through that
+// automatic decode, so it still needs exactly one here. Keeping exactly one
+// decodeURIComponent call handles both sources correctly -- but only because
+// encodeSessionCookie below does NOT also encode. It used to, which put two layers of
+// encoding on the wire (its own, plus Next's automatic one from cookies().set()); the
+// cookies()-based read path silently canceled both layers out, while the raw-header
+// path only had this single decodeURIComponent to undo them, leaving one layer behind
+// and JSON.parse failing on it -- which silently treated a valid, signed-in session as
+// absent in every Route Handler that read the session via the raw header (the Discord
+// "Add bot to your Discord server" flow among them).
 export function decodeSessionCookie(value: string | undefined): StoredSession | null {
   if (!value) return null;
   try {
@@ -49,7 +64,7 @@ export function decodeSessionCookie(value: string | undefined): StoredSession | 
 }
 
 export function encodeSessionCookie(session: StoredSession): string {
-  return encodeURIComponent(JSON.stringify(session));
+  return JSON.stringify(session);
 }
 
 export function sessionCookieOptions() {
@@ -122,12 +137,6 @@ function localOrganizer(): OrganizerSession {
   };
 }
 
-export async function getOrganizerSessionFromRequest(request: Request): Promise<OrganizerSession | null> {
-  const rawSession = sessionFromRequest(request);
-  if (!rawSession) return process.env.TFT_REQUIRE_AUTH === "false" ? localOrganizer() : null;
-  return organizerFromStoredSession(rawSession);
-}
-
 export async function getOrganizerSession(): Promise<OrganizerSession | null> {
   const rawSession = (await cookies()).get(SESSION_COOKIE_NAME)?.value;
   const session = decodeSessionCookie(rawSession);
@@ -139,6 +148,12 @@ export async function requireOrganizer(returnTo = "/dashboard"): Promise<Organiz
   const organizer = await getOrganizerSession();
   if (organizer) return organizer;
   redirect(`/signin?returnTo=${encodeURIComponent(returnTo)}`);
+}
+
+export async function getOrganizerSessionFromRequest(request: Request): Promise<OrganizerSession | null> {
+  const rawSession = sessionFromRequest(request);
+  if (!rawSession) return process.env.TFT_REQUIRE_AUTH === "false" ? localOrganizer() : null;
+  return organizerFromStoredSession(rawSession);
 }
 
 export async function getHostUserId(request: Request): Promise<string | null> {

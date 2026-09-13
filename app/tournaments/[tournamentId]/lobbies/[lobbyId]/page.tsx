@@ -4,6 +4,7 @@ import { getOrganizerSession } from "@/lib/auth/session";
 import { notFound } from "next/navigation";
 import { LobbyResultsEditor } from "@/components/tournaments/lobby-results-editor";
 import { getTournamentLobbyViewModel } from "@/lib/db/tournaments/api";
+import { isTournamentManager } from "@/lib/discord/api";
 
 export const dynamic = "force-dynamic";
 
@@ -73,7 +74,10 @@ export default async function LobbyScoresPage({
       organizer &&
       organizer.hostUserId === tournamentHeader.hostUserId,
   );
-  const isReadOnly = tournamentHeader?.status === "completed" || !isTournamentHost;
+  const isTournamentOperator = isTournamentHost || Boolean(
+    tournamentHeader && organizer && await isTournamentManager(tournamentId, organizer.hostUserId).catch(() => false),
+  );
+  const isReadOnly = tournamentHeader?.status === "completed" || !isTournamentOperator;
   const backQuery = new URLSearchParams();
   if (returnGame) {
     backQuery.set("game", returnGame);
@@ -168,7 +172,7 @@ export default async function LobbyScoresPage({
 
             {isReadOnly ? (
               <div className="mb-5 rounded-md border border-zinc-200 bg-zinc-100 p-4 text-sm font-medium text-zinc-700">
-                {tournamentHeader.status === "completed" ? "This tournament is complete. Results are read-only." : "Only the tournament host can enter results. This is a public read-only view."}
+                {tournamentHeader.status === "completed" ? "This tournament is complete. Results are read-only." : "Only a tournament host or appointed manager can enter results. This is a public read-only view."}
               </div>
             ) : null}
 

@@ -9,11 +9,16 @@
     "lint": "eslint",
     "test": "tsc -p tsconfig.test.json && node --test .test-build/test/*.test.js",
     "test:sheets:live": "tsc -p tsconfig.test.json && node --test .test-build/test/google-sheets-live.test.js",
-    "check": "npm run lint && npm run test && npm run build"
+    "check": "npm run lint && npm run test && npm run build",
+    "bot:dev": "tsx bot/index.ts",
+    "bot:build": "tsc -p bot/tsconfig.json",
+    "bot:start": "node .bot-build/bot/index.js"
   },
   "dependencies": {
     "@google-cloud/vision": "^5.3.7",
     "@xyflow/react": "^12.11.2",
+    "discord.js": "^14.22.1",
+    "dotenv": "^17.4.2",
     "next": "16.2.9",
     "react": "19.2.4",
     "react-dom": "19.2.4"
@@ -26,6 +31,7 @@
     "eslint": "^9",
     "eslint-config-next": "16.2.9",
     "tailwindcss": "^4",
+    "tsx": "^4.20.3",
     "typescript": "^5"
   }
 }
