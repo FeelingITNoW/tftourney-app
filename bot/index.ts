@@ -9,7 +9,9 @@ import {
   PermissionFlagsBits,
   TextInputBuilder,
   TextInputStyle,
+  type CategoryChannel,
   type Guild,
+  type GuildBasedChannel,
   type Message,
   type TextChannel,
   type ThreadChannel,
@@ -100,11 +102,18 @@ function overwrites(guild: Guild, managerRoleId: string, scoreChannel = false) {
   ];
 }
 
-async function ensureChannel(guild: Guild, id: string, name: string, categoryId: string, managerRoleId: string, scoreChannel = false): Promise<TextChannel> {
+async function ensureChannel(guild: Guild, id: string, name: string, categoryId: string, managerRoleId: string, existingChannels: GuildBasedChannel[], scoreChannel = false): Promise<TextChannel> {
   if (id) {
     const existing = await guild.channels.fetch(id).catch(() => null);
     if (existing?.type === ChannelType.GuildText) return existing as TextChannel;
   }
+  // The stored ID can be lost (e.g. a failed config write) even though the channel
+  // still exists in Discord from an earlier attempt -- reuse it by name/parent
+  // instead of creating a duplicate every reconcile tick.
+  const byName = existingChannels.find(
+    (channel): channel is TextChannel => channel.type === ChannelType.GuildText && channel.parentId === categoryId && channel.name === name,
+  );
+  if (byName) return byName;
   return guild.channels.create({ name, type: ChannelType.GuildText, parent: categoryId, permissionOverwrites: overwrites(guild, managerRoleId, scoreChannel), reason: "TFTourney Discord tournament setup" }) as Promise<TextChannel>;
 }
 
@@ -120,12 +129,23 @@ async function ensurePanel(channel: TextChannel, messageId: string, content: str
 }
 
 async function provisionTournament(config: ReconcileConfig, guild: Guild): Promise<ReconcileConfig> {
+  // Snapshot the guild's channels once so a lost category_id/channel_id (e.g. from an
+  // earlier failed config write) can be recovered by name instead of recreated.
+  const existingChannels = [...(await guild.channels.fetch().catch(() => guild.channels.cache)).values()].filter(
+    (channel): channel is GuildBasedChannel => channel != null,
+  );
+  const categoryName = `TFTourney • ${config.name}`.slice(0, 100);
   let category = config.config.category_id ? await guild.channels.fetch(String(config.config.category_id)).catch(() => null) : null;
-  if (!category || category.type !== ChannelType.GuildCategory) category = await guild.channels.create({ name: `TFTourney • ${config.name}`.slice(0, 100), type: ChannelType.GuildCategory, reason: "TFTourney Discord tournament setup" });
+  if (!category || category.type !== ChannelType.GuildCategory) {
+    category = existingChannels.find(
+      (channel): channel is CategoryChannel => channel.type === ChannelType.GuildCategory && channel.name === categoryName,
+    ) ?? null;
+  }
+  if (!category) category = await guild.channels.create({ name: categoryName, type: ChannelType.GuildCategory, reason: "TFTourney Discord tournament setup" });
   const managerRoleId = await ensureRole(guild, config);
-  const signup = await ensureChannel(guild, String(config.config.signup_channel_id ?? ""), "sign-up", category.id, managerRoleId);
-  const checkin = await ensureChannel(guild, String(config.config.checkin_channel_id ?? ""), "check-in", category.id, managerRoleId);
-  const scores = await ensureChannel(guild, String(config.config.score_channel_id ?? ""), "score-recording", category.id, managerRoleId, true);
+  const signup = await ensureChannel(guild, String(config.config.signup_channel_id ?? ""), "sign-up", category.id, managerRoleId, existingChannels);
+  const checkin = await ensureChannel(guild, String(config.config.checkin_channel_id ?? ""), "check-in", category.id, managerRoleId, existingChannels);
+  const scores = await ensureChannel(guild, String(config.config.score_channel_id ?? ""), "score-recording", category.id, managerRoleId, existingChannels, true);
   const signupMessageId = await ensurePanel(signup, String(config.config.signup_message_id ?? ""), "Submit your Riot ID once. The bot verifies it with Riot before adding you to the tournament.", buttonRow(config.tournamentId, "signup", config.status !== "accepting_players"));
   const checkinMessageId = await ensurePanel(checkin, String(config.config.checkin_message_id ?? ""), config.checkInStatus === "open" ? `Check-in is open. ${config.checkedInCount} players have checked in.` : `Check-in is ${config.checkInStatus}.`, buttonRow(config.tournamentId, "checkin", config.checkInStatus !== "open"));
   const patchResponse = await appFetch(`/api/internal/discord/config/${config.tournamentId}`, { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ category_id: category.id, signup_channel_id: signup.id, checkin_channel_id: checkin.id, score_channel_id: scores.id, manager_role_id: managerRoleId, signup_message_id: signupMessageId, checkin_message_id: checkinMessageId, state: "active", last_error: null, last_heartbeat_at: new Date().toISOString() }) });
