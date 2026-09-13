@@ -19,15 +19,22 @@ Create a Discord application and bot, then enable these Gateway intents:
 - `GUILD_MESSAGES`
 - privileged `MESSAGE_CONTENT` (required for attachment fields in message events)
 
-Install the bot with permissions to view/read channels, send messages, attach files, manage channels, manage roles, create private threads, send messages in threads, and manage threads. Put the bot role above the manager roles it creates.
-
 Configure these OAuth callback URLs:
 
 ```text
 https://deploy-tapping-unwed.ngrok-free.dev/api/auth/discord/callback
+https://deploy-tapping-unwed.ngrok-free.dev/api/auth/discord/bot-install/callback
 ```
 
 The manager claim flow requests `identify guilds.join`. The claimant must first sign in to TFTourney with Google, then open the one-time manager link. The bot adds the Discord member and assigns the tournament-specific role before activating the app manager record.
+
+### Adding the bot to a tournament's server
+
+From a tournament's page, the host clicks **"Add bot to your Discord server"** (`/api/auth/discord/bot-install?tournamentId=<id>`). This redirects to Discord's own bot-authorization screen with the `bot` scope and the exact permission set above already encoded (view/read channels, send messages, attach files, manage channels, manage roles, create private threads, send messages in threads, manage threads) — the host picks the target server and authorizes there. Discord adds the bot to that server and redirects back to `/api/auth/discord/bot-install/callback` with the chosen `guild_id`, which the app records against that tournament automatically. There's no server ID to copy by hand.
+
+A manual "enter a server ID" fallback remains available (for a bot already installed via the Developer Portal's own OAuth2 URL Generator, or if `DISCORD_CLIENT_ID` isn't configured yet) but is no longer the primary path.
+
+Put the bot's role above the manager roles it creates in the target server (Server Settings → Roles) after installation.
 
 ## Environment
 

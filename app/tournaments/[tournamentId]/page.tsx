@@ -378,13 +378,29 @@ export default async function TournamentPage({
                       </form>
                       {managerInvite ? <p className="mt-3 break-all rounded bg-white p-3 text-xs text-violet-950">{managerInvite}</p> : null}
                     </>
+                  ) : isTournamentHost ? (
+                    <div className="mt-4 space-y-3">
+                      <a
+                        className="flex h-11 w-full items-center justify-center rounded-md bg-violet-700 px-4 text-sm font-semibold text-white hover:bg-violet-800"
+                        href={`/api/auth/discord/bot-install?tournamentId=${tournament.id}`}
+                      >
+                        Add bot to your Discord server
+                      </a>
+                      <p className="text-xs text-violet-800">
+                        Authorizing the bot on Discord connects its server automatically&mdash;no server ID to copy.
+                      </p>
+                      <details className="text-sm text-violet-900">
+                        <summary className="cursor-pointer font-medium">Enter a server ID by hand instead</summary>
+                        <form action={connectDiscordAction} className="mt-3 space-y-3">
+                          <input name="tournamentId" type="hidden" value={tournament.id} />
+                          <label className="block text-sm font-medium text-violet-950" htmlFor="guildId">Discord server ID</label>
+                          <input className="h-11 w-full rounded-md border border-violet-300 bg-white px-3 text-base text-zinc-950" id="guildId" name="guildId" placeholder="123456789012345678" required />
+                          <button className="flex h-11 w-full items-center justify-center rounded-md bg-violet-700 px-4 text-sm font-semibold text-white hover:bg-violet-800" type="submit">Connect Discord</button>
+                        </form>
+                      </details>
+                    </div>
                   ) : (
-                    <form action={connectDiscordAction} className="mt-4 space-y-3">
-                      <input name="tournamentId" type="hidden" value={tournament.id} />
-                      <label className="block text-sm font-medium text-violet-950" htmlFor="guildId">Discord server ID</label>
-                      <input className="h-11 w-full rounded-md border border-violet-300 bg-white px-3 text-base text-zinc-950" id="guildId" name="guildId" placeholder="123456789012345678" required />
-                      <button className="flex h-11 w-full items-center justify-center rounded-md bg-violet-700 px-4 text-sm font-semibold text-white hover:bg-violet-800" disabled={!isTournamentHost} type="submit">Connect Discord</button>
-                    </form>
+                    <p className="mt-2 text-sm text-violet-900">Only the tournament host can connect Discord.</p>
                   )}
                   {discordError ? <p className="mt-3 text-sm font-medium text-red-700" role="alert">{discordError}</p> : null}
                   {discordConnected ? <p className="mt-3 text-sm font-medium text-emerald-800" role="status">Discord connection queued.</p> : null}
