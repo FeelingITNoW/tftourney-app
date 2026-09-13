@@ -44,8 +44,17 @@ async function refreshSession(session: ReturnType<typeof decodeSessionCookie>) {
 }
 
 export async function proxy(request: NextRequest) {
-  if (request.nextUrl.pathname.startsWith("/api/auth/")) return NextResponse.next();
-
+  // Several /api/auth/* routes (Discord account-link callback, the Discord
+  // bot-install OAuth flow and its callback) read the session cookie to
+  // identify the current host via getHostUserId(request) -- they need a
+  // refreshed token exactly like any page does. A session cookie only
+  // exists here at all once someone is signed in, and needsRefresh() below
+  // is a no-op otherwise, so there's no reason to special-case this prefix:
+  // doing so silently treated a signed-in host as logged out whenever their
+  // access token was near/past expiry (e.g. the "Add bot to your Discord
+  // server" button would bounce them to /signin and back with no visible
+  // error, since /signin itself sits outside this prefix and refreshes the
+  // session before redirecting home).
   const session = decodeSessionCookie(request.cookies.get(SESSION_COOKIE_NAME)?.value);
   if (!session || !needsRefresh(session.expiresAt)) return NextResponse.next();
 
