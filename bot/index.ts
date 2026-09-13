@@ -12,6 +12,7 @@ import {
   type CategoryChannel,
   type Guild,
   type GuildBasedChannel,
+  type GuildMember,
   type Message,
   type TextChannel,
   type ThreadChannel,
@@ -67,6 +68,11 @@ const client = new Client({
 
 const threadContext = new Map<string, { tournamentId: string; managerRoleId: string | null; lobbyId: string | null }>();
 const threadParticipantKeys = new Map<string, string>();
+// Refreshed at the start of every reconcile() tick: which tournaments (if any) a
+// guild is currently connected to. Lets guildCreate/guildDelete react to a server
+// join/removal without a second round trip to the app for the same data reconcile()
+// just fetched.
+const guildTournaments = new Map<string, string[]>();
 let processing = false;
 let reconciling = false;
 
@@ -83,6 +89,33 @@ function buttonRow(tournamentId: string, kind: "signup" | "checkin", disabled = 
     .setStyle(kind === "signup" ? ButtonStyle.Primary : ButtonStyle.Success)
     .setDisabled(disabled);
   return new ActionRowBuilder<ButtonBuilder>().addComponents(button);
+}
+
+// The guild-level permission set requested by /api/auth/discord/bot-install (and
+// documented for manual installs in docs/discord-bot.md). Discord lets the
+// authorizing user uncheck any of these on its own consent screen even though the
+// invite URL pre-selects them, so a missing one here is a real, user-caused
+// misconfiguration worth surfacing by name rather than only failing later with
+// whatever raw error the first blocked Discord API call happens to produce.
+const REQUIRED_GUILD_PERMISSIONS: Array<[bigint, string]> = [
+  [PermissionFlagsBits.ViewChannel, "View Channels"],
+  [PermissionFlagsBits.SendMessages, "Send Messages"],
+  [PermissionFlagsBits.ManageChannels, "Manage Channels"],
+  [PermissionFlagsBits.ManageRoles, "Manage Roles"],
+  [PermissionFlagsBits.ManageThreads, "Manage Threads"],
+  [PermissionFlagsBits.CreatePrivateThreads, "Create Private Threads"],
+  [PermissionFlagsBits.SendMessagesInThreads, "Send Messages in Threads"],
+  [PermissionFlagsBits.AttachFiles, "Attach Files"],
+];
+
+async function getBotMember(guild: Guild) {
+  return guild.members.me ?? await guild.members.fetchMe().catch(() => null);
+}
+
+async function missingGuildPermissions(guild: Guild): Promise<string[]> {
+  const me = await getBotMember(guild);
+  if (!me) return ["(could not read the bot's own permissions)"];
+  return REQUIRED_GUILD_PERMISSIONS.filter(([flag]) => !me.permissions.has(flag)).map(([, label]) => label);
 }
 
 async function ensureRole(guild: Guild, config: ReconcileConfig): Promise<string> {
@@ -156,6 +189,14 @@ async function ensurePanel(channel: TextChannel, messageId: string, content: str
 }
 
 async function provisionTournament(config: ReconcileConfig, guild: Guild): Promise<ReconcileConfig> {
+  // Check permissions up front so a shortfall produces one clear, specific error
+  // (and last_error message) instead of an opaque failure on whichever Discord API
+  // call happens to hit the missing permission first -- which could be anywhere from
+  // category creation to the very last panel message.
+  const missing = await missingGuildPermissions(guild);
+  if (missing.length > 0) {
+    throw new Error(`Bot is missing required Discord permissions: ${missing.join(", ")}. Re-invite the bot with the full permission set from the tournament's Discord panel.`);
+  }
   // Snapshot the guild's channels once so a lost category_id/channel_id (e.g. from an
   // earlier failed config write) can be recovered by name instead of recreated.
   const existingChannels = [...(await guild.channels.fetch().catch(() => guild.channels.cache)).values()].filter(
@@ -170,7 +211,7 @@ async function provisionTournament(config: ReconcileConfig, guild: Guild): Promi
   }
   if (!category) category = await guild.channels.create({ name: categoryName, type: ChannelType.GuildCategory, reason: "TFTourney Discord tournament setup" });
   const managerRoleId = await ensureRole(guild, config);
-  const botMemberId = (guild.members.me ?? await guild.members.fetchMe().catch(() => null))?.id ?? guild.client.user.id;
+  const botMemberId = (await getBotMember(guild))?.id ?? guild.client.user.id;
   const signup = await ensureChannel(guild, String(config.config.signup_channel_id ?? ""), "sign-up", category.id, managerRoleId, botMemberId, existingChannels);
   const checkin = await ensureChannel(guild, String(config.config.checkin_channel_id ?? ""), "check-in", category.id, managerRoleId, botMemberId, existingChannels);
   const scores = await ensureChannel(guild, String(config.config.score_channel_id ?? ""), "score-recording", category.id, managerRoleId, botMemberId, existingChannels, true);
@@ -181,6 +222,16 @@ async function provisionTournament(config: ReconcileConfig, guild: Guild): Promi
   return { ...config, config: { ...config.config, category_id: category.id, signup_channel_id: signup.id, checkin_channel_id: checkin.id, score_channel_id: scores.id, manager_role_id: managerRoleId, signup_message_id: signupMessageId, checkin_message_id: checkinMessageId } };
 }
 
+async function reportProvisionError(tournamentId: string, error: unknown): Promise<void> {
+  const message = (error instanceof Error ? error.message : "Discord provisioning failed.").slice(0, 500);
+  console.error(`[discord-reconcile] tournament ${tournamentId} provisioning failed`, error);
+  await appFetch(`/api/internal/discord/config/${tournamentId}`, {
+    method: "PATCH",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ state: "error", last_error: message }),
+  }).catch((patchError) => console.error(`[discord-reconcile] failed to record error for tournament ${tournamentId}`, patchError));
+}
+
 async function reconcile(): Promise<void> {
   if (reconciling) return;
   reconciling = true;
@@ -188,6 +239,14 @@ async function reconcile(): Promise<void> {
     const response = await appFetch("/api/internal/discord/reconcile");
     if (!response.ok) throw new Error(`Discord reconciliation returned ${response.status}.`);
     const payload = await response.json() as { tournaments: ReconcileConfig[] };
+    guildTournaments.clear();
+    for (const config of payload.tournaments) {
+      const guildId = String(config.config.guild_id ?? "");
+      if (!guildId) continue;
+      const list = guildTournaments.get(guildId) ?? [];
+      list.push(config.tournamentId);
+      guildTournaments.set(guildId, list);
+    }
     for (const config of payload.tournaments) {
     // One tournament's failure (a bad guild ID, a stale config, a transient
     // Discord/API error) must not stop every other connected tournament from
@@ -196,7 +255,13 @@ async function reconcile(): Promise<void> {
     const guildId = String(config.config.guild_id ?? "");
     const guild = await client.guilds.fetch(guildId).catch(() => null);
     if (!guild) continue;
-    const provisioned = await provisionTournament(config, guild);
+    let provisioned: ReconcileConfig;
+    try {
+      provisioned = await provisionTournament(config, guild);
+    } catch (error) {
+      await reportProvisionError(config.tournamentId, error);
+      continue;
+    }
     const parent = await guild.channels.fetch(String(provisioned.config.score_channel_id)) as TextChannel | null;
     if (!parent || parent.type !== ChannelType.GuildText) continue;
     const existing = new Map(provisioned.threads.map((thread) => [`${thread.roundId}:${thread.lobbyNumber}`, thread]));
@@ -360,6 +425,59 @@ async function handleInteraction(interaction: import("discord.js").Interaction):
   }
 }
 
+function findGreetableChannel(guild: Guild, botMember: GuildMember | null): TextChannel | null {
+  const canSend = (channel: GuildBasedChannel): channel is TextChannel =>
+    channel.type === ChannelType.GuildText && (!botMember || channel.permissionsFor(botMember)?.has(PermissionFlagsBits.SendMessages) === true);
+  if (guild.systemChannel && canSend(guild.systemChannel)) return guild.systemChannel;
+  return [...guild.channels.cache.values()].find(canSend) ?? null;
+}
+
+async function greetUnmatchedGuild(guild: Guild): Promise<void> {
+  const botMember = await getBotMember(guild);
+  const missing = botMember ? REQUIRED_GUILD_PERMISSIONS.filter(([flag]) => !botMember.permissions.has(flag)).map(([, label]) => label) : [];
+  const channel = findGreetableChannel(guild, botMember);
+  const lines = [
+    "👋 Thanks for adding the TFTourney Organizer bot!",
+    missing.length > 0
+      ? `⚠️ It's missing these permissions: ${missing.join(", ")}. Re-invite it with the full permission set from the tournament's Discord panel.`
+      : null,
+    `This server isn't connected to a tournament yet. From the tournament's page, open **Discord operations** and use "Add bot to your Discord server" again, or enter this server's ID by hand: \`${guild.id}\``,
+  ].filter((line): line is string => line !== null).join("\n\n");
+  if (!channel) {
+    console.error(`[discord-bot] joined guild ${guild.id} (${guild.name}) but has no channel it can post in`);
+    return;
+  }
+  await channel.send({ content: lines }).catch((error) => console.error(`[discord-bot] failed to greet guild ${guild.id}`, error));
+}
+
+async function handleGuildCreate(guild: Guild): Promise<void> {
+  console.log(`[discord-bot] joined guild ${guild.id} (${guild.name})`);
+  // The OAuth callback that records tournament_discord_configs.guild_id can still be
+  // in flight when this Gateway event arrives -- reconcile immediately (provisioning
+  // the tournament right away instead of waiting up to 10s for the next tick), then
+  // give the callback a moment and check again before concluding this join is
+  // actually unmatched and greeting the server as a manual/standalone install.
+  await reconcile().catch((error) => console.error("[discord-reconcile]", error));
+  if (guildTournaments.has(guild.id)) return;
+  await new Promise((resolve) => setTimeout(resolve, 5_000));
+  await reconcile().catch((error) => console.error("[discord-reconcile]", error));
+  if (guildTournaments.has(guild.id)) return;
+  await greetUnmatchedGuild(guild);
+}
+
+async function handleGuildDelete(guild: Guild): Promise<void> {
+  console.log(`[discord-bot] removed from guild ${guild.id} (${guild.name})`);
+  const tournamentIds = guildTournaments.get(guild.id) ?? [];
+  for (const tournamentId of tournamentIds) {
+    await appFetch(`/api/internal/discord/config/${tournamentId}`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ state: "error", last_error: "The bot was removed from the Discord server." }),
+    }).catch((error) => console.error(`[discord-reconcile] failed to record removal for tournament ${tournamentId}`, error));
+  }
+  guildTournaments.delete(guild.id);
+}
+
 client.once("ready", () => {
   console.log(`[discord-bot] logged in as ${client.user?.tag}`);
   void reconcile().catch((error) => console.error("[discord-reconcile]", error));
@@ -370,6 +488,8 @@ client.once("ready", () => {
 });
 client.on("messageCreate", (message) => void handleMessage(message).catch((error) => console.error("[discord-message]", error)));
 client.on("interactionCreate", (interaction) => void handleInteraction(interaction).catch((error) => console.error("[discord-interaction]", error)));
+client.on("guildCreate", (guild) => void handleGuildCreate(guild).catch((error) => console.error("[discord-bot] guildCreate handler failed", error)));
+client.on("guildDelete", (guild) => void handleGuildDelete(guild).catch((error) => console.error("[discord-bot] guildDelete handler failed", error)));
 process.on("SIGINT", () => void client.destroy());
 process.on("SIGTERM", () => void client.destroy());
 void client.login(botToken);

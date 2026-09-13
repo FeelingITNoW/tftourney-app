@@ -371,7 +371,15 @@ export default async function TournamentPage({
                   <h2 className="text-lg font-semibold text-violet-950">Discord operations</h2>
                   {discordConfig ? (
                     <>
-                      <p className="mt-2 text-sm text-violet-900">Connected to server {discordConfig.guildId}. The bot will reconcile the category and channels shortly.</p>
+                      {discordConfig.state === "error" ? (
+                        <p className="mt-2 rounded-md border border-red-200 bg-red-50 p-3 text-sm font-medium text-red-800" role="alert">
+                          Discord setup needs attention: {discordConfig.lastError ?? "the bot could not finish setting up this server."}
+                        </p>
+                      ) : discordConfig.state === "active" ? (
+                        <p className="mt-2 text-sm text-violet-900">Connected to server {discordConfig.guildId}. Channels are set up.</p>
+                      ) : (
+                        <p className="mt-2 text-sm text-violet-900">Connected to server {discordConfig.guildId}. The bot will reconcile the category and channels shortly.</p>
+                      )}
                       <form action={createManagerInviteAction} className="mt-4">
                         <input name="tournamentId" type="hidden" value={tournament.id} />
                         <button className="flex h-11 w-full items-center justify-center rounded-md bg-violet-700 px-4 text-sm font-semibold text-white hover:bg-violet-800" disabled={!isTournamentHost} type="submit">Create manager invite link</button>

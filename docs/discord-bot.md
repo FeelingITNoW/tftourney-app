@@ -78,6 +78,14 @@ On the tournament page, the owner enters the Discord guild ID. The bot’s recon
 
 The score channel is visible but does not accept ordinary parent-channel messages. The bot creates private threads and adds the current lobby players. Managers can view and manage all private threads.
 
+### On joining and leaving a server
+
+When the bot joins a guild, it reconciles immediately (rather than waiting for the next 10-second tick) so a tournament connected via "Add bot to your Discord server" gets its category and channels right away. If the guild doesn't match any connected tournament after a short grace period (the OAuth callback that records the guild ID can still be in flight), the bot treats it as a manual/standalone install: it checks its own permissions and posts a short message in the first channel it can reach, naming any missing permissions and giving the host the server ID to paste into the "Enter a server ID by hand" form.
+
+Before provisioning a guild, the bot checks that it actually holds the full permission set requested at install time (view channels, send messages, manage channels, manage roles, manage threads, create private threads, send messages in threads, attach files) -- since Discord lets the authorizing user uncheck any of these on its own consent screen. A shortfall is written to `tournament_discord_configs.state = "error"` with a specific `last_error` naming what's missing, surfaced on the tournament page, instead of failing opaquely on whichever Discord API call hits the missing permission first.
+
+If the bot is removed from a server, every tournament connected to that guild is marked `state = "error"` with `last_error` explaining the bot was removed, so the host sees it on the tournament page rather than the integration silently going stale.
+
 ## Queue and score algorithm
 
 Every accepted image attachment is copied to private storage before a queue row is created. Discord message ID is unique, so Gateway retries cannot duplicate a submission.
