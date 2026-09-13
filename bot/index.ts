@@ -161,6 +161,10 @@ async function reconcile(): Promise<void> {
     if (!response.ok) throw new Error(`Discord reconciliation returned ${response.status}.`);
     const payload = await response.json() as { tournaments: ReconcileConfig[] };
     for (const config of payload.tournaments) {
+    // One tournament's failure (a bad guild ID, a stale config, a transient
+    // Discord/API error) must not stop every other connected tournament from
+    // being reconciled this tick -- isolate each tournament's work.
+    try {
     const guildId = String(config.config.guild_id ?? "");
     const guild = await client.guilds.fetch(guildId).catch(() => null);
     if (!guild) continue;
@@ -206,6 +210,9 @@ async function reconcile(): Promise<void> {
       await appFetch("/api/internal/discord/threads", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ roundId: oldThread.roundId, lobbyNumber: oldThread.lobbyNumber, threadId: oldThread.threadId, state: "archived" }) }).catch(() => undefined);
       threadContext.delete(oldThread.threadId);
       threadParticipantKeys.delete(oldThread.threadId);
+    }
+    } catch (error) {
+      console.error(`[discord-reconcile] tournament ${config.tournamentId}`, error);
     }
     }
   } finally {
