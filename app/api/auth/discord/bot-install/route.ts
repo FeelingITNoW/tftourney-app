@@ -43,7 +43,7 @@ export async function GET(request: Request): Promise<Response> {
   const state = randomBytes(32).toString("base64url");
   const authorize = new URL("https://discord.com/oauth2/authorize");
   authorize.searchParams.set("client_id", clientId);
-  authorize.searchParams.set("scope", "bot");
+  authorize.searchParams.set("scope", "bot applications.commands");
   authorize.searchParams.set("permissions", BOT_INVITE_PERMISSIONS);
   authorize.searchParams.set("redirect_uri", `${appUrl.replace(/\/$/, "")}/api/auth/discord/bot-install/callback`);
   authorize.searchParams.set("response_type", "code");

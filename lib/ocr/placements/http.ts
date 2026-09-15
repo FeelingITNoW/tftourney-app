@@ -144,6 +144,7 @@ export async function handlePlacementOcrRequest(
 
   try {
     const result = await dependencies.parseImage(image, roster);
+    logOcrResult(botRequest ? "bot" : "web", result);
     if (result.strategy === "unresolved" && result.placements.length === 0) {
       return Response.json(
         {
@@ -160,10 +161,30 @@ export async function handlePlacementOcrRequest(
   }
 }
 
+// One compact summary line per OCR call plus, when it isn't a clean match,
+// one line per row that didn't match and per issue Vision/the parser flagged
+// -- enough to diagnose a "needs review" result from the terminal without
+// having to query discord_score_submissions.ocr_result by hand.
+function logOcrResult(caller: "bot" | "web", result: PlacementParseResult): void {
+  const matched = result.placements.filter((row) => row.matchStatus === "matched").length;
+  console.log(
+    `[ocr] caller=${caller} status=${result.status} strategy=${result.strategy} ` +
+      `profile=${result.debug.selectedProfile} confidence=${result.debug.layoutConfidence.toFixed(2)} ` +
+      `matched=${matched}/${result.placements.length || result.debug.rosterSize}`,
+  );
+  if (result.status === "complete") return;
+  for (const row of result.placements) {
+    if (row.matchStatus !== "matched") console.log(`[ocr]   #${row.placement} "${row.extractedName}" -> ${row.matchStatus}`);
+  }
+  for (const issue of result.issues) console.log(`[ocr]   issue: ${issue.code} - ${issue.message}`);
+}
+
 function errorResponse(error: unknown): Response {
   if (error instanceof PlacementParseError) {
+    console.error(`[ocr] ${error.code}: ${error.message}`);
     return Response.json({ error: error.message, code: error.code, retryable: error.retryable }, { status: error.status });
   }
+  console.error("[ocr] unexpected OCR failure", error);
   return Response.json({ error: "OCR processing failed.", code: "OCR_FAILED", retryable: true }, { status: 503 });
 }
 

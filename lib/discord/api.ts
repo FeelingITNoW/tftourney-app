@@ -4,6 +4,7 @@ import { supabaseRestRequest } from "../db/supabase-rest/api";
 export type TournamentDiscordConfig = {
   tournamentId: string;
   guildId: string;
+  guildName: string | null;
   categoryId: string | null;
   signupChannelId: string | null;
   checkinChannelId: string | null;
@@ -14,6 +15,22 @@ export type TournamentDiscordConfig = {
   state: "pending" | "active" | "error" | "disabled";
   lastError: string | null;
   lastHeartbeatAt: string | null;
+  createdAt: string | null;
+  updatedAt: string | null;
+  // Set when a host disconnects (state becomes "disabled"): which cleanup the
+  // bot should perform on the provisioned category/channels/role, and
+  // whether it has finished doing so yet.
+  cleanupAction: "archive" | "delete" | null;
+  cleanupRequestedAt: string | null;
+  cleanupCompletedAt: string | null;
+};
+
+export type TournamentCheckInRegistration = {
+  registrationId: string;
+  displayName: string;
+  registrationStatus: "registered" | "waitlisted" | "entered" | "withdrawn";
+  checkedInAt: string | null;
+  hasDiscord: boolean;
 };
 
 export type TournamentCheckInState = {
@@ -21,7 +38,16 @@ export type TournamentCheckInState = {
   openedAt: string | null;
   closedAt: string | null;
   registeredCount: number;
+  // Registered-or-waitlisted players with checked_in_at set -- matches the
+  // Discord panel and check_in_discord_player, which both allow a waitlisted
+  // player to check in. Use checkedInRegisteredCount below for anything that
+  // determines who actually enters the tournament.
   checkedInCount: number;
+  // Registered players with checked_in_at set -- the number start_tournament
+  // will actually seat, since it only ever selects registration_status =
+  // 'registered' rows.
+  checkedInRegisteredCount: number;
+  registrations: TournamentCheckInRegistration[];
 };
 
 function nullableString(value: unknown): string | null {
@@ -30,13 +56,14 @@ function nullableString(value: unknown): string | null {
 
 export async function getTournamentDiscordConfig(tournamentId: string): Promise<TournamentDiscordConfig | null> {
   const rows = await supabaseRestRequest<Record<string, unknown>[]>("tournament_discord_configs", {
-    query: { select: "tournament_id,guild_id,category_id,signup_channel_id,checkin_channel_id,score_channel_id,manager_role_id,signup_message_id,checkin_message_id,state,last_error,last_heartbeat_at", tournament_id: `eq.${tournamentId}`, limit: "1" },
+    query: { select: "tournament_id,guild_id,guild_name,category_id,signup_channel_id,checkin_channel_id,score_channel_id,manager_role_id,signup_message_id,checkin_message_id,state,last_error,last_heartbeat_at,created_at,updated_at,cleanup_action,cleanup_requested_at,cleanup_completed_at", tournament_id: `eq.${tournamentId}`, limit: "1" },
   });
   const row = rows[0];
   if (!row) return null;
   return {
     tournamentId: String(row.tournament_id),
     guildId: String(row.guild_id),
+    guildName: nullableString(row.guild_name),
     categoryId: nullableString(row.category_id),
     signupChannelId: nullableString(row.signup_channel_id),
     checkinChannelId: nullableString(row.checkin_channel_id),
@@ -47,6 +74,11 @@ export async function getTournamentDiscordConfig(tournamentId: string): Promise<
     state: (row.state ?? "pending") as TournamentDiscordConfig["state"],
     lastError: nullableString(row.last_error),
     lastHeartbeatAt: nullableString(row.last_heartbeat_at),
+    createdAt: nullableString(row.created_at),
+    updatedAt: nullableString(row.updated_at),
+    cleanupAction: (row.cleanup_action ?? null) as TournamentDiscordConfig["cleanupAction"],
+    cleanupRequestedAt: nullableString(row.cleanup_requested_at),
+    cleanupCompletedAt: nullableString(row.cleanup_completed_at),
   };
 }
 
@@ -62,15 +94,31 @@ export async function getTournamentCheckInState(tournamentId: string): Promise<T
     query: { select: "check_in_status,check_in_opened_at,check_in_closed_at", id: `eq.${tournamentId}`, limit: "1" },
   });
   if (!rows[0]) return null;
-  const counts = await supabaseRestRequest<Array<{ registration_status: string; checked_in_at: string | null }>>("tournament_registrations", {
-    query: { select: "registration_status,checked_in_at", tournament_id: `eq.${tournamentId}` },
+  const registrations = await supabaseRestRequest<Array<{
+    id: string;
+    display_name: string;
+    registration_status: TournamentCheckInRegistration["registrationStatus"];
+    checked_in_at: string | null;
+    discord_user_id: string | null;
+  }>>("tournament_registrations", {
+    query: { select: "id,display_name,registration_status,checked_in_at,discord_user_id", tournament_id: `eq.${tournamentId}`, order: "created_at.asc,id.asc" },
   });
+  const isCheckedIn = (row: (typeof registrations)[number]) =>
+    row.checked_in_at !== null && (row.registration_status === "registered" || row.registration_status === "waitlisted");
   return {
     status: (rows[0].check_in_status ?? "not_started") as TournamentCheckInState["status"],
     openedAt: nullableString(rows[0].check_in_opened_at),
     closedAt: nullableString(rows[0].check_in_closed_at),
-    registeredCount: counts.filter((row) => row.registration_status === "registered").length,
-    checkedInCount: counts.filter((row) => row.checked_in_at !== null && ["registered", "waitlisted"].includes(row.registration_status)).length,
+    registeredCount: registrations.filter((row) => row.registration_status === "registered").length,
+    checkedInCount: registrations.filter(isCheckedIn).length,
+    checkedInRegisteredCount: registrations.filter((row) => row.registration_status === "registered" && row.checked_in_at !== null).length,
+    registrations: registrations.map((row) => ({
+      registrationId: String(row.id),
+      displayName: row.display_name,
+      registrationStatus: row.registration_status,
+      checkedInAt: nullableString(row.checked_in_at),
+      hasDiscord: row.discord_user_id != null,
+    })),
   };
 }
 
@@ -91,23 +139,92 @@ export async function enqueueDiscordOutbox(input: {
   });
 }
 
-export async function prepareConnectedTournamentStart(tournamentId: string): Promise<void> {
+function chunk<T>(values: T[], size: number): T[][] {
+  const chunks: T[][] = [];
+  for (let index = 0; index < values.length; index += size) chunks.push(values.slice(index, index + size));
+  return chunks;
+}
+
+// Check-in is optional: with no Discord config, or check-in never opened,
+// every registered player enters as before. Only once the host has opened
+// check-in does the roster narrow to who checked in -- and starting while
+// check-in is still open closes it first (one click covers both), so a
+// partial roster is never seated by accident.
+export async function prepareTournamentStartRoster(tournamentId: string): Promise<string[]> {
   const config = await getTournamentDiscordConfig(tournamentId);
-  if (!config) return;
+  if (!config || config.state === "disabled") return [];
   const state = await getTournamentCheckInState(tournamentId);
-  if (!state || state.status !== "closed") {
-    throw new Error("Close Discord check-in before starting this tournament.");
+  if (!state || state.status === "not_started") return [];
+  if (state.status === "open") {
+    await supabaseRestRequest("tournaments", {
+      method: "PATCH",
+      query: { id: `eq.${tournamentId}` },
+      prefer: "return=minimal",
+      body: { check_in_status: "closed", check_in_closed_at: new Date().toISOString() },
+    });
   }
-  await supabaseRestRequest("tournament_registrations", {
+  const rows = await supabaseRestRequest<Array<{ id: string }>>("tournament_registrations", {
     method: "PATCH",
     query: {
+      select: "id",
       tournament_id: `eq.${tournamentId}`,
       registration_status: "eq.registered",
       checked_in_at: "is.null",
     },
-    prefer: "return=minimal",
+    prefer: "return=representation",
     body: { registration_status: "waitlisted" },
   });
+  return (rows ?? []).map((row) => row.id);
+}
+
+// Undoes prepareTournamentStartRoster's demotion after a failed start, so a
+// host whose start attempt errored (e.g. an entrant-count mismatch) isn't
+// left with players stuck as waitlisted for no reason.
+export async function restoreTournamentStartRoster(registrationIds: string[]): Promise<void> {
+  for (const batch of chunk(registrationIds, 64)) {
+    if (batch.length === 0) continue;
+    await supabaseRestRequest("tournament_registrations", {
+      method: "PATCH",
+      query: { id: `in.(${batch.join(",")})` },
+      prefer: "return=minimal",
+      body: { registration_status: "registered" },
+    });
+  }
+}
+
+export async function setRegistrationCheckIn(input: {
+  tournamentId: string;
+  registrationId: string;
+  checkedIn: boolean;
+}): Promise<void> {
+  const config = await getTournamentDiscordConfig(input.tournamentId);
+  if (!config || config.state === "disabled") {
+    throw new Error("Connect this tournament to Discord before using check-in.");
+  }
+  const state = await getTournamentCheckInState(input.tournamentId);
+  if (!state || state.status === "not_started") {
+    throw new Error("Open check-in before checking players in.");
+  }
+  const rows = await supabaseRestRequest<Array<{ id: string }>>("tournament_registrations", {
+    method: "PATCH",
+    query: {
+      select: "id",
+      id: `eq.${input.registrationId}`,
+      tournament_id: `eq.${input.tournamentId}`,
+      registration_status: "in.(registered,waitlisted)",
+    },
+    prefer: "return=representation",
+    body: { checked_in_at: input.checkedIn ? new Date().toISOString() : null },
+  });
+  if (!rows?.[0]) throw new Error("Registration was not found.");
+}
+
+// Kept as a small pure-looking helper (rather than inline `Date.now()` in the
+// page component) so eslint's react-hooks/purity rule doesn't flag a direct
+// impure call inside a Server Component's render body.
+export function isDiscordConfigPendingTooLong(config: TournamentDiscordConfig | null, thresholdMs = 30_000): boolean {
+  if (!config || config.state !== "pending" || config.updatedAt === null) return false;
+  return Date.now() - new Date(config.updatedAt).getTime() > thresholdMs;
 }
 
 export function createManagerInviteToken(): { token: string; hash: string; expiresAt: string } {

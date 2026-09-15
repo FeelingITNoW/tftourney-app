@@ -247,6 +247,102 @@ Returns connection/export state only for the verified tournament host. All four
 functions revoke `public`, `anon`, and `authenticated` execution and grant it
 to `service_role`.
 
+## Discord queue and score functions
+
+These functions back the Discord bot integration (`bot/index.ts` and the
+`app/api/internal/discord/**` routes); see `docs/discord-bot.md` for the
+end-to-end flow. All revoke `public`, `anon`, and `authenticated` execution
+and grant it to `service_role`.
+
+### public.enqueue_discord_score_submission
+
+    enqueue_discord_score_submission(
+      p_tournament_id text, p_thread_id text, p_discord_message_id text,
+      p_discord_user_id text, p_received_at timestamptz, p_storage_path text,
+      p_mime_type text, p_byte_size integer
+    ) returns table (
+      submission_id text, submission_status text, queue_position integer,
+      round_id text, lobby_number integer, accepted_image_count integer,
+      retry_after_seconds integer
+    )
+
+Locks the mapped `discord_lobby_threads` row and queues a screenshot, or
+inserts it as a terminal rejection: `rejected_cooldown` if the lobby's
+`score_cooldown_seconds` has not elapsed since `last_accepted_at`,
+`rejected_overflow` beyond three pending jobs per thread, or `rejected_spam`
+within a ten-second per-user/thread window. Deduplicates by
+`discord_message_id`.
+
+### public.claim_discord_score_submission
+
+    claim_discord_score_submission(p_lease_seconds integer default 120)
+    returns table (
+      submission_id text, tournament_id text, round_id text, thread_id text,
+      lobby_id text, game_number integer, lease_token text, storage_path text,
+      attempt_count integer, claim_status text, discord_message_id text,
+      retry_after_seconds integer
+    )
+
+Expires stale leases, then leases the oldest queued row in a thread with no
+other job processing or awaiting review. If the lobby's cooldown became
+active after the row was queued, rejects it (`claim_status =
+'rejected_cooldown'`) without leasing it or counting an attempt; otherwise
+reserves the earliest pending game for that round/lobby number and marks it
+`processing` (`claim_status = 'claimed'`).
+
+### public.mark_discord_submission_review
+
+    mark_discord_submission_review(
+      p_submission_id text, p_lease_token text, p_ocr_result jsonb,
+      p_error_code text, p_error_message text
+    ) returns table (updated_submission_id text, updated_status text)
+
+Moves a leased submission to `needs_review`, storing the raw OCR result for
+audit. Requires the caller's lease token to still be valid.
+
+### public.submit_lobby_results
+
+    submit_lobby_results(
+      p_tournament_id text, p_lobby_id text, p_results jsonb,
+      p_idempotency_key text default null, p_source text default 'web',
+      p_submission_id text default null, p_mode text default 'record'
+    ) returns table (
+      updated_lobby_id text, updated_participant_count integer,
+      round_id text, lobby_number integer, game_number integer,
+      replayed boolean
+    )
+
+The shared idempotent score-write boundary used by both the Discord worker
+and the web API (`update_lobby_results` is now a thin wrapper calling this
+with mode `correct`). Locks the tournament, round, and lobby; validates the
+full roster and unique placements; derives points from the format's
+`placementPoints`; recalculates round totals; and, when `p_submission_id` is
+given, marks that Discord submission `accepted` and — only the first time a
+previously-pending game is recorded — increments
+`discord_lobby_threads.accepted_image_count`, stamps `last_game_number`, and
+starts that thread's score cooldown by setting `last_accepted_at = now()`.
+Calls `generate_round_lobbies` to create the next game block when the current
+one completes.
+
+### public.discord_score_cooldown_remaining_seconds
+
+    discord_score_cooldown_remaining_seconds(
+      p_last_accepted_at timestamptz, p_cooldown_seconds integer
+    ) returns integer
+
+Pure helper: seconds remaining before a lobby thread's score cooldown clears
+(`0` when there is no prior accept or the cooldown is disabled). Shared by
+the enqueue and claim functions above so the two cooldown checks can never
+disagree.
+
+### public.check_in_discord_player
+
+    check_in_discord_player(p_tournament_id text, p_discord_user_id text)
+    returns table (registration_id text, display_name text, checked_in_at timestamptz)
+
+Marks a registered/waitlisted player checked in while check-in is open.
+Idempotent: repeat calls do not move an already-recorded `checked_in_at`.
+
 ## Integrity and trigger functions
 
 ### public.set_updated_at
@@ -289,6 +385,8 @@ database:
 | 20260721000000 | Compact schema-v3 format normalization and graph-aware replacements. |
 | 20260722000000 | Runtime graph support and the two-argument graph start/finalize APIs. |
 | 20260723000000 | Safe two-phase destination reseeding for the unique seed index. |
+| 20260808010000 | Discord tournament integration: guild/channel provisioning config, manager roles and invites, lobby-thread mapping, the screenshot queue and claim/lease functions, and the shared `submit_lobby_results` score boundary. |
+| 20260914000000 | Per-lobby-thread score cooldown (`score_cooldown_seconds`, `last_accepted_at`, `rejected_cooldown`, `discord_score_cooldown_remaining_seconds`) and fixes for ambiguous-column bugs in `claim_discord_score_submission`, `submit_lobby_results`, `check_in_discord_player`, and a NULL-output bug in `enqueue_discord_score_submission`. |
 
 Historical overloads such as start_tournament(uuid),
 start_tournament(bigint), and the old one-argument graph helpers are removed

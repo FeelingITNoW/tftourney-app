@@ -11,7 +11,7 @@ export async function GET(request: Request): Promise<Response> {
   if (!isDiscordBotRequest(request)) return Response.json({ error: "Unauthorized.", code: "AUTH_REQUIRED" }, { status: 401 });
   try {
     const configs = await supabaseRestRequest<Array<Record<string, unknown>>>("tournament_discord_configs", {
-      query: { select: "tournament_id,guild_id,category_id,signup_channel_id,checkin_channel_id,score_channel_id,manager_role_id,signup_message_id,checkin_message_id,state,last_error", state: "not.in.(disabled)" },
+      query: { select: "tournament_id,guild_id,category_id,signup_channel_id,checkin_channel_id,score_channel_id,manager_role_id,signup_message_id,checkin_message_id,state,last_error,score_cooldown_seconds", state: "not.in.(disabled)" },
     });
     const tournaments = [];
     for (const config of configs) {
