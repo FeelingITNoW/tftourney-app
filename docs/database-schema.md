@@ -291,6 +291,53 @@ accepted-image count when a Discord submission is accepted.
 The migration also records `tournaments.ended_at` when a tournament is completed
 or cancelled so retention cleanup can remove Discord images after seven days.
 
+`20260914000000_add_discord_score_cooldown.sql` adds a configurable per-lobby
+score cooldown and fixes latent bugs in the functions above. New columns:
+`tournament_discord_configs.score_cooldown_seconds` (integer, default `60`,
+`0`-`3600`, `0` disables the cooldown) and
+`discord_lobby_threads.last_accepted_at` (set only when a Discord submission
+records a previously-pending game). `discord_score_submissions.status` gains
+`rejected_cooldown`. The helper `discord_score_cooldown_remaining_seconds(last_accepted_at,
+cooldown_seconds)` computes the remaining wait and is used by both
+`enqueue_discord_score_submission` (rejects a screenshot posted while the
+lobby's cooldown is active, before the overflow/spam checks) and
+`claim_discord_score_submission` (rejects an already-queued screenshot that
+reaches the front of the queue after the cooldown started, without leasing it
+or counting an attempt). Both now also return `retry_after_seconds`, and
+`claim_discord_score_submission` additionally returns `claim_status`
+(`'claimed'` or `'rejected_cooldown'`) and `discord_message_id` so a rejection
+can be replied to directly. The same migration qualifies every table
+reference in `claim_discord_score_submission`, `submit_lobby_results`, and
+`check_in_discord_player` that previously collided with a same-named
+`returns table` output column — those unqualified references made PostgreSQL
+raise "column reference is ambiguous" on every call — and fixes
+`enqueue_discord_score_submission`'s inserts to `returning *` instead of
+`returning id`, which had left `status`/`queue_position` NULL on every
+rejection branch.
+
+`20260915000000_discord_connect_ux.sql` adds `tournament_discord_configs.guild_name`
+(text, populated by the bot from `guild.name` on each provisioning tick) so the
+tournament page can show a server name instead of a raw snowflake. It also
+changes application-level semantics, not schema: `check_in_status` no longer
+gates `start_tournament` -- a connected tournament with check-in never opened
+(`not_started`, the default) starts with every registered player exactly as an
+unconnected one does; opening or closing check-in only narrows the roster once
+the host has used it, and starting while check-in is open closes it first.
+Manual host check-in (setting/clearing a registration's `checked_in_at` from
+the web UI, for players without a `discord_user_id`) uses the same column the
+Discord check-in button writes.
+
+`20260916000000_discord_disconnect_cleanup.sql` adds
+`tournament_discord_configs.cleanup_action` (`'archive'` or `'delete'`,
+nullable), `cleanup_requested_at`, and `cleanup_completed_at`. Disconnecting a
+tournament (`state` becomes `"disabled"`) sets `cleanup_action` and
+`cleanup_requested_at`; the bot's `/api/internal/discord/cleanup` poll picks
+up disabled configs with a pending (not-yet-completed) cleanup action, since
+disabled tournaments are otherwise excluded from the normal reconcile
+payload, archives or permanently deletes the provisioned category/channels/
+role accordingly, and stamps `cleanup_completed_at`. Reconnecting resets all
+three columns to null.
+
 ## Route-scoped read models
 
 `20260803010000_route_scoped_view_models.sql` adds composite lookup indexes for

@@ -6,7 +6,9 @@ import {
   finalizeTournamentNodeAction,
   closeTournamentCheckInAction,
   openTournamentCheckInAction,
+  setRegistrationCheckInAction,
   connectDiscordAction,
+  disconnectDiscordAction,
   createManagerInviteAction,
   randomizePendingLobbyResultsAction,
   registerPlayerAction,
@@ -19,6 +21,7 @@ import { Scoresheet } from "@/components/tournaments/scoresheet";
 import { TournamentDetails } from "@/components/tournaments/tournament-details";
 import { GoogleSheetsPublishingPanel } from "@/components/tournaments/google-sheets-publishing-panel";
 import { AccountHeader } from "@/components/account/account-header";
+import { PendingButton } from "@/components/ui/pending-button";
 import {
   getTournamentPageViewModel,
   TOURNAMENT_STATUS_ACCEPTING_PLAYERS,
@@ -26,7 +29,7 @@ import {
 import type { TournamentDetail, TournamentDetailPageViewModel, TournamentPanelView } from "@/lib/db/tournaments/types";
 import { getOrganizerSession } from "@/lib/auth/session";
 import { selectTournamentEntrants } from "@/lib/tournament/start/api";
-import { getTournamentCheckInState, getTournamentDiscordConfig } from "@/lib/discord/api";
+import { getTournamentCheckInState, getTournamentDiscordConfig, isDiscordConfigPendingTooLong } from "@/lib/discord/api";
 import { LiveRefresh } from "@/components/tournaments/live-refresh";
 
 export const dynamic = "force-dynamic";
@@ -56,6 +59,8 @@ type TournamentPageSearchParams = Promise<{
   checkInUpdated?: string | string[];
   discordError?: string | string[];
   discordConnected?: string | string[];
+  discordDisconnected?: string | string[];
+  discordManager?: string | string[];
   managerInvite?: string | string[];
 }>;
 
@@ -97,6 +102,8 @@ export default async function TournamentPage({
   const checkInUpdated = getSearchValue(query.checkInUpdated);
   const discordError = getSearchValue(query.discordError);
   const discordConnected = getSearchValue(query.discordConnected) === "true";
+  const discordDisconnected = getSearchValue(query.discordDisconnected);
+  const discordManagerGranted = getSearchValue(query.discordManager) === "granted";
   const managerInvite = getSearchValue(query.managerInvite);
   const organizer = await getOrganizerSession();
   const view: TournamentPanelView = requestedView === "scoresheet" || requestedView === "graph" || requestedView === "details" || requestedView === "lobbies"
@@ -144,8 +151,12 @@ export default async function TournamentPage({
   }
 
   const isTournamentHost = Boolean(tournament && organizer && organizer.hostUserId === tournament.hostUserId);
-  const discordConfig = tournament && isTournamentHost ? await getTournamentDiscordConfig(tournament.id).catch(() => null) : null;
+  const rawDiscordConfig = tournament && isTournamentHost ? await getTournamentDiscordConfig(tournament.id).catch(() => null) : null;
+  // A "disabled" config is a soft-disconnect (see disconnectDiscordAction):
+  // treat it as not connected everywhere on this page.
+  const discordConfig = rawDiscordConfig && rawDiscordConfig.state !== "disabled" ? rawDiscordConfig : null;
   const checkInState = discordConfig ? await getTournamentCheckInState(tournament!.id).catch(() => null) : null;
+  const discordPendingTooLong = isDiscordConfigPendingTooLong(discordConfig);
 
   const lobbyPanel = tournament?.panel.view === "lobbies" ? tournament.panel : null;
   const scoresheetPanel = tournament?.panel.view === "scoresheet" ? tournament.panel : null;
@@ -180,21 +191,34 @@ export default async function TournamentPage({
   const currentRoundLabel = tournament?.selectedNodeId
     ? tournament.nodes.find((node) => node.id === tournament.selectedNodeId)?.name ?? `Node ${tournament.selectedNodeId}`
     : "Not started";
-  const checkInRequired = Boolean(discordConfig);
+  // Check-in is optional: until the host opens it, every registered player
+  // enters as before. Once opened (or closed), only checked-in registered
+  // players are seated -- pressing Start while it's still open closes it
+  // first (see prepareTournamentStartRoster), so this only ever reflects the
+  // roster that will actually be used.
+  const checkInInUse = Boolean(discordConfig) && checkInState?.status !== "not_started";
   const potentialEntrantCount = tournament
-    ? checkInRequired
-      ? Math.min(checkInState?.checkedInCount ?? 0, tournament.playerCount)
+    ? checkInInUse
+      ? Math.min(checkInState?.checkedInRegisteredCount ?? 0, tournament.playerCount)
       : selectTournamentEntrants(tournament.registrations, tournament.playerCount).length
     : 0;
-  const checkInReady = !checkInRequired || checkInState?.status === "closed";
   const meetsStartRequirement = tournament
     ? tournament.startRequirement.exactEntrants !== null
       ? potentialEntrantCount === tournament.startRequirement.exactEntrants
       : potentialEntrantCount >= tournament.startRequirement.minimumEntrants
     : false;
+  const startDisabled = !tournament || tournament.registrations.length === 0 || !meetsStartRequirement;
+  const startLabel = checkInState?.status === "open"
+    ? `Close check-in & start (${checkInState.checkedInRegisteredCount} checked in)`
+    : "Start tournament";
   const enteredRegistrationIds = new Set(
     tournament?.participants.map((participant) => participant.registrationId) ??
       [],
+  );
+  const checkedInRegistrationIds = new Set(
+    (checkInState?.registrations ?? [])
+      .filter((registration) => registration.checkedInAt !== null)
+      .map((registration) => registration.registrationId),
   );
   const hasPendingCurrentRoundLobby =
     lobbyPanel?.lobbies.some(
@@ -212,7 +236,13 @@ export default async function TournamentPage({
 
   return (
     <main className="min-h-screen bg-stone-50 text-zinc-950">
-      <LiveRefresh enabled={Boolean(tournament?.hasStarted && discordConfig)} />
+      <LiveRefresh
+        enabled={Boolean(
+          (discordConfig &&
+            (tournament?.hasStarted || discordConfig.state === "pending" || checkInState?.status === "open")) ||
+            (rawDiscordConfig?.state === "disabled" && rawDiscordConfig.cleanupAction && !rawDiscordConfig.cleanupCompletedAt),
+        )}
+      />
       <div className="mx-auto flex min-h-screen w-full max-w-5xl flex-col px-6 py-6 sm:px-8 lg:px-10">
         <header className="flex items-center justify-between border-b border-zinc-200 pb-5">
           <div>
@@ -297,15 +327,19 @@ export default async function TournamentPage({
                   {isAcceptingPlayers ? (
                     <>
                       <p className="mt-2 text-sm text-zinc-500">
-                        {potentialEntrantCount} player
-                        {potentialEntrantCount === 1 ? "" : "s"} will enter
-                        round 1.
+                        {checkInInUse
+                          ? `${checkInState?.checkedInRegisteredCount ?? 0} of ${checkInState?.registeredCount ?? 0} registered players are checked in.`
+                          : `${potentialEntrantCount} player${potentialEntrantCount === 1 ? "" : "s"} will enter round 1.`}
                       </p>
                       {!meetsStartRequirement ? (
                         <p className="mt-2 text-sm font-medium text-amber-800">
                           {tournament.startRequirement.exactEntrants !== null
-                            ? `This format requires exactly ${tournament.startRequirement.exactEntrants} entrants to start.`
-                            : `Register at least ${tournament.startRequirement.minimumEntrants} entrants to start.`}
+                            ? checkInInUse
+                              ? `Exactly ${tournament.startRequirement.exactEntrants} players must be checked in to start.`
+                              : `This format requires exactly ${tournament.startRequirement.exactEntrants} entrants to start.`
+                            : checkInInUse
+                              ? `At least ${tournament.startRequirement.minimumEntrants} players must be checked in to start.`
+                              : `Register at least ${tournament.startRequirement.minimumEntrants} entrants to start.`}
                         </p>
                       ) : null}
                       <form action={startTournamentAction} className="mt-4">
@@ -314,17 +348,17 @@ export default async function TournamentPage({
                           type="hidden"
                           value={tournament.id}
                         />
-                        <button
+                        <PendingButton
                           className={`flex h-11 w-full items-center justify-center rounded-md px-4 text-sm font-semibold transition focus:outline-none focus:ring-2 focus:ring-emerald-600 focus:ring-offset-2 ${
-                            tournament.registrations.length === 0 || !meetsStartRequirement
+                            startDisabled
                               ? "cursor-not-allowed bg-zinc-200 text-zinc-500"
                               : "bg-emerald-700 text-white hover:bg-emerald-800"
                           }`}
-                          disabled={tournament.registrations.length === 0 || !meetsStartRequirement || !checkInReady}
-                          type="submit"
+                          disabled={startDisabled}
+                          pendingLabel="Starting…"
                         >
-                          Start tournament
-                        </button>
+                          {startLabel}
+                        </PendingButton>
                       </form>
                     </>
                   ) : (
@@ -341,77 +375,149 @@ export default async function TournamentPage({
                   ) : null}
                 </div>
 
-                {discordConfig ? (
-                  <div className="rounded-lg border border-cyan-200 bg-cyan-50 p-5 shadow-sm">
-                    <h2 className="text-lg font-semibold text-cyan-950">Discord check-in</h2>
-                    <p className="mt-2 text-sm text-cyan-900">
-                      {checkInState?.status === "open"
-                        ? `${checkInState.checkedInCount} players checked in. Close check-in when the roster is final.`
-                        : checkInState?.status === "closed"
-                          ? `${checkInState.checkedInCount} players checked in. Only checked-in players can start.`
-                          : "Open check-in to let registered Discord players confirm attendance."}
-                    </p>
-                    {checkInState?.status === "open" ? (
-                      <form action={closeTournamentCheckInAction} className="mt-4">
-                        <input name="tournamentId" type="hidden" value={tournament.id} />
-                        <button className="flex h-11 w-full items-center justify-center rounded-md bg-cyan-700 px-4 text-sm font-semibold text-white hover:bg-cyan-800" disabled={!isTournamentHost} type="submit">Close check-in</button>
-                      </form>
-                    ) : checkInState?.status !== "closed" ? (
-                      <form action={openTournamentCheckInAction} className="mt-4">
-                        <input name="tournamentId" type="hidden" value={tournament.id} />
-                        <button className="flex h-11 w-full items-center justify-center rounded-md bg-cyan-700 px-4 text-sm font-semibold text-white hover:bg-cyan-800" disabled={!isTournamentHost} type="submit">Open check-in</button>
-                      </form>
-                    ) : null}
-                    {checkInError ? <p className="mt-3 text-sm font-medium text-red-700" role="alert">{checkInError}</p> : null}
-                    {checkInUpdated ? <p className="mt-3 text-sm font-medium text-emerald-800" role="status">Check-in {checkInUpdated}.</p> : null}
-                  </div>
-                ) : null}
-
                 <div className="rounded-lg border border-violet-200 bg-violet-50 p-5 shadow-sm">
-                  <h2 className="text-lg font-semibold text-violet-950">Discord operations</h2>
+                  <h2 className="text-lg font-semibold text-violet-950">Discord</h2>
                   {discordConfig ? (
                     <>
-                      {discordConfig.state === "error" ? (
-                        <p className="mt-2 rounded-md border border-red-200 bg-red-50 p-3 text-sm font-medium text-red-800" role="alert">
-                          Discord setup needs attention: {discordConfig.lastError ?? "the bot could not finish setting up this server."}
-                        </p>
-                      ) : discordConfig.state === "active" ? (
-                        <p className="mt-2 text-sm text-violet-900">Connected to server {discordConfig.guildId}. Channels are set up.</p>
-                      ) : (
-                        <p className="mt-2 text-sm text-violet-900">Connected to server {discordConfig.guildId}. The bot will reconcile the category and channels shortly.</p>
-                      )}
+                      <ol className="mt-3 space-y-2 text-sm">
+                        <li className="flex items-start gap-2 text-violet-900">
+                          <span aria-hidden="true">✅</span>
+                          <span>Bot added to server{discordConfig.guildName ? ` "${discordConfig.guildName}"` : ""}.</span>
+                        </li>
+                        <li className="flex items-start gap-2">
+                          {discordConfig.state === "error" ? (
+                            <>
+                              <span aria-hidden="true">⚠️</span>
+                              <span className="text-red-800">
+                                Setup needs attention: {discordConfig.lastError ?? "the bot could not finish setting up this server."}{" "}
+                                <a className="font-medium underline" href={`/api/auth/discord/bot-install?tournamentId=${tournament.id}`}>Reconnect</a>
+                              </span>
+                            </>
+                          ) : discordConfig.state === "active" ? (
+                            <>
+                              <span aria-hidden="true">✅</span>
+                              <span className="text-violet-900">Channels are set up. Ready to go.</span>
+                            </>
+                          ) : (
+                            <>
+                              <span aria-hidden="true">⏳</span>
+                              <span className="text-violet-900">
+                                Setting up #sign-up, #check-in, and #score-recording&hellip;
+                                {discordPendingTooLong ? (
+                                  <span className="mt-1 block text-amber-800">
+                                    This is taking a while. Make sure the bot process is running (<code>npm run bot:dev</code>).
+                                  </span>
+                                ) : null}
+                              </span>
+                            </>
+                          )}
+                        </li>
+                      </ol>
+
+                      {discordConfig.state !== "error" ? (
+                        <div className="mt-4 rounded-md border border-violet-100 bg-white p-3">
+                          <h3 className="text-sm font-semibold text-violet-950">Check-in (optional)</h3>
+                          <p className="mt-1 text-sm text-violet-900">
+                            {checkInState?.status === "open"
+                              ? `${checkInState.checkedInCount} players checked in. Discord's button updates within about 10 seconds.`
+                              : checkInState?.status === "closed"
+                                ? `Closed. ${checkInState.checkedInCount} players checked in.`
+                                : "Not opened. Every registered player will enter unless you open check-in."}
+                          </p>
+                          <div className="mt-3 flex gap-2">
+                            {checkInState?.status === "open" ? (
+                              <form action={closeTournamentCheckInAction} className="flex-1">
+                                <input name="tournamentId" type="hidden" value={tournament.id} />
+                                <PendingButton className="flex h-10 w-full items-center justify-center rounded-md bg-cyan-700 px-4 text-sm font-semibold text-white hover:bg-cyan-800 disabled:cursor-not-allowed disabled:bg-zinc-300" disabled={!isTournamentHost} pendingLabel="Closing…">Close check-in</PendingButton>
+                              </form>
+                            ) : (
+                              <form action={openTournamentCheckInAction} className="flex-1">
+                                <input name="tournamentId" type="hidden" value={tournament.id} />
+                                <PendingButton className="flex h-10 w-full items-center justify-center rounded-md bg-cyan-700 px-4 text-sm font-semibold text-white hover:bg-cyan-800 disabled:cursor-not-allowed disabled:bg-zinc-300" disabled={!isTournamentHost} pendingLabel="Opening…">
+                                  {checkInState?.status === "closed" ? "Reopen check-in" : "Open check-in"}
+                                </PendingButton>
+                              </form>
+                            )}
+                          </div>
+                          {checkInError ? <p className="mt-2 text-sm font-medium text-red-700" role="alert">{checkInError}</p> : null}
+                          {checkInUpdated ? <p className="mt-2 text-sm font-medium text-emerald-800" role="status">Check-in {checkInUpdated.replaceAll("-", " ")}.</p> : null}
+                        </div>
+                      ) : null}
+
                       <form action={createManagerInviteAction} className="mt-4">
                         <input name="tournamentId" type="hidden" value={tournament.id} />
-                        <button className="flex h-11 w-full items-center justify-center rounded-md bg-violet-700 px-4 text-sm font-semibold text-white hover:bg-violet-800" disabled={!isTournamentHost} type="submit">Create manager invite link</button>
+                        <PendingButton className="flex h-11 w-full items-center justify-center rounded-md bg-violet-700 px-4 text-sm font-semibold text-white hover:bg-violet-800 disabled:cursor-not-allowed disabled:bg-zinc-300" disabled={!isTournamentHost} pendingLabel="Creating link…">Create manager invite link</PendingButton>
                       </form>
                       {managerInvite ? <p className="mt-3 break-all rounded bg-white p-3 text-xs text-violet-950">{managerInvite}</p> : null}
+                      {discordManagerGranted ? <p className="mt-3 text-sm font-medium text-emerald-800" role="status">You now have manager access to this tournament&apos;s Discord channels.</p> : null}
+
+                      <div className="mt-4">
+                        <h3 className="text-sm font-semibold text-red-900">Disconnect</h3>
+                        <p className="mt-1 text-xs text-red-800">
+                          Turns off check-in (every registered player will enter) and stops the bot from managing this server.
+                        </p>
+                        <div className="mt-2 flex flex-col gap-2 sm:flex-row">
+                          <form action={disconnectDiscordAction} className="flex-1">
+                            <input name="tournamentId" type="hidden" value={tournament.id} />
+                            <input name="cleanupAction" type="hidden" value="archive" />
+                            <PendingButton
+                              className="flex h-10 w-full items-center justify-center rounded-md border border-red-200 bg-white px-3 text-sm font-semibold text-red-700 hover:bg-red-50 disabled:cursor-not-allowed disabled:text-zinc-400"
+                              confirmMessage="Disconnect and archive this tournament's Discord channels? They'll be locked read-only and renamed, but kept in the server."
+                              disabled={!isTournamentHost}
+                              pendingLabel="Archiving…"
+                            >
+                              Archive &amp; disconnect
+                            </PendingButton>
+                          </form>
+                          <form action={disconnectDiscordAction} className="flex-1">
+                            <input name="tournamentId" type="hidden" value={tournament.id} />
+                            <input name="cleanupAction" type="hidden" value="delete" />
+                            <PendingButton
+                              className="flex h-10 w-full items-center justify-center rounded-md border border-red-300 bg-red-50 px-3 text-sm font-semibold text-red-800 hover:bg-red-100 disabled:cursor-not-allowed disabled:text-zinc-400"
+                              confirmMessage="Disconnect and permanently delete this tournament's Discord category, channels, and manager role? This cannot be undone."
+                              disabled={!isTournamentHost}
+                              pendingLabel="Deleting…"
+                            >
+                              Delete &amp; disconnect
+                            </PendingButton>
+                          </form>
+                        </div>
+                      </div>
                     </>
                   ) : isTournamentHost ? (
                     <div className="mt-4 space-y-3">
-                      <a
-                        className="flex h-11 w-full items-center justify-center rounded-md bg-violet-700 px-4 text-sm font-semibold text-white hover:bg-violet-800"
-                        href={`/api/auth/discord/bot-install?tournamentId=${tournament.id}`}
-                      >
-                        Add bot to your Discord server
-                      </a>
-                      <p className="text-xs text-violet-800">
-                        Authorizing the bot on Discord connects its server automatically&mdash;no server ID to copy.
-                      </p>
+                      <form action={connectDiscordAction} className="space-y-3">
+                        <input name="tournamentId" type="hidden" value={tournament.id} />
+                        <label className="block text-sm font-medium text-violet-950" htmlFor="guildId">Discord server ID</label>
+                        <input className="h-11 w-full rounded-md border border-violet-300 bg-white px-3 text-base text-zinc-950" id="guildId" name="guildId" placeholder="123456789012345678" required />
+                        <p className="text-xs text-violet-800">
+                          In Discord, enable Developer Mode (User Settings → Advanced), then right-click the server icon and choose &quot;Copy Server ID&quot;. Make sure the bot has already been added to that server first.
+                        </p>
+                        <PendingButton className="flex h-11 w-full items-center justify-center rounded-md bg-violet-700 px-4 text-sm font-semibold text-white hover:bg-violet-800" pendingLabel="Connecting…">Connect Discord</PendingButton>
+                      </form>
                       <details className="text-sm text-violet-900">
-                        <summary className="cursor-pointer font-medium">Enter a server ID by hand instead</summary>
-                        <form action={connectDiscordAction} className="mt-3 space-y-3">
-                          <input name="tournamentId" type="hidden" value={tournament.id} />
-                          <label className="block text-sm font-medium text-violet-950" htmlFor="guildId">Discord server ID</label>
-                          <input className="h-11 w-full rounded-md border border-violet-300 bg-white px-3 text-base text-zinc-950" id="guildId" name="guildId" placeholder="123456789012345678" required />
-                          <button className="flex h-11 w-full items-center justify-center rounded-md bg-violet-700 px-4 text-sm font-semibold text-white hover:bg-violet-800" type="submit">Connect Discord</button>
-                        </form>
+                        <summary className="cursor-pointer font-medium">Or use one-click authorize instead</summary>
+                        <a
+                          className="mt-3 flex h-11 w-full items-center justify-center rounded-md bg-violet-700 px-4 text-sm font-semibold text-white hover:bg-violet-800"
+                          href={`/api/auth/discord/bot-install?tournamentId=${tournament.id}`}
+                        >
+                          Connect a Discord server
+                        </a>
+                        <p className="mt-2 text-xs text-violet-800">
+                          Adds the bot and connects its server in one step, no ID to copy. Can be slower to finish setting up than the manual form above.
+                        </p>
                       </details>
                     </div>
                   ) : (
                     <p className="mt-2 text-sm text-violet-900">Only the tournament host can connect Discord.</p>
                   )}
                   {discordError ? <p className="mt-3 text-sm font-medium text-red-700" role="alert">{discordError}</p> : null}
-                  {discordConnected ? <p className="mt-3 text-sm font-medium text-emerald-800" role="status">Discord connection queued.</p> : null}
+                  {discordConnected ? <p className="mt-3 text-sm font-medium text-emerald-800" role="status">Discord connection queued. This card updates automatically once it&apos;s ready.</p> : null}
+                  {discordDisconnected === "archive" ? <p className="mt-3 text-sm font-medium text-zinc-700" role="status">Discord disconnected. Channels are being archived in the background.</p> : null}
+                  {discordDisconnected === "delete" ? <p className="mt-3 text-sm font-medium text-zinc-700" role="status">Discord disconnected. Channels are being deleted in the background.</p> : null}
+                  {rawDiscordConfig?.state === "disabled" && rawDiscordConfig.cleanupAction && !rawDiscordConfig.cleanupCompletedAt && !discordDisconnected ? (
+                    <p className="mt-3 text-sm text-zinc-600" role="status">Still {rawDiscordConfig.cleanupAction === "delete" ? "deleting" : "archiving"} Discord channels in the background&hellip;</p>
+                  ) : null}
                 </div>
 
                 <div className="rounded-lg border border-zinc-200 bg-white p-5 shadow-sm">
@@ -750,6 +856,8 @@ export default async function TournamentPage({
                         <th className="px-4 py-3 font-medium">Player</th>
                         {tournament.hasStarted ? (
                           <th className="px-4 py-3 font-medium">Entry</th>
+                        ) : checkInInUse ? (
+                          <th className="px-4 py-3 font-medium">Check-in</th>
                         ) : null}
                         <th className="px-4 py-3 font-medium">Registered</th>
                       </tr>
@@ -768,6 +876,25 @@ export default async function TournamentPage({
                               {enteredRegistrationIds.has(player.id)
                                 ? "Entered"
                                 : "Not entered"}
+                            </td>
+                          ) : checkInInUse ? (
+                            <td className="px-4 py-3">
+                              <form action={setRegistrationCheckInAction}>
+                                <input name="tournamentId" type="hidden" value={tournament.id} />
+                                <input name="registrationId" type="hidden" value={player.id} />
+                                <input name="checkedIn" type="hidden" value={checkedInRegistrationIds.has(player.id) ? "false" : "true"} />
+                                <PendingButton
+                                  className={`h-8 rounded-md px-3 text-xs font-semibold disabled:cursor-not-allowed disabled:opacity-60 ${
+                                    checkedInRegistrationIds.has(player.id)
+                                      ? "bg-emerald-100 text-emerald-800 hover:bg-emerald-200"
+                                      : "bg-zinc-100 text-zinc-700 hover:bg-zinc-200"
+                                  }`}
+                                  disabled={!isTournamentHost}
+                                  pendingLabel="Saving…"
+                                >
+                                  {checkedInRegistrationIds.has(player.id) ? "✓ Checked in (undo)" : "Check in"}
+                                </PendingButton>
+                              </form>
                             </td>
                           ) : null}
                           <td className="px-4 py-3 text-zinc-600">

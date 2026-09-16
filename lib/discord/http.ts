@@ -169,6 +169,7 @@ export type DiscordScoreSubmissionResult = {
   roundId: string | null;
   lobbyNumber: number | null;
   acceptedImageCount: number;
+  retryAfterSeconds: number | null;
 };
 
 export function parseSubmissionResult(
@@ -181,5 +182,6 @@ export function parseSubmissionResult(
     roundId: value.round_id == null ? null : String(value.round_id),
     lobbyNumber: value.lobby_number == null ? null : Number(value.lobby_number),
     acceptedImageCount: Number(value.accepted_image_count ?? 0),
+    retryAfterSeconds: value.retry_after_seconds == null ? null : Number(value.retry_after_seconds),
   };
 }

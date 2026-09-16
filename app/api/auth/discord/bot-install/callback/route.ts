@@ -53,7 +53,7 @@ export async function GET(request: Request): Promise<Response> {
       method: "POST",
       query: { on_conflict: "tournament_id" },
       prefer: "resolution=merge-duplicates,return=minimal",
-      body: { tournament_id: tournamentId, guild_id: guildId, state: "pending", last_error: null },
+      body: { tournament_id: tournamentId, guild_id: guildId, state: "pending", last_error: null, updated_at: new Date().toISOString(), cleanup_action: null, cleanup_requested_at: null, cleanup_completed_at: null },
     });
     await enqueueDiscordOutbox({
       tournamentId,

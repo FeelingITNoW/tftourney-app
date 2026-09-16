@@ -17,18 +17,30 @@ export type EnqueueDiscordSubmissionInput = {
   bytes: Uint8Array;
 };
 
-export type ClaimedDiscordSubmission = {
-  submissionId: string;
-  tournamentId: string;
-  roundId: string;
-  threadId: string;
-  lobbyId: string;
-  gameNumber: number;
-  leaseToken: string;
-  storagePath: string;
-  attemptCount: number;
-  roster: Array<{ id: string; displayName: string }>;
-};
+export type ClaimedDiscordSubmission =
+  | {
+      claimStatus: "claimed";
+      submissionId: string;
+      tournamentId: string;
+      roundId: string;
+      threadId: string;
+      discordMessageId: string;
+      lobbyId: string;
+      gameNumber: number;
+      leaseToken: string;
+      storagePath: string;
+      attemptCount: number;
+      roster: Array<{ id: string; displayName: string }>;
+    }
+  | {
+      claimStatus: "rejected_cooldown";
+      submissionId: string;
+      tournamentId: string;
+      roundId: string;
+      threadId: string;
+      discordMessageId: string;
+      retryAfterSeconds: number;
+    };
 
 function storageConfig(): { url: string; key: string } {
   const url = (process.env.NEXT_PUBLIC_SUPABASE_URL ?? process.env.SUPABASE_URL)?.replace(/\/$/, "");
@@ -112,14 +124,28 @@ export async function claimDiscordSubmission(): Promise<ClaimedDiscordSubmission
   const row = rows[0];
   if (!row) return null;
   const tournamentId = String(row.tournament_id ?? "");
+  const discordMessageId = String(row.discord_message_id ?? "");
+  if (row.claim_status === "rejected_cooldown") {
+    return {
+      claimStatus: "rejected_cooldown",
+      submissionId: String(row.submission_id),
+      tournamentId,
+      roundId: String(row.round_id),
+      threadId: String(row.thread_id),
+      discordMessageId,
+      retryAfterSeconds: Number(row.retry_after_seconds ?? 0),
+    };
+  }
   const lobbyId = String(row.lobby_id ?? "");
   const model = await getTournamentLobbyViewModel(tournamentId, lobbyId);
   if (!model) throw new Error("Claimed Discord submission points to a missing lobby.");
   return {
+    claimStatus: "claimed",
     submissionId: String(row.submission_id),
     tournamentId,
     roundId: String(row.round_id),
     threadId: String(row.thread_id),
+    discordMessageId,
     lobbyId,
     gameNumber: Number(row.game_number),
     leaseToken: String(row.lease_token),

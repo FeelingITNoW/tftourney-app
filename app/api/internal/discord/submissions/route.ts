@@ -31,8 +31,12 @@ export async function POST(request: Request): Promise<Response> {
       mimeType: image.type,
       bytes: new Uint8Array(await image.arrayBuffer()),
     });
-    const status = result.status === "rejected_overflow" ? 429 : result.status === "rejected_spam" ? 429 : result.status === "accepted" ? 200 : 202;
-    return Response.json(result, { status, headers: status === 429 ? { "Retry-After": "10" } : undefined });
+    const isCooldown = result.status === "rejected_cooldown";
+    const status = isCooldown || result.status === "rejected_overflow" || result.status === "rejected_spam"
+      ? 429
+      : result.status === "accepted" ? 200 : 202;
+    const retryAfter = isCooldown ? String(Math.max(1, result.retryAfterSeconds ?? 1)) : "10";
+    return Response.json(result, { status, headers: status === 429 ? { "Retry-After": retryAfter } : undefined });
   } catch (error) {
     return discordErrorResponse(error, "Screenshot could not be queued.");
   }
