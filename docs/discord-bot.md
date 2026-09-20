@@ -80,6 +80,8 @@ Once a tournament is connected (via "Connect a Discord server" or the manual ser
 
 The score channel is visible but does not accept ordinary parent-channel messages. The bot creates private threads and adds the current lobby players. Managers can view and manage all private threads.
 
+The loop only reconciles tournaments that still have work: a `completed` or `cancelled` tournament is dropped from the poll once it has no open lobby thread left, so finished events stop costing Discord API calls and database work. That last condition matters — the reconcile tick is the only thing that archives a lobby thread and the only thing that disables the sign-up button, so a tournament that ends while the bot is offline still gets one final tick to finish that before it is skipped for good.
+
 ### On joining and leaving a server
 
 When the bot joins a guild, it reconciles immediately (rather than waiting for the next 10-second tick) so a tournament connected via "Connect a Discord server" gets its category and channels right away. If the guild doesn't match any connected tournament after a short grace period (the OAuth callback that records the guild ID can still be in flight), the bot treats it as a manual/standalone install: it checks its own permissions and posts a short message in the first channel it can reach, naming any missing permissions and giving the host the server ID to paste into the "Enter a server ID by hand" form.

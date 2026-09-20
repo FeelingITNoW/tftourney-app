@@ -243,9 +243,25 @@ configuration for the workbook worker. No graph or lobby duplication is sent.
       p_tournament_id text, p_host_user_id bigint
     ) returns table (view_model jsonb)
 
-Returns connection/export state only for the verified tournament host. All four
+Returns connection/export state only for the verified tournament host. All five
 functions revoke `public`, `anon`, and `authenticated` execution and grant it
 to `service_role`.
+
+### public.get_discord_reconcile_view_model
+
+    get_discord_reconcile_view_model() returns table (view_model jsonb)
+
+Returns the whole payload for the bot's 10-second reconcile poll
+(`app/api/internal/discord/reconcile`) in one query: every non-disabled
+`tournament_discord_configs` row with its tournament name, status, check-in
+status, registered/checked-in counts, the raw snake_case `config` block, the
+lobbies of active rounds with their participants' `discord_user_id` and
+display name, and all lobby threads for the tournament. Skips `'disabled'`
+configs, and skips `'completed'`/`'cancelled'` tournaments once they have no
+`discord_lobby_threads` row left in `state = 'active'` -- the extra condition
+guarantees one final tick to archive threads and disable the sign-up panel
+before the tournament drops out. Replaces a handler that issued eight
+sequential reads per tournament per tick. Executable only by `service_role`.
 
 ## Discord queue and score functions
 
@@ -387,6 +403,7 @@ database:
 | 20260723000000 | Safe two-phase destination reseeding for the unique seed index. |
 | 20260808010000 | Discord tournament integration: guild/channel provisioning config, manager roles and invites, lobby-thread mapping, the screenshot queue and claim/lease functions, and the shared `submit_lobby_results` score boundary. |
 | 20260914000000 | Per-lobby-thread score cooldown (`score_cooldown_seconds`, `last_accepted_at`, `rejected_cooldown`, `discord_score_cooldown_remaining_seconds`) and fixes for ambiguous-column bugs in `claim_discord_score_submission`, `submit_lobby_results`, `check_in_discord_player`, and a NULL-output bug in `enqueue_discord_score_submission`. |
+| 20260919000000 | `get_discord_reconcile_view_model`, replacing the reconcile route's per-tournament fan-out with one read model, and skipping settled completed/cancelled tournaments. |
 
 Historical overloads such as start_tournament(uuid),
 start_tournament(bigint), and the old one-argument graph helpers are removed
