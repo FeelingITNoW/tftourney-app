@@ -50,6 +50,63 @@ export type TournamentCheckInState = {
   registrations: TournamentCheckInRegistration[];
 };
 
+// The bot's 10s reconcile poll. Every field is produced by the
+// get_discord_reconcile_view_model read model in a single round trip, so this
+// shape has to stay identical to what the bot already consumes: `config` keeps
+// its snake_case keys because the bot reads config.config.guild_id and friends.
+export type DiscordReconcileLobbyParticipant = {
+  discordUserId: string | null;
+  displayName: string;
+};
+
+export type DiscordReconcileLobby = {
+  id: string;
+  roundId: string;
+  gameNumber: number;
+  lobbyNumber: number;
+  participants: DiscordReconcileLobbyParticipant[];
+};
+
+export type DiscordReconcileThread = {
+  roundId: string;
+  lobbyNumber: number;
+  threadId: string;
+  acceptedImageCount: number;
+  state: string;
+  lastGameNumber: number | null;
+};
+
+export type DiscordReconcileConfig = {
+  tournament_id: string;
+  guild_id: string;
+  category_id: string | null;
+  signup_channel_id: string | null;
+  checkin_channel_id: string | null;
+  score_channel_id: string | null;
+  manager_role_id: string | null;
+  signup_message_id: string | null;
+  checkin_message_id: string | null;
+  state: TournamentDiscordConfig["state"];
+  last_error: string | null;
+  score_cooldown_seconds: number;
+};
+
+export type DiscordReconcileTournament = {
+  tournamentId: string;
+  name: string;
+  status: string;
+  checkInStatus: string;
+  registeredCount: number;
+  checkedInCount: number;
+  config: DiscordReconcileConfig;
+  activeLobbies: DiscordReconcileLobby[];
+  threads: DiscordReconcileThread[];
+};
+
+export type DiscordReconcilePayload = {
+  tournaments: DiscordReconcileTournament[];
+};
+
 function nullableString(value: unknown): string | null {
   return value == null ? null : String(value);
 }
@@ -119,6 +176,25 @@ export async function getTournamentCheckInState(tournamentId: string): Promise<T
       checkedInAt: nullableString(row.checked_in_at),
       hasDiscord: row.discord_user_id != null,
     })),
+  };
+}
+
+// One round trip for the whole reconcile payload. The read model already applies
+// the two filters that matter -- configs in state 'disabled', and completed or
+// cancelled tournaments that have no active lobby thread left to archive -- so
+// there is no per-tournament fan-out here.
+export async function getDiscordReconcileViewModel(): Promise<DiscordReconcilePayload> {
+  const rows = await supabaseRestRequest<Array<{ view_model?: unknown }>>(
+    "rpc/get_discord_reconcile_view_model",
+    { method: "POST", body: {} },
+  );
+  const viewModel = rows?.[0]?.view_model;
+  if (!viewModel || typeof viewModel !== "object") {
+    return { tournaments: [] };
+  }
+  const tournaments = (viewModel as { tournaments?: unknown }).tournaments;
+  return {
+    tournaments: Array.isArray(tournaments) ? (tournaments as DiscordReconcileTournament[]) : [],
   };
 }
 

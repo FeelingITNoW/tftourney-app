@@ -350,3 +350,18 @@ one selected server tab and at most eight lobbies for one game/page;
 `get_google_sheet_export_status_view_model` returns Sheets state only when the
 requested host owns the tournament. IDs are serialized as text and refresh
 tokens are never included.
+
+`20260919000000_discord_reconcile_view_model.sql` adds
+`get_discord_reconcile_view_model`, which returns the entire payload for the
+bot's 10-second reconcile poll in one request. It replaces a route that issued
+eight sequential PostgREST reads per connected tournament, so a tick cost
+`1 + 8N` round trips and never stopped paying for finished tournaments. Two
+filters are applied inside the query: `tournament_discord_configs` rows in
+`state = 'disabled'`, and tournaments whose `status` is `'completed'` or
+`'cancelled'` **and** that have no `discord_lobby_threads` row left in
+`state = 'active'`. The second filter is deliberately not a bare status check:
+the reconcile tick is the only thing that archives a lobby thread and the only
+thing that flips a sign-up button to disabled, so a tournament that ended while
+the bot was offline still gets one final tick to finish that work before it
+drops out of the payload. The payload shape matches the retired handler exactly,
+including the snake_case `config` block the bot reads.
