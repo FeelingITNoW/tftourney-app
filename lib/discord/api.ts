@@ -57,6 +57,10 @@ export type TournamentCheckInState = {
 export type DiscordReconcileLobbyParticipant = {
   discordUserId: string | null;
   displayName: string;
+  // The durable player account id, when the registration is linked to a player
+  // account. Lets the bot verify a thread member belongs to the lobby by
+  // identity rather than by a per-tournament registration row.
+  playerAccountId: string | null;
 };
 
 export type DiscordReconcileLobby = {

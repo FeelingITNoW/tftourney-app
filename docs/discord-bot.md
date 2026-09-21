@@ -90,6 +90,21 @@ Before provisioning a guild, the bot checks that it actually holds the full perm
 
 If the bot is removed from a server, every tournament connected to that guild is marked `state = "error"` with `last_error` explaining the bot was removed, so the host sees it on the tournament page rather than the integration silently going stale.
 
+## Player accounts
+
+Signing up through the Discord sign-up button (or the web player page) resolves
+a durable `player_accounts` row for the Discord user, links the verified Riot
+identity, and stores `player_account_id` on the registration. The bot can then
+contact the player and match them to a lobby by account identity rather than by
+a per-tournament registration row.
+
+`get_discord_reconcile_view_model` includes a `playerAccountId` on each active
+lobby participant (see `lib/discord/api.ts`,
+`DiscordReconcileLobbyParticipant.playerAccountId`). The bot reads participants
+by index and ignores unknown fields, so older bot builds keep working while the
+membership id becomes available. Web players sign in with Discord at
+`/api/auth/discord/player` and manage their tournaments at `/player`.
+
 ## Check-in
 
 Discord check-in is optional and never blocks starting a tournament:

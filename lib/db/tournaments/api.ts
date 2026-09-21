@@ -1557,7 +1557,7 @@ export async function registerTournamentPlayer(
       {
         method: "POST",
         query: {
-          select: "id,tournament_id,display_name,riot_puuid,created_at",
+          select: "id,tournament_id,display_name,riot_puuid,player_account_id,created_at",
         },
         prefer: "return=representation",
         body: {
@@ -1565,6 +1565,7 @@ export async function registerTournamentPlayer(
           riot_puuid: input.riotAccount.puuid,
           display_name: input.riotAccount.gameTag,
           ...(input.discordUserId ? { discord_user_id: input.discordUserId } : {}),
+          ...(input.playerAccountId ? { player_account_id: input.playerAccountId } : {}),
         },
       },
     );
@@ -1575,7 +1576,9 @@ export async function registerTournamentPlayer(
     ) {
       throw new Error(error.message.includes("discord_user_id")
         ? "This Discord user is already registered."
-        : "That Riot account is already registered.");
+        : error.message.includes("player_account")
+          ? "You are already registered for this tournament."
+          : "That Riot account is already registered.");
     }
 
     throw error;
