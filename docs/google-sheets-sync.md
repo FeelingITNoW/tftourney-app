@@ -36,6 +36,16 @@ tournament remains serialized so its workbook cannot be overwritten by an
 older projection. Each successful sync still writes the managed workbook tabs
 and Google API quotas remain the upper throughput limit.
 
+Two additional optimizations reduce the cost of each write:
+
+- The Scores tab orders its round columns by each round node's depth from the
+  final node (the graph sink is depth 0, its direct predecessors depth 1, and
+  so on), closest to the final first. Ties are broken by round name. This keeps
+  the most decisive rounds leftmost regardless of round numbering.
+- The worker clears only the columns each tab actually uses instead of the full
+  `A:ZZ` grid, which lowers the cleared cell count per sync while still wiping
+  shrunk rows.
+
 ## Tuning and operations
 
 Set `GOOGLE_SHEET_WORKER_CONCURRENCY` in the Next.js app to control the number
