@@ -3,6 +3,34 @@ import test from "node:test";
 import type { TournamentDetail } from "../lib/db/tournaments/types";
 import { buildTournamentWorkbook } from "../lib/sheets/projection";
 
+const multiNodeFormat = {
+  schemaVersion: 3,
+  id: "multi-node",
+  name: "Multi Node",
+  placementPoints: { "1": 8 },
+  startRequirement: { minimumEntrants: 8 },
+  nodeDefaults: {
+    mergeSeeding: "random",
+    lobbySeeding: "snake",
+    games: 1,
+    reseed: 0,
+    standings: { rankingMetric: "points", sortDirection: "desc", tieBreakers: [] },
+    reseedStandings: { rankingMetric: "tournament_points", sortDirection: "desc", tieBreakers: [] },
+  },
+  nodes: [
+    { id: "open", name: "Opening Stage", initialEntrantSlots: "all" },
+    { id: "alpha", name: "Alpha Stage" },
+    { id: "beta", name: "Beta Stage" },
+    { id: "final", name: "Final Stage", lobbySeeding: "random" },
+  ],
+  edges: [
+    { id: "open-alpha", sourceNodeId: "open", destinationNodeId: "alpha", priority: 1, condition: { type: "top_n", count: 4 } },
+    { id: "open-beta", sourceNodeId: "open", destinationNodeId: "beta", priority: 2, condition: { type: "top_n", count: 4 } },
+    { id: "alpha-final", sourceNodeId: "alpha", destinationNodeId: "final", priority: 1, condition: { type: "top_n", count: 2 } },
+    { id: "beta-final", sourceNodeId: "beta", destinationNodeId: "final", priority: 1, condition: { type: "top_n", count: 2 } },
+  ],
+};
+
 const detail = {
   id: "tournament-1",
   name: "Summer Open",
@@ -75,4 +103,32 @@ test("projects roster, future standard games, advancement, and checkmate into th
     "2026-07-22T12:00:00.000Z",
   );
   assert.equal(pendingWorkbook.tabs[1].rows[4]?.[5]?.value, "Advanced to Final");
+});
+
+test("orders score columns by depth from the final node, then by name", () => {
+  const tournament = {
+    ...detail,
+    formatConfig: multiNodeFormat,
+    rounds: [
+      { id: "round-open", roundNumber: 1, formatNodeId: "open", name: "Opening Stage", status: "completed", configuredGames: 1, isCheckmate: false },
+      { id: "round-alpha", roundNumber: 2, formatNodeId: "alpha", name: "Alpha Stage", status: "completed", configuredGames: 1, isCheckmate: false },
+      { id: "round-beta", roundNumber: 3, formatNodeId: "beta", name: "Beta Stage", status: "completed", configuredGames: 1, isCheckmate: false },
+      { id: "round-final", roundNumber: 4, formatNodeId: "final", name: "Final Stage", status: "active", configuredGames: 1, isCheckmate: false },
+    ],
+    scores: [],
+    gameScores: [],
+  } as unknown as TournamentDetail;
+
+  const workbook = buildTournamentWorkbook(tournament, "2026-07-22T12:00:00.000Z");
+  const header = workbook.tabs[1].rows[3]?.map((cell) => cell.value);
+  assert.deepEqual(header, [
+    "Rank",
+    "Player",
+    "Total",
+    "Final Stage G1",
+    "Alpha Stage G1",
+    "Beta Stage G1",
+    "Opening Stage G1",
+    "Status",
+  ]);
 });

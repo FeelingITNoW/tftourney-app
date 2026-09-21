@@ -74,6 +74,8 @@ test("creates a shared workbook with stable tabs and writes managed ranges", asy
   assert.deepEqual(permissionBody, { type: "anyone", role: "reader" });
 
   await adapter.writeWorkbook({ spreadsheetId: "sheet-1", sheetIds: created.sheetIds, workbook });
+  const clear = calls.find((call) => call.url.includes("values:batchClear"))?.body as { ranges?: string[] };
+  assert.deepEqual(clear.ranges, ["Players!A:A", "Scores!A:B", "Checkmate!A:A"]);
   const valuesUpdate = calls.find((call) => call.url.includes("values:batchUpdate"))?.body as { valueInputOption?: string; data?: Array<{ values: unknown[][] }> };
   assert.equal(valuesUpdate.valueInputOption, "RAW");
   assert.deepEqual(valuesUpdate.data?.[1]?.values?.[0], ["Rank", "Score"]);

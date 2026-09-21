@@ -95,6 +95,28 @@ function valueForGoogle(cell: SheetCell): string | number | boolean {
   return cell.value;
 }
 
+function columnLetter(index: number): string {
+  let remaining = index + 1;
+  let letters = "";
+  while (remaining > 0) {
+    const remainder = (remaining - 1) % 26;
+    letters = String.fromCharCode(65 + remainder) + letters;
+    remaining = Math.floor((remaining - 1) / 26);
+  }
+  return letters;
+}
+
+/**
+ * Clear only the columns each tab actually uses. Clearing the full grid
+ * (A:ZZ) on every sync wastes Google API quota and bandwidth, so scope the
+ * clear range to the widest row while still clearing full column height so
+ * shrunk rows (for example a smaller roster) are removed.
+ */
+function clearRangeForTab(tab: SheetTabModel): string {
+  const columnCount = Math.max(...tab.rows.map((row) => row.length), 1);
+  return `${tab.title}!A:${columnLetter(columnCount - 1)}`;
+}
+
 function cellData(cell: SheetCell) {
   if (typeof cell.value === "number") {
     return { userEnteredValue: { numberValue: cell.value } };
@@ -237,7 +259,7 @@ export class GoogleSheetsHttpAdapter implements GoogleSheetAdapter {
     }));
     await requestJson(this.fetchImpl, `${SHEETS_URL}/${encodeURIComponent(input.spreadsheetId)}/values:batchClear`, this.accessToken, {
       method: "POST",
-      body: JSON.stringify({ ranges: input.workbook.tabs.map((tab) => `${tab.title}!A:ZZ`) }),
+      body: JSON.stringify({ ranges: input.workbook.tabs.map((tab) => clearRangeForTab(tab)) }),
     });
     await requestJson(this.fetchImpl, `${SHEETS_URL}/${encodeURIComponent(input.spreadsheetId)}/values:batchUpdate`, this.accessToken, {
       method: "POST",

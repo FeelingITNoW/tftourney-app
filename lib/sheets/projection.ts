@@ -1,6 +1,7 @@
 import type { TournamentExportViewModel, TournamentRound } from "../db/tournaments/types";
 import { resolveCheckmateOutcome } from "../tournament/checkmate/api";
 import type { CheckmateGameResult, CheckmateWinCondition } from "../tournament/checkmate/types";
+import { getFormatGraph } from "../tournament/formats/api";
 import { sortScoresHighestFirst } from "../tournament/scoring/api";
 import type { SheetCell, SheetTabModel, TournamentWorkbookModel } from "./types";
 
@@ -34,6 +35,66 @@ function roundName(detail: TournamentExportViewModel, round: TournamentRound): s
 
 function hasCheckmate(round: TournamentRound): boolean {
   return round.isCheckmate === true;
+}
+
+/**
+ * Maps each format node to its distance from the final node (a node with no
+ * outgoing edges). The final node is depth 0, its direct predecessors depth 1,
+ * and so on. Nodes that are unreachable from a final node (or absent from the
+ * format graph) are omitted so callers can fall back to a stable ordering.
+ */
+function depthFromFinalNode(detail: TournamentExportViewModel): Map<string, number> {
+  const graph = getFormatGraph(detail.formatConfig);
+  const outgoing = new Set<string>();
+  const incoming = new Map<string, string[]>();
+
+  for (const edge of graph.edges) {
+    outgoing.add(edge.sourceNodeId);
+    incoming.set(edge.destinationNodeId, [...(incoming.get(edge.destinationNodeId) ?? []), edge.sourceNodeId]);
+  }
+
+  const depths = new Map<string, number>();
+  const queue: string[] = [];
+  for (const node of graph.nodes) {
+    if (!outgoing.has(node.id)) {
+      depths.set(node.id, 0);
+      queue.push(node.id);
+    }
+  }
+
+  while (queue.length) {
+    const nodeId = queue.shift() as string;
+    const nextDepth = (depths.get(nodeId) ?? 0) + 1;
+    for (const predecessor of incoming.get(nodeId) ?? []) {
+      const existing = depths.get(predecessor);
+      if (existing === undefined || nextDepth < existing) {
+        depths.set(predecessor, nextDepth);
+        queue.push(predecessor);
+      }
+    }
+  }
+
+  return depths;
+}
+
+function compareDepth(first: number, second: number): number {
+  if (first === second) return 0;
+  return first < second ? -1 : 1;
+}
+
+function orderedScoreRounds(detail: TournamentExportViewModel): TournamentRound[] {
+  const depths = depthFromFinalNode(detail);
+  const depthOf = (round: TournamentRound): number =>
+    (round.formatNodeId ? depths.get(round.formatNodeId) : undefined) ?? Number.POSITIVE_INFINITY;
+
+  return [...detail.rounds]
+    .filter((round) => !hasCheckmate(round))
+    .sort(
+      (first, second) =>
+        compareDepth(depthOf(first), depthOf(second)) ||
+        roundName(detail, first).localeCompare(roundName(detail, second)) ||
+        first.id.localeCompare(second.id),
+    );
 }
 
 function standardRows(detail: TournamentExportViewModel): StandardScore[] {
@@ -140,7 +201,7 @@ function playersTab(detail: TournamentExportViewModel, generatedAt: string): She
 }
 
 function scoresTab(detail: TournamentExportViewModel, generatedAt: string): SheetTabModel {
-  const rounds = orderedRounds(detail).filter((round) => !hasCheckmate(round));
+  const rounds = orderedScoreRounds(detail);
   const columns = rounds.flatMap((round) =>
     Array.from({ length: configuredGameCount(round, detail) }, (_, index) => ({
       round,
