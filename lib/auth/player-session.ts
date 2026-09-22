@@ -22,9 +22,56 @@ export type PlayerSession = {
   discordUserId: string | null;
 };
 
+// Label for the derived-key HMAC below. Versioned so a future change to the
+// derivation (a different label, or dropping this fallback) can be
+// distinguished from today's keys without ambiguity.
+const DERIVED_SECRET_LABEL = "tftourney:player-session:v1";
+
+let warnedMissingPlayerSessionSecret = false;
+
+// PLAYER_SESSION_SECRET is the preferred signing key, but requiring it as a
+// hard prerequisite means every new environment (a fresh Railway service, a
+// contributor's local setup) silently breaks player sign-in until someone
+// remembers to provision one more secret. Fall back to deriving a key from
+// SUPABASE_SERVICE_ROLE_KEY, which the app cannot run without anyway, so
+// sign-in works out of the box anywhere the app itself is configured.
+//
+// This must derive ONLY from SUPABASE_SERVICE_ROLE_KEY, never from
+// SUPABASE_ANON_KEY or NEXT_PUBLIC_SUPABASE_ANON_KEY (unlike the `??` chains
+// in lib/db/supabase-rest/api.ts and lib/auth/session.ts) -- the anon key is
+// public, and a signing key derived from a public value is forgeable by
+// anyone who can read it out of the client bundle.
+//
+// Trade-off: rotating SUPABASE_SERVICE_ROLE_KEY invalidates outstanding
+// player session cookies when no explicit PLAYER_SESSION_SECRET is set.
+// That's acceptable -- players just sign in again -- but it's why an
+// explicit secret remains preferred and recommended in the docs.
+function derivedSecret(): string | null {
+  const serviceRoleKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
+  if (!serviceRoleKey) return null;
+  if (!warnedMissingPlayerSessionSecret) {
+    warnedMissingPlayerSessionSecret = true;
+    console.warn(
+      "[player-session] PLAYER_SESSION_SECRET is not set; deriving a player session signing key from " +
+        "SUPABASE_SERVICE_ROLE_KEY instead. Set PLAYER_SESSION_SECRET explicitly (openssl rand -base64 32) " +
+        "so player sessions survive a service-role-key rotation.",
+    );
+  }
+  return createHmac("sha256", serviceRoleKey).update(DERIVED_SECRET_LABEL).digest("base64url");
+}
+
 function resolveSecret(options: PlayerSessionOptions = {}): string | null {
   const secret = options.secret ?? process.env.PLAYER_SESSION_SECRET;
-  return secret && secret.length > 0 ? secret : null;
+  if (secret && secret.length > 0) return secret;
+  return derivedSecret();
+}
+
+// Whether player session tokens can currently be signed/verified at all --
+// either via an explicit PLAYER_SESSION_SECRET or the SUPABASE_SERVICE_ROLE_KEY
+// fallback above. Route handlers use this to fail fast with a clear error
+// before attempting an OAuth round trip.
+export function playerSessionSecretAvailable(): boolean {
+  return resolveSecret() !== null;
 }
 
 function sign(payloadPart: string, secret: string): string {

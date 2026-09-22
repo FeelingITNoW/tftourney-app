@@ -9,7 +9,10 @@ import {
   PLAYER_DISCORD_STATE_COOKIE,
   safePlayerReturnPath,
 } from "../../../../../../lib/auth/player-discord-oauth";
-import { PLAYER_SESSION_COOKIE_NAME } from "../../../../../../lib/auth/player-session";
+import {
+  PLAYER_SESSION_COOKIE_NAME,
+  playerSessionSecretAvailable,
+} from "../../../../../../lib/auth/player-session";
 
 export const runtime = "nodejs";
 
@@ -38,7 +41,7 @@ async function handle(request: Request): Promise<Response> {
   const clientId = process.env.DISCORD_CLIENT_ID;
   const clientSecret = process.env.DISCORD_CLIENT_SECRET;
   if (!clientId || !clientSecret) return playerFail(request, "discord_oauth_not_configured");
-  if (!process.env.PLAYER_SESSION_SECRET) return playerFail(request, "player_session_not_configured");
+  if (!playerSessionSecretAvailable()) return playerFail(request, "player_session_not_configured");
   const appUrl = getAppOrigin(request);
   const tokenResponse = await fetch("https://discord.com/api/v10/oauth2/token", {
     method: "POST",

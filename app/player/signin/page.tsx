@@ -13,7 +13,8 @@ function first(value: string | string[] | undefined): string {
 const PLAYER_AUTH_ERRORS: Record<string, string> = {
   discord_state_invalid: "Your Discord sign-in request expired. Please try again.",
   discord_oauth_not_configured: "Discord sign-in is not configured yet.",
-  player_session_not_configured: "Player sign-in is not configured yet.",
+  player_session_not_configured:
+    "Player sign-in is not configured: set PLAYER_SESSION_SECRET or SUPABASE_SERVICE_ROLE_KEY.",
   discord_oauth_failed: "Discord sign-in could not be completed. Please try again.",
   discord_identity_failed: "Your Discord account details could not be loaded. Please try again.",
   player_account_failed: "Your player account could not be created. Please try again.",

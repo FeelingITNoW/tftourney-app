@@ -57,7 +57,10 @@ PLAYER_SESSION_SECRET=
 ```
 
 `PLAYER_SESSION_SECRET` signs the stateless player session cookie set by player
-Discord sign-in; generate one with `openssl rand -base64 32`.
+Discord sign-in; generate one with `openssl rand -base64 32`. It's optional --
+when unset, the signing key is derived from `SUPABASE_SERVICE_ROLE_KEY`
+instead, so player sign-in works without it -- but set it explicitly so
+player sessions survive a service-role-key rotation.
 
 Run the app and worker in separate supervised processes:
 
@@ -119,8 +122,9 @@ from the organizer manager-invite flow's `/api/auth/discord/callback`. Register
 both in the Discord Developer Portal's redirect list (see
 [Discord application setup](#discord-application-setup)) — Discord returns
 `invalid oauth2 redirect_uri` for any unregistered redirect URI. Player sign-in
-also requires `PLAYER_SESSION_SECRET` to be set (see [Environment](#environment));
-without it the callback fails with `player_session_not_configured`.
+needs a session-signing key, either `PLAYER_SESSION_SECRET` or
+`SUPABASE_SERVICE_ROLE_KEY` (see [Environment](#environment)); with neither
+set, the callback fails with `player_session_not_configured`.
 
 ## Check-in
 
