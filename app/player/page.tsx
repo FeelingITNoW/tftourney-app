@@ -1,5 +1,5 @@
 import Link from "next/link";
-import { signUpForTournamentAction } from "@/app/player/actions";
+import { checkInForTournamentAction, signUpForTournamentAction } from "@/app/player/actions";
 import { PendingButton } from "@/components/ui/pending-button";
 import { requirePlayer } from "@/lib/auth/player-session";
 import { getPlayerAccountById } from "@/lib/db/players/api";
@@ -11,6 +11,7 @@ export const dynamic = "force-dynamic";
 type PlayerSearchParams = Promise<{
   playerError?: string | string[];
   playerSignedUp?: string | string[];
+  playerCheckedIn?: string | string[];
   playerAuth?: string | string[];
 }>;
 
@@ -32,14 +33,29 @@ type TournamentRow = {
   id: string;
   name: string;
   status: string;
+  checkInStatus: string;
   registeredPlayerCount: number;
   maxPlayers: number;
   isRegistered: boolean;
   registrationStatus: string | null;
+  checkedIn: boolean;
 };
 
 function signUpControl(tournament: TournamentRow, hasRiotId: boolean) {
-  if (tournament.isRegistered) return <span className="text-xs font-medium text-emerald-700">Signed up</span>;
+  if (tournament.isRegistered) {
+    if (tournament.checkInStatus === "open" && !tournament.checkedIn) {
+      return (
+        <form action={checkInForTournamentAction}>
+          <input name="tournamentId" type="hidden" value={tournament.id} />
+          <PendingButton className="rounded-md bg-emerald-600 px-3 py-2 text-xs font-semibold text-white hover:bg-emerald-700" pendingLabel="Checking in…">
+            Check in
+          </PendingButton>
+        </form>
+      );
+    }
+    if (tournament.checkedIn) return <span className="text-xs font-medium text-emerald-700">Checked in</span>;
+    return <span className="text-xs font-medium text-emerald-700">Signed up</span>;
+  }
   if (tournament.status !== "accepting_players") return <span className="text-xs text-zinc-500">Closed</span>;
   return (
     <form action={signUpForTournamentAction} className="flex flex-col items-end gap-2">
@@ -105,12 +121,15 @@ export default async function PlayerPage({ searchParams }: { searchParams: Playe
   ]);
   const error = first(query.playerError);
   const signedUp = first(query.playerSignedUp);
+  const checkedIn = first(query.playerCheckedIn);
   const tournaments = dashboard?.tournaments ?? [];
   const myTournaments = tournaments.filter((tournament) => tournament.isRegistered);
   const availableTournaments = tournaments.filter((tournament) => !tournament.isRegistered);
   const hasRiotId = Boolean(account?.riotGameTag);
+  const hasDiscord = Boolean(account?.discordUserId);
   const avatarUrl = discordAvatarUrl(account?.discordUserId, account?.discordAvatar);
   const discordName = discordDisplayName(account?.discordUsername);
+  const displayName = account?.username ?? (hasDiscord ? discordName : null) ?? account?.riotGameTag ?? "Player";
 
   return (
     <main className="min-h-screen bg-stone-50 text-zinc-950">
@@ -123,22 +142,20 @@ export default async function PlayerPage({ searchParams }: { searchParams: Playe
             <p className="mt-1 text-sm text-zinc-500">Player home</p>
           </div>
           <div className="flex items-center gap-3">
-            <div className="flex items-center gap-2 rounded-full border border-zinc-200 bg-white py-1 pl-1 pr-3 shadow-sm" title="Your Discord account is linked and you are signed in.">
+            <Link className="flex items-center gap-2 rounded-full border border-zinc-200 bg-white py-1 pl-1 pr-3 shadow-sm hover:border-zinc-300" href="/player/account" title="Manage your account">
               {avatarUrl ? (
                 // eslint-disable-next-line @next/next/no-img-element -- external Discord CDN avatar, dimensions are fixed
-                <img alt={`${discordName} Discord avatar`} className="h-9 w-9 rounded-full object-cover" height={36} src={avatarUrl} width={36} />
+                <img alt={`${displayName} avatar`} className="h-9 w-9 rounded-full object-cover" height={36} src={avatarUrl} width={36} />
               ) : (
                 <span aria-hidden="true" className="flex h-9 w-9 items-center justify-center rounded-full bg-indigo-600 text-sm font-semibold text-white">
-                  {discordName.slice(0, 1).toUpperCase()}
+                  {displayName.slice(0, 1).toUpperCase()}
                 </span>
               )}
               <span className="flex flex-col leading-tight">
-                <span className="text-xs font-semibold text-zinc-900">{discordName}</span>
-                <span className="flex items-center gap-1 text-[11px] font-medium text-emerald-700">
-                  <span aria-hidden="true">✓</span> Discord linked
-                </span>
+                <span className="text-xs font-semibold text-zinc-900">{displayName}</span>
+                <span className="text-[11px] font-medium text-zinc-500">Manage account</span>
               </span>
-            </div>
+            </Link>
             <a className="text-sm font-semibold text-zinc-500 hover:text-zinc-900" href={`/api/auth/signout?returnTo=${encodeURIComponent("/")}`}>Sign out</a>
           </div>
         </header>
@@ -147,7 +164,7 @@ export default async function PlayerPage({ searchParams }: { searchParams: Playe
           <p className="text-sm font-semibold uppercase tracking-[0.12em] text-amber-700">Available tournaments</p>
           <h1 className="mt-3 text-4xl font-semibold tracking-tight">Play TFT tournaments</h1>
           <p className="mt-3 max-w-2xl text-base leading-7 text-zinc-600">
-            Sign up with your linked Riot account and the bot will place you into the right lobby thread and keep you posted.
+            Sign up with your linked Riot account. Linking Discord lets the bot place you into your lobby thread automatically.
           </p>
           <dl className="mt-5 flex flex-wrap gap-3 text-sm">
             <div className="border-l-4 border-indigo-600 bg-white px-4 py-3 shadow-sm">
@@ -159,15 +176,21 @@ export default async function PlayerPage({ searchParams }: { searchParams: Playe
               <dd className="mt-1 font-semibold text-zinc-950">{myTournaments.length}</dd>
             </div>
           </dl>
+          {!hasDiscord ? (
+            <p className="mt-5 rounded-md border border-amber-200 bg-amber-50 p-4 text-sm font-medium text-amber-900" role="status">
+              Link Discord from <Link className="underline" href="/player/account">your account page</Link> so the bot can place you in a lobby thread and you can submit screenshots.
+            </p>
+          ) : null}
           {error ? <p className="mt-5 rounded-md border border-red-200 bg-red-50 p-4 text-sm font-medium text-red-800" role="alert">{error}</p> : null}
-          {signedUp ? <p className="mt-5 rounded-md border border-emerald-200 bg-emerald-50 p-4 text-sm font-medium text-emerald-900" role="status">You are signed up. The bot will contact you on Discord about your lobby.</p> : null}
+          {signedUp ? <p className="mt-5 rounded-md border border-emerald-200 bg-emerald-50 p-4 text-sm font-medium text-emerald-900" role="status">You are signed up.{hasDiscord ? " The bot will contact you on Discord about your lobby." : ""}</p> : null}
+          {checkedIn ? <p className="mt-5 rounded-md border border-emerald-200 bg-emerald-50 p-4 text-sm font-medium text-emerald-900" role="status">You are checked in.</p> : null}
         </section>
 
         <section aria-label="Your tournaments" className="border-t border-zinc-200 py-8">
           <div className="flex items-end justify-between gap-4">
             <div>
               <h2 className="text-2xl font-semibold text-zinc-950">Your tournaments</h2>
-              <p className="mt-1 text-sm text-zinc-500">Tournaments you have signed up for. The bot contacts you here on Discord.</p>
+              <p className="mt-1 text-sm text-zinc-500">Tournaments you have signed up for.</p>
             </div>
           </div>
           <div className="mt-5">
@@ -176,7 +199,7 @@ export default async function PlayerPage({ searchParams }: { searchParams: Playe
                 You are not signed up for any tournaments yet. Join one below.
               </div>
             ) : (
-              <TournamentTable tournaments={myTournaments} hasRiotId={hasRiotId} showSignUp={false} />
+              <TournamentTable tournaments={myTournaments} hasRiotId={hasRiotId} showSignUp />
             )}
           </div>
         </section>

@@ -3,8 +3,10 @@ import test from "node:test";
 import {
   PLAYER_SESSION_COOKIE_NAME,
   createPlayerSessionToken,
+  createSignedPlayerToken,
   playerSessionFromRequest,
   verifyPlayerSessionToken,
+  verifySignedPlayerToken,
 } from "../lib/auth/player-session";
 
 const SECRET = "player-session-secret";
@@ -171,4 +173,35 @@ test("playerSessionFromRequest returns null without a player cookie", () => {
     headers: { cookie: "other=value" },
   });
   assert.equal(playerSessionFromRequest(request, { secret: SECRET }), null);
+});
+
+test("createPlayerSessionToken defaults discordUserId to null when omitted", () => {
+  const token = createPlayerSessionToken({ playerAccountId: "42" }, { secret: SECRET });
+  const payload = verifyPlayerSessionToken(token, { secret: SECRET });
+  assert.equal(payload?.discordUserId, null);
+});
+
+test("createSignedPlayerToken/verifySignedPlayerToken round-trip an arbitrary payload", () => {
+  const token = createSignedPlayerToken(
+    { discordUserId: "discord-1", discordUsername: "FuuTime" },
+    600,
+    { secret: SECRET },
+  );
+  const payload = verifySignedPlayerToken(token, { secret: SECRET });
+  assert.equal(payload?.discordUserId, "discord-1");
+  assert.equal(payload?.discordUsername, "FuuTime");
+});
+
+test("verifySignedPlayerToken rejects an expired token", () => {
+  const token = createSignedPlayerToken(
+    { discordUserId: "discord-1" },
+    10,
+    { secret: SECRET, now: nowSeconds() - 100 },
+  );
+  assert.equal(verifySignedPlayerToken(token, { secret: SECRET }), null);
+});
+
+test("verifySignedPlayerToken rejects a token signed with a different secret", () => {
+  const token = createSignedPlayerToken({ discordUserId: "discord-1" }, 600, { secret: SECRET });
+  assert.equal(verifySignedPlayerToken(token, { secret: "other-secret" }), null);
 });

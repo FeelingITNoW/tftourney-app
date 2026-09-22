@@ -1,7 +1,8 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { GET as callback } from "../app/api/auth/discord/player/callback/route";
-import { PLAYER_SESSION_COOKIE_NAME } from "../lib/auth/player-session";
+import { createPlayerSessionToken, PLAYER_SESSION_COOKIE_NAME } from "../lib/auth/player-session";
+import { PLAYER_PENDING_DISCORD_COOKIE } from "../lib/auth/player-discord-oauth";
 
 type Saved = Record<string, string | undefined>;
 
@@ -39,52 +40,152 @@ function setEnv(): void {
   process.env.TFTOURNEY_APP_URL = "https://app.example";
 }
 
-test("player Discord callback exchanges the code, claims the account, and sets the player cookie", async () => {
-  const saved = snapshotEnv(ENV_KEYS);
-  const originalFetch = globalThis.fetch;
-  setEnv();
-  const calls: Array<{ url: string; method: string; body: unknown }> = [];
-  globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
+const EXISTING_PLAYER_ROW = {
+  id: 42,
+  auth_user_id: null,
+  username: null,
+  discord_user_id: "discord-1",
+  discord_username: "FuuTime",
+  discord_avatar: "abcd",
+  riot_puuid: null,
+  riot_game_tag: null,
+  email: null,
+  created_at: "2026-09-21T00:00:00Z",
+  updated_at: "2026-09-21T00:00:00Z",
+  last_signed_in_at: null,
+};
+
+function stubDiscordIdentity(existingRow: unknown): typeof fetch {
+  return (async (input: RequestInfo | URL, init?: RequestInit) => {
     const url = String(input);
-    calls.push({ url, method: init?.method ?? "GET", body: init?.body ?? null });
     if (url.includes("/oauth2/token")) {
       return new Response(JSON.stringify({ access_token: "discord-access" }), { status: 200 });
     }
     if (url.includes("/users/@me")) {
       return new Response(JSON.stringify({ id: "discord-1", username: "FuuTime", avatar: "abcd" }), { status: 200 });
     }
-    if (url.includes("/rpc/claim_or_create_player_by_discord")) {
-      return new Response(
-        JSON.stringify([{ id: 42, discord_user_id: "discord-1", discord_username: "FuuTime", discord_avatar: "abcd", riot_puuid: null, riot_game_tag: null, auth_user_id: null, email: null, created_at: "2026-09-21T00:00:00Z", updated_at: "2026-09-21T00:00:00Z" }]),
-        { status: 200 },
-      );
+    if (url.includes("/rest/v1/player_accounts") && (init?.method ?? "GET") === "GET") {
+      return new Response(JSON.stringify(existingRow ? [existingRow] : []), { status: 200 });
+    }
+    if (url.includes("/rpc/link_discord_account_to_player")) {
+      return new Response(JSON.stringify([{ ...EXISTING_PLAYER_ROW, id: 7 }]), { status: 200 });
     }
     throw new Error(`Unexpected callback request: ${url}`);
   }) as typeof fetch;
+}
 
+test("player Discord callback signs in when the Discord id already has a linked account", async () => {
+  const saved = snapshotEnv(ENV_KEYS);
+  const originalFetch = globalThis.fetch;
+  setEnv();
+  globalThis.fetch = stubDiscordIdentity(EXISTING_PLAYER_ROW);
   try {
     const response = await callback(
       new Request("https://app.example/api/auth/discord/player/callback?code=oauth-code&state=state-1", {
         headers: {
-          cookie:
-            "tftourney-player-discord-state=state-1; tftourney-player-discord-return-to=%2Fplayer",
+          cookie: "tftourney-player-discord-state=state-1; tftourney-player-discord-return-to=%2Fplayer",
         },
       }),
     );
     assert.equal(response.status, 307);
     assert.equal(response.headers.get("location"), "/player?playerAuth=success");
     assert.match(response.headers.get("set-cookie") ?? "", new RegExp(`${PLAYER_SESSION_COOKIE_NAME}=`));
-    const claim = calls.find((call) => call.url.includes("/rpc/claim_or_create_player_by_discord"));
-    assert.ok(claim);
-    assert.deepEqual(JSON.parse(String(claim!.body)), {
+  } finally {
+    globalThis.fetch = originalFetch;
+    restoreEnv(saved);
+  }
+});
+
+test("player Discord callback sends an unknown Discord identity to signup instead of auto-creating an account", async () => {
+  const saved = snapshotEnv(ENV_KEYS);
+  const originalFetch = globalThis.fetch;
+  setEnv();
+  globalThis.fetch = stubDiscordIdentity(null);
+  try {
+    const response = await callback(
+      new Request("https://app.example/api/auth/discord/player/callback?code=oauth-code&state=state-1", {
+        headers: {
+          cookie: "tftourney-player-discord-state=state-1; tftourney-player-discord-return-to=%2Fplayer",
+        },
+      }),
+    );
+    assert.equal(response.status, 307);
+    assert.equal(response.headers.get("location"), "/player/signup?playerAuth=discord");
+    const setCookie = response.headers.get("set-cookie") ?? "";
+    assert.match(setCookie, new RegExp(`${PLAYER_PENDING_DISCORD_COOKIE}=`));
+    assert.doesNotMatch(setCookie, new RegExp(`${PLAYER_SESSION_COOKIE_NAME}=`));
+  } finally {
+    globalThis.fetch = originalFetch;
+    restoreEnv(saved);
+  }
+});
+
+test("player Discord callback in link mode attaches the identity to the signed-in account", async () => {
+  const saved = snapshotEnv(ENV_KEYS);
+  const originalFetch = globalThis.fetch;
+  setEnv();
+  const calls: Array<{ url: string; body: unknown }> = [];
+  globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
+    const url = String(input);
+    calls.push({ url, body: init?.body ?? null });
+    if (url.includes("/oauth2/token")) {
+      return new Response(JSON.stringify({ access_token: "discord-access" }), { status: 200 });
+    }
+    if (url.includes("/users/@me")) {
+      return new Response(JSON.stringify({ id: "discord-1", username: "FuuTime", avatar: "abcd" }), { status: 200 });
+    }
+    if (url.includes("/rpc/link_discord_account_to_player")) {
+      return new Response(JSON.stringify([{ ...EXISTING_PLAYER_ROW, id: 7, username: "someone" }]), { status: 200 });
+    }
+    throw new Error(`Unexpected callback request: ${url}`);
+  }) as typeof fetch;
+
+  const activeSessionToken = createPlayerSessionToken({ playerAccountId: "7" });
+
+  try {
+    const response = await callback(
+      new Request("https://app.example/api/auth/discord/player/callback?code=oauth-code&state=state-1", {
+        headers: {
+          cookie: `tftourney-player-discord-state=state-1; tftourney-player-discord-return-to=%2Fplayer%2Faccount; tftourney-player-discord-mode=link; ${PLAYER_SESSION_COOKIE_NAME}=${activeSessionToken}`,
+        },
+      }),
+    );
+    assert.equal(response.status, 307);
+    assert.equal(response.headers.get("location"), "/player/account?accountUpdated=discord");
+    const link = calls.find((call) => call.url.includes("/rpc/link_discord_account_to_player"));
+    assert.ok(link);
+    assert.deepEqual(JSON.parse(String(link!.body)), {
+      p_player_account_id: "7",
       p_discord_user_id: "discord-1",
       p_discord_username: "FuuTime",
       p_discord_avatar: "abcd",
     });
-    const tokenExchange = calls.find((call) => call.url.includes("/oauth2/token"));
-    assert.ok(tokenExchange);
-    const body = new URLSearchParams(String(tokenExchange!.body));
-    assert.equal(body.get("redirect_uri"), "https://app.example/api/auth/discord/player/callback");
+  } finally {
+    globalThis.fetch = originalFetch;
+    restoreEnv(saved);
+  }
+});
+
+test("player Discord callback in link mode fails cleanly with no active player session", async () => {
+  const saved = snapshotEnv(ENV_KEYS);
+  const originalFetch = globalThis.fetch;
+  setEnv();
+  globalThis.fetch = (async () => {
+    throw new Error("fetch should not be called");
+  }) as typeof fetch;
+  try {
+    const response = await callback(
+      new Request("https://app.example/api/auth/discord/player/callback?code=oauth-code&state=state-1", {
+        headers: {
+          cookie: "tftourney-player-discord-state=state-1; tftourney-player-discord-return-to=%2Fplayer%2Faccount; tftourney-player-discord-mode=link",
+        },
+      }),
+    );
+    assert.equal(response.status, 307);
+    assert.equal(
+      response.headers.get("location"),
+      "/player/signin?playerAuthError=discord_link_requires_session&returnTo=%2Fplayer%2Faccount",
+    );
   } finally {
     globalThis.fetch = originalFetch;
     restoreEnv(saved);
@@ -96,28 +197,12 @@ test("player Discord callback succeeds without PLAYER_SESSION_SECRET by deriving
   const originalFetch = globalThis.fetch;
   setEnv();
   delete process.env.PLAYER_SESSION_SECRET;
-  globalThis.fetch = (async (input: RequestInfo | URL) => {
-    const url = String(input);
-    if (url.includes("/oauth2/token")) {
-      return new Response(JSON.stringify({ access_token: "discord-access" }), { status: 200 });
-    }
-    if (url.includes("/users/@me")) {
-      return new Response(JSON.stringify({ id: "discord-1", username: "FuuTime", avatar: "abcd" }), { status: 200 });
-    }
-    if (url.includes("/rpc/claim_or_create_player_by_discord")) {
-      return new Response(
-        JSON.stringify([{ id: 42, discord_user_id: "discord-1", discord_username: "FuuTime", discord_avatar: "abcd", riot_puuid: null, riot_game_tag: null, auth_user_id: null, email: null, created_at: "2026-09-21T00:00:00Z", updated_at: "2026-09-21T00:00:00Z" }]),
-        { status: 200 },
-      );
-    }
-    throw new Error(`Unexpected callback request: ${url}`);
-  }) as typeof fetch;
+  globalThis.fetch = stubDiscordIdentity(EXISTING_PLAYER_ROW);
   try {
     const response = await callback(
       new Request("https://app.example/api/auth/discord/player/callback?code=oauth-code&state=state-1", {
         headers: {
-          cookie:
-            "tftourney-player-discord-state=state-1; tftourney-player-discord-return-to=%2Fplayer",
+          cookie: "tftourney-player-discord-state=state-1; tftourney-player-discord-return-to=%2Fplayer",
         },
       }),
     );
@@ -143,8 +228,7 @@ test("player Discord callback fails with player_session_not_configured when neit
     const response = await callback(
       new Request("https://app.example/api/auth/discord/player/callback?code=oauth-code&state=state-1", {
         headers: {
-          cookie:
-            "tftourney-player-discord-state=state-1; tftourney-player-discord-return-to=%2Fplayer",
+          cookie: "tftourney-player-discord-state=state-1; tftourney-player-discord-return-to=%2Fplayer",
         },
       }),
     );
@@ -170,8 +254,7 @@ test("player Discord callback rejects a mismatched state", async () => {
     const response = await callback(
       new Request("https://app.example/api/auth/discord/player/callback?code=oauth-code&state=wrong", {
         headers: {
-          cookie:
-            "tftourney-player-discord-state=state-1; tftourney-player-discord-return-to=%2Fplayer",
+          cookie: "tftourney-player-discord-state=state-1; tftourney-player-discord-return-to=%2Fplayer",
         },
       }),
     );
@@ -195,8 +278,7 @@ test("player Discord callback fails cleanly when OAuth is not configured", async
     const response = await callback(
       new Request("https://app.example/api/auth/discord/player/callback?code=oauth-code&state=state-1", {
         headers: {
-          cookie:
-            "tftourney-player-discord-state=state-1; tftourney-player-discord-return-to=%2Fplayer",
+          cookie: "tftourney-player-discord-state=state-1; tftourney-player-discord-return-to=%2Fplayer",
         },
       }),
     );

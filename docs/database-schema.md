@@ -11,12 +11,17 @@ CREATE TABLE public.users (
   CONSTRAINT users_pkey PRIMARY KEY (id)
 );
 
--- Durable player identity, separate from organizer `users`. Links a Discord
--- identity (the bot's contact + lobby-thread membership key) and a verified
--- Riot identity so sign-up is seamless on the web and in the bot.
+-- Durable player identity, separate from organizer `users`. A player creates
+-- their own account with a username/password (create_player_account /
+-- set_player_credentials); Discord and Riot are optional links on top of that
+-- (link_discord_account_to_player / link_riot_account_to_player). A
+-- bot-created account (claim_or_create_player_by_discord) has a null
+-- username/password_hash until the player claims it on the web.
 CREATE TABLE public.player_accounts (
   id bigint GENERATED ALWAYS AS IDENTITY NOT NULL,
   auth_user_id uuid UNIQUE,
+  username text,
+  password_hash text,
   discord_user_id text UNIQUE,
   discord_username text,
   discord_avatar text,
@@ -25,6 +30,7 @@ CREATE TABLE public.player_accounts (
   email text,
   created_at timestamptz NOT NULL DEFAULT now(),
   updated_at timestamptz NOT NULL DEFAULT now(),
+  last_signed_in_at timestamptz,
   CONSTRAINT player_accounts_pkey PRIMARY KEY (id)
 );
 
@@ -157,6 +163,7 @@ CREATE TABLE public.participant_round_scores (
 -- tournament_registrations(tournament_id, riot_puuid) where riot_puuid is not null
 -- tournament_registrations(tournament_id, player_account_id) where player_account_id is not null
 -- player_accounts(auth_user_id), player_accounts(discord_user_id) (unique, partial)
+-- player_accounts(lower(username)), player_accounts(lower(email)) (unique, partial)
 -- tournament_participants(tournament_id, registration_id)
 -- tournament_participants(tournament_id, seed_number)
 -- rounds(tournament_id, format_round_id)

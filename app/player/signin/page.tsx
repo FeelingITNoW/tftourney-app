@@ -1,5 +1,7 @@
 import Link from "next/link";
 import { redirect } from "next/navigation";
+import { signInPlayerAccountAction } from "@/app/player/actions";
+import { PendingButton } from "@/components/ui/pending-button";
 import { getPlayerSession } from "@/lib/auth/player-session";
 
 export const dynamic = "force-dynamic";
@@ -11,13 +13,15 @@ function first(value: string | string[] | undefined): string {
 }
 
 const PLAYER_AUTH_ERRORS: Record<string, string> = {
+  invalid_credentials: "Incorrect username or password.",
   discord_state_invalid: "Your Discord sign-in request expired. Please try again.",
   discord_oauth_not_configured: "Discord sign-in is not configured yet.",
   player_session_not_configured:
     "Player sign-in is not configured: set PLAYER_SESSION_SECRET or SUPABASE_SERVICE_ROLE_KEY.",
   discord_oauth_failed: "Discord sign-in could not be completed. Please try again.",
   discord_identity_failed: "Your Discord account details could not be loaded. Please try again.",
-  player_account_failed: "Your player account could not be created. Please try again.",
+  player_account_failed: "Your player account could not be loaded. Please try again.",
+  discord_link_requires_session: "Your session expired. Sign in, then link Discord again from your account page.",
 };
 
 function safeReturnTo(value: string): string {
@@ -40,11 +44,36 @@ export default async function PlayerSignInPage({ searchParams }: { searchParams:
         <section className="mt-10 rounded-xl border border-zinc-200 bg-white p-7 shadow-sm">
           <p className="text-sm font-semibold uppercase tracking-[0.12em] text-amber-700">Player access</p>
           <h1 className="mt-3 text-3xl font-semibold tracking-tight">Sign in to play.</h1>
-          <p className="mt-4 text-sm leading-6 text-zinc-600">Use your Discord account to see available tournaments, sign up, and let the bot place you in the right lobby.</p>
-          {error ? <p className="mt-5 rounded-md border border-red-200 bg-red-50 p-3 text-sm font-medium text-red-800" role="alert">{PLAYER_AUTH_ERRORS[error] ?? "Discord sign-in failed. Please try again."}</p> : null}
-          <a className="mt-6 flex h-11 items-center justify-center rounded-md bg-indigo-600 px-4 text-sm font-semibold text-white transition hover:bg-indigo-700 focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:ring-offset-2" href={`/api/auth/discord/player?returnTo=${encodeURIComponent(returnTo)}`}>
-            Sign in with Discord
+          <p className="mt-4 text-sm leading-6 text-zinc-600">Sign in with your username and password to see available tournaments, sign up, and manage your account.</p>
+          {error ? <p className="mt-5 rounded-md border border-red-200 bg-red-50 p-3 text-sm font-medium text-red-800" role="alert">{PLAYER_AUTH_ERRORS[error] ?? "Sign-in failed. Please try again."}</p> : null}
+          <form action={signInPlayerAccountAction} className="mt-6 flex flex-col gap-4">
+            <input name="returnTo" type="hidden" value={returnTo} />
+            <label className="block text-sm font-medium text-zinc-700" htmlFor="username">
+              Username
+              <input autoComplete="username" className="mt-1 h-11 w-full rounded-md border border-zinc-300 px-3 text-sm" id="username" name="username" required type="text" />
+            </label>
+            <label className="block text-sm font-medium text-zinc-700" htmlFor="password">
+              Password
+              <input autoComplete="current-password" className="mt-1 h-11 w-full rounded-md border border-zinc-300 px-3 text-sm" id="password" name="password" required type="password" />
+            </label>
+            <PendingButton className="mt-2 flex h-11 items-center justify-center rounded-md bg-indigo-600 px-4 text-sm font-semibold text-white transition hover:bg-indigo-700" pendingLabel="Signing in…">
+              Sign in
+            </PendingButton>
+          </form>
+          <div className="mt-6 flex items-center gap-3 text-xs font-medium uppercase tracking-wide text-zinc-400">
+            <span className="h-px flex-1 bg-zinc-200" />
+            or
+            <span className="h-px flex-1 bg-zinc-200" />
+          </div>
+          <a className="mt-6 flex h-11 items-center justify-center rounded-md border border-zinc-300 bg-white px-4 text-sm font-semibold text-zinc-800 transition hover:bg-zinc-50" href={`/api/auth/discord/player?returnTo=${encodeURIComponent(returnTo)}`}>
+            Continue with Discord
           </a>
+          <p className="mt-5 text-center text-sm text-zinc-600">
+            New here?{" "}
+            <Link className="font-semibold text-emerald-800 hover:text-emerald-950" href={`/player/signup?returnTo=${encodeURIComponent(returnTo)}`}>
+              Create an account
+            </Link>
+          </p>
           <Link className="mt-4 block text-center text-sm font-semibold text-emerald-800 hover:text-emerald-950" href="/">Continue browsing tournaments</Link>
         </section>
       </div>

@@ -2,7 +2,7 @@ import type { PlayerAccount } from "../db/players/types";
 import type { TournamentRegistration } from "../db/tournaments/types";
 import type { VerifiedRiotAccount } from "../riot/accounts/types";
 import { getRiotAccountByRiotId } from "../riot/accounts/api";
-import { getPlayerAccountById, linkRiotAccountToPlayer } from "../db/players/api";
+import { checkInPlayerAccount, getPlayerAccountById, linkRiotAccountToPlayer } from "../db/players/api";
 import { registerTournamentPlayer } from "../db/tournaments/api";
 import { parseRiotGameTag, validatePlayerRegistration } from "../tournament/players/api";
 
@@ -98,4 +98,26 @@ export async function registerPlayerAccountForTournament(
     ...(player.discordUserId ? { discordUserId: player.discordUserId } : {}),
     playerAccountId: player.id,
   });
+}
+
+export type CheckInPlayerForTournamentInput = {
+  playerAccountId: string;
+  tournamentId: string;
+};
+
+export type CheckInPlayerForTournamentResult = {
+  registrationId: string;
+  displayName: string;
+  checkedInAt: string;
+};
+
+// Web check-in, keyed on the player's durable account id rather than a
+// Discord id (see check_in_player_account in
+// 20260922000001_link_discord_to_player.sql). This is the counterpart to the
+// bot's Discord-keyed check-in for players who registered without linking
+// Discord.
+export async function checkInPlayerForTournament(
+  input: CheckInPlayerForTournamentInput,
+): Promise<CheckInPlayerForTournamentResult> {
+  return checkInPlayerAccount(input);
 }

@@ -4,15 +4,24 @@ export type PlayerTournamentItem = {
   id: string;
   name: string;
   status: string;
+  checkInStatus: string;
   registeredPlayerCount: number;
   maxPlayers: number;
   isRegistered: boolean;
   registrationStatus: string | null;
+  checkedIn: boolean;
+  participated: boolean;
   createdAt: string;
 };
 
 export type PlayerDashboardViewModel = {
   playerAccountId: string | null;
+  username: string | null;
+  email: string | null;
+  discordUserId: string | null;
+  discordUsername: string | null;
+  discordAvatar: string | null;
+  riotPuuid: string | null;
   riotGameTag: string | null;
   tournaments: PlayerTournamentItem[];
   signedUpCount: number;
@@ -45,6 +54,10 @@ function valueAt(row: Record<string, unknown>, snake: string, camel = snake): un
   return row[camel] ?? row[snake];
 }
 
+function asNullableString(value: unknown): string | null {
+  return value === null || value === undefined ? null : String(value);
+}
+
 // Maps the get_player_dashboard_view_model payload into a view model the player
 // page can render directly: every tournament available to play, plus which ones
 // this player has already signed up for.
@@ -57,19 +70,25 @@ export function mapPlayerDashboardViewModel(rawValue: unknown): PlayerDashboardV
       id: asString(valueAt(row, "id")),
       name: asString(valueAt(row, "name"), "Untitled tournament"),
       status: asString(valueAt(row, "status"), "accepting_players"),
+      checkInStatus: asString(valueAt(row, "check_in_status", "checkInStatus"), "not_started"),
       registeredPlayerCount: asNumber(valueAt(row, "registered_player_count", "registeredPlayerCount")),
       maxPlayers: asNumber(valueAt(row, "max_players", "maxPlayers")),
       isRegistered: asBoolean(valueAt(row, "registered")),
       registrationStatus: registrationStatus == null ? null : asString(registrationStatus),
+      checkedIn: asBoolean(valueAt(row, "checked_in", "checkedIn")),
+      participated: asBoolean(valueAt(row, "participated")),
       createdAt: asString(valueAt(row, "created_at", "createdAt")),
     } satisfies PlayerTournamentItem;
   });
-  const riotGameTag = valueAt(raw, "riot_game_tag", "riotGameTag");
   return {
-    playerAccountId: valueAt(raw, "player_account_id", "playerAccountId") == null
-      ? null
-      : asString(valueAt(raw, "player_account_id", "playerAccountId")),
-    riotGameTag: riotGameTag == null ? null : asString(riotGameTag),
+    playerAccountId: asNullableString(valueAt(raw, "player_account_id", "playerAccountId")),
+    username: asNullableString(valueAt(raw, "username")),
+    email: asNullableString(valueAt(raw, "email")),
+    discordUserId: asNullableString(valueAt(raw, "discord_user_id", "discordUserId")),
+    discordUsername: asNullableString(valueAt(raw, "discord_username", "discordUsername")),
+    discordAvatar: asNullableString(valueAt(raw, "discord_avatar", "discordAvatar")),
+    riotPuuid: asNullableString(valueAt(raw, "riot_puuid", "riotPuuid")),
+    riotGameTag: asNullableString(valueAt(raw, "riot_game_tag", "riotGameTag")),
     tournaments,
     signedUpCount: tournaments.filter((tournament) => tournament.isRegistered).length,
   };

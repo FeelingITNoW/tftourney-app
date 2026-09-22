@@ -130,7 +130,9 @@ behind Railway's proxy. Checklist for a working deployment:
   the Railway domain.
 - Apply all Supabase migrations, including
   `20260921000003_fix_player_account_function_ambiguity.sql` — without it,
-  player Discord sign-in fails with `player_account_failed`.
+  player Discord sign-in fails with `player_account_failed` — and
+  `20260922000000`–`20260922000002`, which add player username/password
+  accounts, optional Discord/Riot linking, and account-keyed web check-in.
 
 The scheduled worker is exposed through the Supabase Edge Function at
 `supabase/functions/sync-tournament-sheets`. Configure Supabase Cron to invoke
@@ -180,10 +182,16 @@ https://tftourney-app-production.up.railway.app/api/auth/discord/player/callback
 https://tftourney-app-production.up.railway.app/api/auth/discord/bot-install/callback
 ```
 
-Player sign-in with Discord (`/player/signin`) uses its own callback route
-(`/api/auth/discord/player/callback`), separate from the organizer
-manager-invite callback (`/api/auth/discord/callback`), so the two flows never
-share a redirect URI or a cookie.
+Players create their own account with a username and password at
+`/player/signup`; Riot and Discord are optional links managed from
+`/player/account` afterward. "Continue with Discord" on `/player/signin` uses
+its own callback route (`/api/auth/discord/player/callback`), separate from
+the organizer manager-invite callback (`/api/auth/discord/callback`), so the
+two flows never share a redirect URI or a cookie. It signs in an account that
+already has that Discord identity linked (including one the bot created);
+otherwise it sends the player to `/player/signup` with the Discord identity
+attached so they finish creating an account instead of one being silently
+auto-created.
 
 Run the worker locally with:
 

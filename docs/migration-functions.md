@@ -359,6 +359,125 @@ disagree.
 Marks a registered/waitlisted player checked in while check-in is open.
 Idempotent: repeat calls do not move an already-recorded `checked_in_at`.
 
+## Player and organizer account functions
+
+### public.claim_or_create_organizer
+
+    claim_or_create_organizer(p_auth_user_id uuid, p_email text)
+    returns table (id bigint, email text, auth_user_id uuid)
+
+Resolves the `users` row for an organizer's Supabase auth identity: matches by
+`auth_user_id`, then by lowercased email (raising on a unique-violation if
+that email is already bound to a different auth user), then adopts the
+unclaimed legacy `users.id = 1` seed row, else inserts a new row.
+
+### public.claim_or_create_player_by_discord
+
+    claim_or_create_player_by_discord(
+      p_discord_user_id text, p_discord_username text default null,
+      p_discord_avatar text default null
+    )
+    returns table (
+      id bigint, auth_user_id uuid, discord_user_id text, discord_username text,
+      discord_avatar text, riot_puuid text, riot_game_tag text, email text,
+      created_at timestamptz, updated_at timestamptz
+    )
+
+Idempotently claims the player account for a Discord identity: the first call
+creates it, later calls refresh the cached username/avatar and return the same
+row. Used by the Discord bot's sign-up flow (never by the web sign-in flow,
+which does not auto-create accounts -- see create_player_account below).
+
+### public.create_player_account
+
+    create_player_account(
+      p_username text, p_password_hash text, p_email text default null,
+      p_discord_user_id text default null, p_discord_username text default null,
+      p_discord_avatar text default null
+    )
+    returns table (
+      id bigint, auth_user_id uuid, username text, discord_user_id text,
+      discord_username text, discord_avatar text, riot_puuid text,
+      riot_game_tag text, email text, created_at timestamptz,
+      updated_at timestamptz, last_signed_in_at timestamptz
+    )
+
+Creates a brand-new player account from a username/password, the only way a
+web account is created. Raises a distinct message for a taken username vs. a
+Discord id already linked to another account (`discord_user_id` is optional,
+used when a player signs up right after "Continue with Discord" resolved to
+no existing account).
+
+### public.find_player_account_by_username
+
+    find_player_account_by_username(p_username text)
+    returns table (..., password_hash text, ...)
+
+Case-insensitive username lookup including `password_hash`, for sign-in
+verification only. No other player_accounts read function returns the hash.
+
+### public.touch_player_account_last_signed_in
+
+    touch_player_account_last_signed_in(p_player_account_id text) returns void
+
+Records a successful sign-in. Kept separate from the `stable` read functions
+above so a read can never have a write side effect.
+
+### public.set_player_credentials
+
+    set_player_credentials(
+      p_player_account_id text, p_username text default null,
+      p_password_hash text default null, p_email text default null
+    )
+    returns table (... same shape as create_player_account minus password_hash ...)
+
+Sets or changes a player's username/password/email. A null argument leaves
+that column untouched, so a password-only change does not require resending
+the username. Used both to claim a credential-less (bot-created) account and
+to change credentials later.
+
+### public.link_riot_account_to_player
+
+    link_riot_account_to_player(
+      p_player_account_id text, p_riot_puuid text, p_riot_game_tag text
+    )
+    returns table (... player_accounts row ...)
+
+Attaches a verified Riot identity to a player account. Refuses to move a
+`riot_puuid` already linked to a different account.
+
+### public.link_discord_account_to_player / public.unlink_discord_account_from_player
+
+    link_discord_account_to_player(
+      p_player_account_id text, p_discord_user_id text,
+      p_discord_username text default null, p_discord_avatar text default null
+    ) returns table (... player_accounts row ...)
+    unlink_discord_account_from_player(p_player_account_id text)
+      returns table (... player_accounts row ...)
+
+Lets an already-signed-in player link or unlink a Discord identity from their
+account page. `link_discord_account_to_player` refuses a Discord id already
+linked to a different account, mirroring `link_riot_account_to_player`.
+
+### public.check_in_player_account
+
+    check_in_player_account(p_tournament_id text, p_player_account_id text)
+    returns table (registration_id text, display_name text, checked_in_at timestamptz)
+
+Web check-in keyed on the player's durable account id instead of Discord id.
+Same guards and idempotency as `check_in_discord_player`; this is the
+counterpart for a player who registered without linking Discord.
+
+### public.get_player_dashboard_view_model
+
+    get_player_dashboard_view_model(p_player_account_id text)
+    returns table (view_model jsonb)
+
+One-round-trip read model for the player dashboard/account pages: the
+account's own profile fields (username, email, Discord, Riot) plus, per
+visible tournament, whether the player registered, checked in, and actually
+played (a `tournament_participants` row exists for their registration).
+
 ## Integrity and trigger functions
 
 ### public.set_updated_at
@@ -404,6 +523,10 @@ database:
 | 20260808010000 | Discord tournament integration: guild/channel provisioning config, manager roles and invites, lobby-thread mapping, the screenshot queue and claim/lease functions, and the shared `submit_lobby_results` score boundary. |
 | 20260914000000 | Per-lobby-thread score cooldown (`score_cooldown_seconds`, `last_accepted_at`, `rejected_cooldown`, `discord_score_cooldown_remaining_seconds`) and fixes for ambiguous-column bugs in `claim_discord_score_submission`, `submit_lobby_results`, `check_in_discord_player`, and a NULL-output bug in `enqueue_discord_score_submission`. |
 | 20260919000000 | `get_discord_reconcile_view_model`, replacing the reconcile route's per-tournament fan-out with one read model, and skipping settled completed/cancelled tournaments. |
+| 20260921000000–20260921000003 | `player_accounts` table, `claim_or_create_player_by_discord`, `link_riot_account_to_player`, `get_player_dashboard_view_model`, `playerAccountId` on the reconcile view model, and a fix for ambiguous-column bugs in the two claim/link functions. |
+| 20260922000000 | `username`/`password_hash`/`last_signed_in_at` on `player_accounts`; `create_player_account`, `find_player_account_by_username`, `touch_player_account_last_signed_in`, `set_player_credentials` -- player accounts can now be created and signed into with a username/password instead of requiring Discord. |
+| 20260922000001 | `link_discord_account_to_player`, `unlink_discord_account_from_player`, `check_in_player_account` -- Discord becomes an optional link on an existing account, and web check-in no longer requires one. |
+| 20260922000002 | `get_player_dashboard_view_model` extended with the account's profile fields and per-tournament `check_in_status`/`checked_in`/`participated`. |
 
 Historical overloads such as start_tournament(uuid),
 start_tournament(bigint), and the old one-argument graph helpers are removed
