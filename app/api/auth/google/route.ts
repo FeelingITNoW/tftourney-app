@@ -1,5 +1,6 @@
 import { createHash, randomBytes } from "node:crypto";
 import { NextResponse } from "next/server";
+import { getAppOrigin } from "../../../../lib/app-url";
 
 export const runtime = "nodejs";
 
@@ -33,7 +34,7 @@ export async function GET(request: Request) {
 
   const verifier = base64Url(randomBytes(32));
   const challenge = base64Url(createHash("sha256").update(verifier).digest());
-  const callback = new URL("/api/auth/google/callback", request.url).toString();
+  const callback = new URL("/api/auth/google/callback", getAppOrigin(request)).toString();
   const authorize = new URL(`${supabaseUrl.replace(/\/$/, "")}/auth/v1/authorize`);
   authorize.searchParams.set("provider", "google");
   authorize.searchParams.set("redirect_to", callback);

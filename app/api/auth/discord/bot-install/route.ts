@@ -1,5 +1,6 @@
 import { randomBytes } from "node:crypto";
 import { NextResponse } from "next/server";
+import { getAppOrigin } from "../../../../../lib/app-url";
 import { getHostUserId } from "../../../../../lib/auth/session";
 import { assertTournamentHost } from "../../../../../lib/db/tournaments/api";
 
@@ -39,7 +40,7 @@ export async function GET(request: Request): Promise<Response> {
     );
   }
 
-  const appUrl = process.env.TFTOURNEY_APP_URL ?? url.origin;
+  const appUrl = getAppOrigin(request);
   const state = randomBytes(32).toString("base64url");
   const authorize = new URL("https://discord.com/oauth2/authorize");
   authorize.searchParams.set("client_id", clientId);

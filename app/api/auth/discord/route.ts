@@ -1,5 +1,6 @@
 import { randomBytes } from "node:crypto";
 import { NextResponse } from "next/server";
+import { getAppOrigin } from "../../../../lib/app-url";
 
 export const runtime = "nodejs";
 
@@ -11,7 +12,7 @@ export async function GET(request: Request): Promise<Response> {
   const url = new URL(request.url);
   const invite = url.searchParams.get("invite") ?? "";
   const state = randomBytes(32).toString("base64url");
-  const appUrl = process.env.TFTOURNEY_APP_URL ?? url.origin;
+  const appUrl = getAppOrigin(request);
   const clientId = process.env.DISCORD_CLIENT_ID;
   if (!clientId || !process.env.DISCORD_CLIENT_SECRET) return Response.json({ error: "Discord OAuth is not configured." }, { status: 503 });
   const authorize = new URL("https://discord.com/oauth2/authorize");

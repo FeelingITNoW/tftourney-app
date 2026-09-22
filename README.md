@@ -88,8 +88,19 @@ https://pwhtssicqwaolxgpfoxw.supabase.co/auth/v1/callback
 
 In Supabase Dashboard → Authentication → URL Configuration, allow the app
 callback URLs (`http://localhost:3000/api/auth/google/callback` locally and the
-deployed equivalent). The Google consent screen must allow the
-`https://www.googleapis.com/auth/drive.file` scope.
+deployed equivalent, for example
+`https://tftourney-app-production.up.railway.app/api/auth/google/callback`). The
+Google consent screen must allow the `https://www.googleapis.com/auth/drive.file`
+scope.
+
+The absolute redirect URIs are derived from `TFTOURNEY_APP_URL` (see
+`lib/app-url.ts`), so that variable must be set to the deployed origin in
+production — otherwise OAuth redirects fall back to the request host, which
+resolves to `localhost` behind a reverse proxy such as Railway. Set:
+
+```text
+TFTOURNEY_APP_URL=https://tftourney-app-production.up.railway.app
+```
 
 The scheduled worker is exposed through the Supabase Edge Function at
 `supabase/functions/sync-tournament-sheets`. Configure Supabase Cron to invoke
@@ -127,7 +138,15 @@ check-in, private lobby score threads, durable screenshot queues, OCR review,
 and idempotent score submission. Configure the Discord variables in
 `.env.local`, apply the latest Supabase migration, then follow
 [docs/discord-bot.md](docs/discord-bot.md) for Discord Developer Portal,
-ngrok, storage, and deployment setup.
+ngrok, storage, and deployment setup. In the Discord Developer Portal, add both
+the local and deployed redirect URIs under OAuth2 → Redirects:
+
+```text
+http://localhost:3000/api/auth/discord/callback
+http://localhost:3000/api/auth/discord/bot-install/callback
+https://tftourney-app-production.up.railway.app/api/auth/discord/callback
+https://tftourney-app-production.up.railway.app/api/auth/discord/bot-install/callback
+```
 
 Run the worker locally with:
 

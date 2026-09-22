@@ -1,7 +1,9 @@
 "use server";
 
 import { revalidatePath } from "next/cache";
+import { headers } from "next/headers";
 import { redirect } from "next/navigation";
+import { getAppOriginFromHost } from "@/lib/app-url";
 import defaultTournamentFormat from "@/lib/tournament/formats/default.json";
 import {
   createTournament,
@@ -555,7 +557,7 @@ export async function createManagerInviteAction(formData: FormData) {
   } catch (error) {
     redirectWithParams(detailPath, { discordError: error instanceof Error ? error.message : "Manager invite could not be created." });
   }
-  const baseUrl = process.env.TFTOURNEY_APP_URL ?? "http://localhost:3000";
+  const baseUrl = getAppOriginFromHost((await headers()).get("host"));
   redirectWithParams(detailPath, { managerInvite: `${baseUrl.replace(/\/$/, "")}/discord/manager-invites/${invite.token}` });
 }
 
