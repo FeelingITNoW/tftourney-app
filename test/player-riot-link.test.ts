@@ -7,6 +7,7 @@ function player(overrides: Partial<PlayerAccount> = {}): PlayerAccount {
   return {
     id: "42",
     authUserId: null,
+    username: null,
     discordUserId: "discord-1",
     discordUsername: "FuuTime",
     discordAvatar: null,
@@ -15,6 +16,7 @@ function player(overrides: Partial<PlayerAccount> = {}): PlayerAccount {
     email: null,
     createdAt: "2026-09-21T00:00:00Z",
     updatedAt: "2026-09-21T00:00:00Z",
+    lastSignedInAt: null,
     ...overrides,
   };
 }

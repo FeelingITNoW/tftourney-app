@@ -90,7 +90,11 @@ function constantTimeEqual(first: string, second: string): boolean {
 // someone for the web dashboard without carrying personal data, and so no extra
 // dependency is required beyond node:crypto.
 export function createPlayerSessionToken(
-  session: { playerAccountId: string; discordUserId: string | null },
+  // discordUserId defaults to null: the account is now the durable identity
+  // (username/password or Discord), and Discord linkage is looked up from the
+  // player_accounts row rather than carried in the session -- it can be
+  // unlinked mid-session, so baking it into the token would go stale.
+  session: { playerAccountId: string; discordUserId?: string | null },
   options: PlayerSessionOptions = {},
 ): string {
   const secret = resolveSecret(options);
@@ -99,7 +103,7 @@ export function createPlayerSessionToken(
   const ttl = options.ttlSeconds ?? PLAYER_SESSION_DEFAULT_TTL_SECONDS;
   const payload: PlayerSessionPayload = {
     playerAccountId: session.playerAccountId,
-    discordUserId: session.discordUserId,
+    discordUserId: session.discordUserId ?? null,
     expiresAt: now + ttl,
   };
   const payloadPart = Buffer.from(JSON.stringify(payload)).toString("base64url");
@@ -133,6 +137,49 @@ export function verifyPlayerSessionToken(
       discordUserId: typeof parsed.discordUserId === "string" ? parsed.discordUserId : null,
       expiresAt: parsed.expiresAt,
     };
+  } catch {
+    return null;
+  }
+}
+
+// Generic signed, expiring token primitives sharing the same secret
+// resolution and HMAC scheme as the player session token above. Used for
+// short-lived payloads that are not a full player session -- currently the
+// pending-Discord-identity token in player-discord-oauth.ts -- so there is
+// only one signing scheme to reason about instead of a second one per use.
+export function createSignedPlayerToken<T extends Record<string, unknown>>(
+  payload: T,
+  ttlSeconds: number,
+  options: PlayerSessionOptions = {},
+): string {
+  const secret = resolveSecret(options);
+  if (!secret) throw new Error("PLAYER_SESSION_SECRET is not configured.");
+  const now = options.now ?? Math.floor(Date.now() / 1000);
+  const withExpiry = { ...payload, expiresAt: now + ttlSeconds };
+  const payloadPart = Buffer.from(JSON.stringify(withExpiry)).toString("base64url");
+  return `${payloadPart}.${sign(payloadPart, secret)}`;
+}
+
+export function verifySignedPlayerToken(
+  token: string | undefined,
+  options: PlayerSessionOptions = {},
+): (Record<string, unknown> & { expiresAt: number }) | null {
+  if (!token) return null;
+  const secret = resolveSecret(options);
+  if (!secret) return null;
+  const separatorIndex = token.lastIndexOf(".");
+  if (separatorIndex <= 0 || separatorIndex === token.length - 1) return null;
+  const payloadPart = token.slice(0, separatorIndex);
+  const signaturePart = token.slice(separatorIndex + 1);
+  if (!constantTimeEqual(sign(payloadPart, secret), signaturePart)) return null;
+  try {
+    const parsed = JSON.parse(Buffer.from(payloadPart, "base64url").toString("utf8")) as Record<string, unknown> & {
+      expiresAt?: unknown;
+    };
+    if (typeof parsed.expiresAt !== "number") return null;
+    const now = options.now ?? Math.floor(Date.now() / 1000);
+    if (parsed.expiresAt <= now) return null;
+    return parsed as Record<string, unknown> & { expiresAt: number };
   } catch {
     return null;
   }

@@ -4,6 +4,7 @@ import { getAppOrigin } from "../../../../../lib/app-url";
 import {
   PLAYER_DISCORD_CALLBACK_PATH,
   PLAYER_DISCORD_COOKIE_PATH,
+  PLAYER_DISCORD_MODE_COOKIE,
   PLAYER_DISCORD_RETURN_TO_COOKIE,
   PLAYER_DISCORD_STATE_COOKIE,
 } from "../../../../../lib/auth/player-discord-oauth";
@@ -28,6 +29,10 @@ export async function GET(request: Request): Promise<Response> {
   if (!clientId || !process.env.DISCORD_CLIENT_SECRET) {
     return Response.json({ error: "Discord OAuth is not configured." }, { status: 503 });
   }
+  // mode=link is used from /player/account's "Link Discord" button, by an
+  // already-signed-in player, to attach a Discord identity to their account
+  // instead of resolving/creating an account from it.
+  const mode = url.searchParams.get("mode") === "link" ? "link" : "signin";
   const authorize = new URL("https://discord.com/oauth2/authorize");
   authorize.searchParams.set("client_id", clientId);
   authorize.searchParams.set("response_type", "code");
@@ -44,5 +49,6 @@ export async function GET(request: Request): Promise<Response> {
   };
   response.cookies.set(PLAYER_DISCORD_STATE_COOKIE, state, cookieBase);
   response.cookies.set(PLAYER_DISCORD_RETURN_TO_COOKIE, safeReturnTo(url.searchParams.get("returnTo")), cookieBase);
+  response.cookies.set(PLAYER_DISCORD_MODE_COOKIE, mode, cookieBase);
   return response;
 }
