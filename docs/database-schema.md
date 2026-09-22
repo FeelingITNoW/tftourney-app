@@ -11,6 +11,23 @@ CREATE TABLE public.users (
   CONSTRAINT users_pkey PRIMARY KEY (id)
 );
 
+-- Durable player identity, separate from organizer `users`. Links a Discord
+-- identity (the bot's contact + lobby-thread membership key) and a verified
+-- Riot identity so sign-up is seamless on the web and in the bot.
+CREATE TABLE public.player_accounts (
+  id bigint GENERATED ALWAYS AS IDENTITY NOT NULL,
+  auth_user_id uuid UNIQUE,
+  discord_user_id text UNIQUE,
+  discord_username text,
+  discord_avatar text,
+  riot_puuid text,
+  riot_game_tag text,
+  email text,
+  created_at timestamptz NOT NULL DEFAULT now(),
+  updated_at timestamptz NOT NULL DEFAULT now(),
+  CONSTRAINT player_accounts_pkey PRIMARY KEY (id)
+);
+
 CREATE TABLE public.tournaments (
   id bigint GENERATED ALWAYS AS IDENTITY NOT NULL,
   host_user_id bigint NOT NULL,
@@ -38,11 +55,16 @@ CREATE TABLE public.tournament_registrations (
     CHECK (registration_status IN ('registered', 'waitlisted', 'entered', 'withdrawn')),
   display_name text NOT NULL,
   riot_puuid text,
+  discord_user_id text,
+  player_account_id bigint,
+  checked_in_at timestamptz,
   created_at timestamptz NOT NULL DEFAULT now(),
   updated_at timestamptz NOT NULL DEFAULT now(),
   CONSTRAINT tournament_registrations_pkey PRIMARY KEY (id),
   CONSTRAINT tournament_registrations_tournament_id_fkey
-    FOREIGN KEY (tournament_id) REFERENCES public.tournaments(id) ON DELETE CASCADE
+    FOREIGN KEY (tournament_id) REFERENCES public.tournaments(id) ON DELETE CASCADE,
+  CONSTRAINT tournament_registrations_player_account_fkey
+    FOREIGN KEY (player_account_id) REFERENCES public.player_accounts(id) ON DELETE SET NULL
 );
 
 CREATE TABLE public.rounds (
@@ -133,6 +155,8 @@ CREATE TABLE public.participant_round_scores (
 -- rounds(tournament_id, status, round_number, id)
 -- tournament_edges(tournament_id, priority, id)
 -- tournament_registrations(tournament_id, riot_puuid) where riot_puuid is not null
+-- tournament_registrations(tournament_id, player_account_id) where player_account_id is not null
+-- player_accounts(auth_user_id), player_accounts(discord_user_id) (unique, partial)
 -- tournament_participants(tournament_id, registration_id)
 -- tournament_participants(tournament_id, seed_number)
 -- rounds(tournament_id, format_round_id)
@@ -365,3 +389,49 @@ thing that flips a sign-up button to disabled, so a tournament that ended while
 the bot was offline still gets one final tick to finish that work before it
 drops out of the payload. The payload shape matches the retired handler exactly,
 including the snake_case `config` block the bot reads.
+
+## Player accounts
+
+`20260921000000_add_player_accounts.sql` adds the `player_accounts` table, a
+durable player identity separate from organizer `users`. Each account links at
+most one Discord identity (`discord_user_id`, unique) and one verified Riot
+identity (`riot_puuid` + `riot_game_tag`), and optionally a Supabase
+`auth_user_id` and `email`. `tournament_registrations.player_account_id`
+references it with `on delete set null`, backfilling the existing flat
+`discord_user_id`/`riot_puuid` columns so bot and web flows share one identity.
+
+Two service-role-only RPCs back the repository:
+
+- `claim_or_create_player_by_discord(p_discord_user_id, p_discord_username,
+  p_discord_avatar)` idempotently claims or creates the account for a Discord
+  user, refreshing the cached username/avatar. Discord identity can never fork
+  into two accounts.
+- `link_riot_account_to_player(p_player_account_id, p_riot_puuid,
+  p_riot_game_tag)` attaches a verified Riot identity and refuses to move a
+  `puuid` already linked to another account.
+
+`20260921000001_player_reconcile_membership.sql` replaces
+`get_discord_reconcile_view_model` with an otherwise identical payload that adds
+`playerAccountId` to every active lobby participant, so the bot can verify a
+thread member belongs to a lobby by account identity. The bot reads participants
+by index and ignores unknown fields, so the change is backwards compatible.
+
+`20260921000002_player_dashboard_view_model.sql` adds
+`get_player_dashboard_view_model(p_player_account_id)`, returning in one round
+trip the player's `riot_game_tag` and every visible tournament with a
+`registered` flag and the player's own `registration_status`. The player page
+uses it to show all tournaments plus which ones the signed-in player has joined.
+
+Web players sign in with Discord (`/api/auth/discord/player`) using an
+`identify`-scoped OAuth flow and a stateless HMAC-signed cookie
+(`tftourney-player-session`, see `lib/auth/player-session.ts`). The authorize
+step reuses the already-registered `/api/auth/discord/callback` redirect URI and
+sets a `tftourney-player-discord-state` cookie; the shared callback detects that
+cookie and routes to the player flow (`lib/auth/player-discord-oauth.ts`),
+avoids a second redirect URL in the Discord Developer Portal, and fails with
+`invalid oauth2 redirect_uri` if a new one is used without being registered.
+Sign-up reuses the account's stored Riot identity when present, otherwise
+verifies a newly entered `GameName#TAG` with Riot and links it first
+(`lib/players/registration.ts`). The bot's
+`/api/internal/discord/signup` resolves/creates the same account and links the
+verified Riot identity before writing the registration.

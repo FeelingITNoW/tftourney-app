@@ -302,6 +302,7 @@ export type TournamentRegistrationRow = {
   tournament_id: string | number;
   display_name: string | null;
   riot_puuid: string | null;
+  player_account_id?: string | number | null;
   registration_status: "registered" | "waitlisted" | "entered" | "withdrawn";
   created_at: string;
 };
@@ -375,6 +376,7 @@ export type RegisterTournamentPlayerInput = {
   tournamentId: string;
   riotAccount: VerifiedRiotAccount;
   discordUserId?: string;
+  playerAccountId?: string;
 };
 
 export type AddRandomSeededTournamentPlayersInput = {

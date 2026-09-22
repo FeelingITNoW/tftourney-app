@@ -96,7 +96,12 @@ export default async function Home({
               Tournament operations for Teamfight Tactics
             </p>
           </div>
-          <AccountHeader organizer={organizer} returnTo="/dashboard" />
+          <div className="flex items-center gap-3">
+            <Link className="rounded-md border border-indigo-200 bg-indigo-50 px-3 py-2 text-sm font-semibold text-indigo-800 hover:bg-indigo-100" href="/player">
+              Player home
+            </Link>
+            <AccountHeader organizer={organizer} returnTo="/dashboard" />
+          </div>
         </header>
 
         <section className="grid flex-1 items-center gap-10 py-12 lg:grid-cols-[1.02fr_0.98fr] lg:py-16">
