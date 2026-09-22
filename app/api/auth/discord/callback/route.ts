@@ -1,5 +1,6 @@
 import { createHash } from "node:crypto";
 import { NextResponse } from "next/server";
+import { getAppOrigin } from "../../../../../lib/app-url";
 import { getHostUserId } from "../../../../../lib/auth/session";
 import { supabaseRestRequest } from "../../../../../lib/db/supabase-rest/api";
 import { getTournamentDiscordConfig } from "../../../../../lib/discord/api";
@@ -45,7 +46,7 @@ async function handlePlayerCallback(request: Request, url: URL): Promise<Respons
   const clientSecret = process.env.DISCORD_CLIENT_SECRET;
   if (!clientId || !clientSecret) return playerFail(request, "discord_oauth_not_configured");
   if (!process.env.PLAYER_SESSION_SECRET) return playerFail(request, "player_session_not_configured");
-  const appUrl = process.env.TFTOURNEY_APP_URL ?? url.origin;
+  const appUrl = getAppOrigin(request);
   const tokenResponse = await fetch("https://discord.com/api/v10/oauth2/token", {
     method: "POST",
     headers: { "Content-Type": "application/x-www-form-urlencoded" },
@@ -107,7 +108,7 @@ export async function GET(request: Request): Promise<Response> {
   const clientSecret = process.env.DISCORD_CLIENT_SECRET;
   const botToken = process.env.DISCORD_BOT_TOKEN;
   if (!clientId || !clientSecret || !botToken) return fail(request, "discord_oauth_not_configured");
-  const appUrl = process.env.TFTOURNEY_APP_URL ?? url.origin;
+  const appUrl = getAppOrigin(request);
   const tokenResponse = await fetch("https://discord.com/api/v10/oauth2/token", {
     method: "POST",
     headers: { "Content-Type": "application/x-www-form-urlencoded" },
