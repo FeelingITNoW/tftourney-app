@@ -424,9 +424,14 @@ uses it to show all tournaments plus which ones the signed-in player has joined.
 
 Web players sign in with Discord (`/api/auth/discord/player`) using an
 `identify`-scoped OAuth flow and a stateless HMAC-signed cookie
-(`tftourney-player-session`, see `lib/auth/player-session.ts`). Sign-up reuses
-the account's stored Riot identity when present, otherwise verifies a newly
-entered `GameName#TAG` with Riot and links it first
+(`tftourney-player-session`, see `lib/auth/player-session.ts`). The authorize
+step reuses the already-registered `/api/auth/discord/callback` redirect URI and
+sets a `tftourney-player-discord-state` cookie; the shared callback detects that
+cookie and routes to the player flow (`lib/auth/player-discord-oauth.ts`),
+avoids a second redirect URL in the Discord Developer Portal, and fails with
+`invalid oauth2 redirect_uri` if a new one is used without being registered.
+Sign-up reuses the account's stored Riot identity when present, otherwise
+verifies a newly entered `GameName#TAG` with Riot and links it first
 (`lib/players/registration.ts`). The bot's
 `/api/internal/discord/signup` resolves/creates the same account and links the
 verified Riot identity before writing the registration.

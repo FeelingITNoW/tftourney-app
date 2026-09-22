@@ -98,7 +98,7 @@ export default async function Home({
           </div>
           <div className="flex items-center gap-3">
             <Link className="rounded-md border border-indigo-200 bg-indigo-50 px-3 py-2 text-sm font-semibold text-indigo-800 hover:bg-indigo-100" href="/player">
-              Player sign in
+              Player home
             </Link>
             <AccountHeader organizer={organizer} returnTo="/dashboard" />
           </div>

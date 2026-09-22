@@ -22,7 +22,12 @@ export async function GET(request: Request): Promise<Response> {
   const authorize = new URL("https://discord.com/oauth2/authorize");
   authorize.searchParams.set("client_id", clientId);
   authorize.searchParams.set("response_type", "code");
-  authorize.searchParams.set("redirect_uri", `${appUrl.replace(/\/$/, "")}/api/auth/discord/player/callback`);
+  // Reuse the already-registered /api/auth/discord/callback redirect URI. A new
+  // path would require adding another redirect URL in the Discord Developer
+  // Portal, which is what produced "invalid oauth2 redirect_uri". The callback
+  // tells the player flow apart by the tftourney-player-discord-state cookie set
+  // below, which the organizer manager flow never sets.
+  authorize.searchParams.set("redirect_uri", `${appUrl.replace(/\/$/, "")}/api/auth/discord/callback`);
   authorize.searchParams.set("scope", "identify");
   authorize.searchParams.set("state", state);
   const response = NextResponse.redirect(authorize);
@@ -31,7 +36,7 @@ export async function GET(request: Request): Promise<Response> {
     maxAge: 600,
     sameSite: "lax" as const,
     secure: process.env.NODE_ENV === "production",
-    path: "/api/auth/discord/player",
+    path: "/api/auth/discord",
   };
   response.cookies.set("tftourney-player-discord-state", state, cookieBase);
   response.cookies.set("tftourney-player-discord-return-to", safeReturnTo(url.searchParams.get("returnTo")), cookieBase);

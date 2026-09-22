@@ -105,6 +105,13 @@ by index and ignores unknown fields, so older bot builds keep working while the
 membership id becomes available. Web players sign in with Discord at
 `/api/auth/discord/player` and manage their tournaments at `/player`.
 
+The player OAuth flow reuses the registered `/api/auth/discord/callback`
+redirect URI (it sets a `tftourney-player-discord-state` cookie, and the shared
+callback routes to the player flow when that cookie is present). Do not add a
+separate player callback URL to the Discord Developer Portal redirect list
+unless you also change the authorize route to use it — Discord returns
+`invalid oauth2 redirect_uri` for any unregistered redirect URI.
+
 ## Check-in
 
 Discord check-in is optional and never blocks starting a tournament:
