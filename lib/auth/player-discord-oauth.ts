@@ -4,11 +4,14 @@ import {
   playerSessionCookieOptions,
 } from "./player-session";
 
-// Cookie names for the player Discord sign-in flow. The flow reuses the
-// already-registered /api/auth/discord/callback redirect URI (adding a new one
-// requires a Discord Developer Portal change and otherwise fails with
-// "invalid oauth2 redirect_uri"), so the player authorize route sets a player
-// state cookie that the shared callback uses to tell the flows apart.
+// Player sign-in with Discord has its own OAuth redirect URI, separate from
+// the organizer manager-invite flow's /api/auth/discord/callback, so the two
+// flows can never be confused by a stale cookie. Register this path in the
+// Discord Developer Portal's OAuth2 redirect list alongside the manager one.
+export const PLAYER_DISCORD_CALLBACK_PATH = "/api/auth/discord/player/callback";
+export const PLAYER_DISCORD_COOKIE_PATH = "/api/auth/discord/player";
+
+// Cookie names for the player Discord sign-in flow.
 export const PLAYER_DISCORD_STATE_COOKIE = "tftourney-player-discord-state";
 export const PLAYER_DISCORD_RETURN_TO_COOKIE = "tftourney-player-discord-return-to";
 
@@ -42,7 +45,7 @@ export type CompletedPlayerDiscordSignIn = {
 };
 
 // Claims/creates the player account for the Discord identity and mints the
-// player session cookie. Shared by the reused /api/auth/discord/callback route.
+// player session cookie.
 export async function completePlayerDiscordSignIn(
   discordUser: PlayerDiscordIdentity,
 ): Promise<CompletedPlayerDiscordSignIn> {

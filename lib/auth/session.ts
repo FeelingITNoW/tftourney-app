@@ -116,16 +116,29 @@ async function getOrganizerForAuthUser(user: SupabaseUser): Promise<OrganizerRow
 }
 
 async function organizerFromStoredSession(session: StoredSession): Promise<OrganizerSession | null> {
-  const user = await getSupabaseUser(session.accessToken);
-  if (!user) return null;
-  const organizer = await getOrganizerForAuthUser(user);
-  if (!organizer) return null;
-  return {
-    authUserId: user.id,
-    hostUserId: String(organizer.id),
-    email: organizer.email || user.email || "Google organizer",
-    isLocal: false,
-  };
+  // getSupabaseUser and getOrganizerForAuthUser call supabaseRestRequest, which
+  // throws on any non-2xx response (DatabaseRequestError) or on a network
+  // failure. Uncaught, that surfaced as an opaque HTTP 500 on every page that
+  // resolves a session (/, /signin, /dashboard) instead of the page simply
+  // rendering as signed-out. Treat any lookup failure as "not signed in".
+  try {
+    const user = await getSupabaseUser(session.accessToken);
+    if (!user) return null;
+    const organizer = await getOrganizerForAuthUser(user);
+    if (!organizer) return null;
+    return {
+      authUserId: user.id,
+      hostUserId: String(organizer.id),
+      email: organizer.email || user.email || "Google organizer",
+      isLocal: false,
+    };
+  } catch (error) {
+    console.error("[organizer-session] Organizer lookup failed; treating session as signed out", {
+      message: error instanceof Error ? error.message : String(error),
+      name: error instanceof Error ? error.name : undefined,
+    });
+    return null;
+  }
 }
 
 function localOrganizer(): OrganizerSession {

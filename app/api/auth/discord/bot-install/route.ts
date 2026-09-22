@@ -1,6 +1,7 @@
 import { randomBytes } from "node:crypto";
 import { NextResponse } from "next/server";
-import { getAppOrigin } from "../../../../../lib/app-url";
+import { appRedirect, getAppOrigin } from "../../../../../lib/app-url";
+import { errorLogFields } from "../../../../../lib/auth/log";
 import { getHostUserId } from "../../../../../lib/auth/session";
 import { assertTournamentHost } from "../../../../../lib/db/tournaments/api";
 
@@ -15,29 +16,25 @@ export const runtime = "nodejs";
 // optional native zlib-sync addon -- into the Next.js server bundle.
 const BOT_INVITE_PERMISSIONS = "361045724176";
 
-export async function GET(request: Request): Promise<Response> {
+async function handle(request: Request): Promise<Response> {
   const url = new URL(request.url);
   const tournamentId = url.searchParams.get("tournamentId") ?? "";
   const returnTo = tournamentId ? `/tournaments/${tournamentId}` : "/";
-  if (!tournamentId) return NextResponse.redirect(new URL("/", request.url));
+  if (!tournamentId) return appRedirect("/");
 
   const hostUserId = await getHostUserId(request);
   if (!hostUserId) {
-    return NextResponse.redirect(new URL(`/signin?returnTo=${encodeURIComponent(returnTo)}`, request.url));
+    return appRedirect("/signin", { returnTo });
   }
   try {
     await assertTournamentHost(tournamentId, hostUserId);
   } catch {
-    return NextResponse.redirect(
-      new URL(`${returnTo}?discordError=${encodeURIComponent("Only the tournament host can connect Discord.")}`, request.url),
-    );
+    return appRedirect(returnTo, { discordError: "Only the tournament host can connect Discord." });
   }
 
   const clientId = process.env.DISCORD_CLIENT_ID;
   if (!clientId) {
-    return NextResponse.redirect(
-      new URL(`${returnTo}?discordError=${encodeURIComponent("Discord is not configured.")}`, request.url),
-    );
+    return appRedirect(returnTo, { discordError: "Discord is not configured." });
   }
 
   const appUrl = getAppOrigin(request);
@@ -66,4 +63,15 @@ export async function GET(request: Request): Promise<Response> {
     path: "/api/auth/discord/bot-install",
   });
   return response;
+}
+
+export async function GET(request: Request): Promise<Response> {
+  try {
+    return await handle(request);
+  } catch (error) {
+    console.error("[discord-auth] Bot-install authorize failed unexpectedly", errorLogFields(error));
+    const tournamentId = new URL(request.url).searchParams.get("tournamentId") ?? "";
+    const returnTo = tournamentId ? `/tournaments/${tournamentId}` : "/";
+    return appRedirect(returnTo, { discordError: "Discord could not be connected. Please try again." });
+  }
 }

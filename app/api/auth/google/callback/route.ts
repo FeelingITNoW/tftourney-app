@@ -1,4 +1,6 @@
 import { NextResponse } from "next/server";
+import { appRedirect } from "../../../../../lib/app-url";
+import { errorLogFields } from "../../../../../lib/auth/log";
 import { encryptGoogleRefreshToken } from "../../../../../lib/sheets/crypto";
 import { supabaseRestRequest } from "../../../../../lib/db/supabase-rest/api";
 import { claimOrCreateOrganizer } from "../../../../../lib/db/users/api";
@@ -29,34 +31,25 @@ function safeReturnPath(value: string | undefined): string {
   }
 }
 
-function returnUrl(request: Request, params: Record<string, string> = {}): URL {
-  const returnTo = safeReturnPath(cookieValue(request, "tftourney-google-return-to"));
-  const destination = new URL(returnTo, request.url);
-  for (const [key, value] of Object.entries(params)) destination.searchParams.set(key, value);
-  return destination;
-}
-
-function authRedirect(request: Request, params: Record<string, string>): NextResponse {
-  const response = NextResponse.redirect(returnUrl(request, params));
+function clearGoogleCookies(response: NextResponse): NextResponse {
   response.cookies.set("tftourney-google-pkce", "", { maxAge: 0, path: "/api/auth/google" });
   response.cookies.set("tftourney-google-return-to", "", { maxAge: 0, path: "/api/auth/google" });
   response.cookies.set("tftourney-google-intent", "", { maxAge: 0, path: "/api/auth/google" });
   return response;
+}
+
+function authRedirect(request: Request, params: Record<string, string>): NextResponse {
+  const returnTo = safeReturnPath(cookieValue(request, "tftourney-google-return-to"));
+  return clearGoogleCookies(appRedirect(returnTo, params));
 }
 
 function failureRedirect(request: Request, error: string): NextResponse {
   if (intentValue(request) === "sheets") return authRedirect(request, { authError: error });
-  const destination = new URL("/signin", request.url);
-  destination.searchParams.set("authError", error);
-  destination.searchParams.set("returnTo", safeReturnPath(cookieValue(request, "tftourney-google-return-to")));
-  const response = NextResponse.redirect(destination);
-  response.cookies.set("tftourney-google-pkce", "", { maxAge: 0, path: "/api/auth/google" });
-  response.cookies.set("tftourney-google-return-to", "", { maxAge: 0, path: "/api/auth/google" });
-  response.cookies.set("tftourney-google-intent", "", { maxAge: 0, path: "/api/auth/google" });
-  return response;
+  const returnTo = safeReturnPath(cookieValue(request, "tftourney-google-return-to"));
+  return clearGoogleCookies(appRedirect("/signin", { authError: error, returnTo }));
 }
 
-export async function GET(request: Request) {
+async function handle(request: Request): Promise<Response> {
   const url = new URL(request.url);
   const code = url.searchParams.get("code");
   const verifier = cookieValue(request, "tftourney-google-pkce");
@@ -94,12 +87,7 @@ export async function GET(request: Request) {
       email: user.email ?? `${user.id}@invalid.local`,
     });
   } catch (error) {
-    console.error("[google-auth] Organizer profile linking failed", {
-      message: error instanceof Error ? error.message : String(error),
-      code: error && typeof error === "object" && "code" in error ? (error as { code?: unknown }).code : undefined,
-      details: error && typeof error === "object" && "details" in error ? (error as { details?: unknown }).details : undefined,
-      hint: error && typeof error === "object" && "hint" in error ? (error as { hint?: unknown }).hint : undefined,
-    });
+    console.error("[google-auth] Organizer profile linking failed", errorLogFields(error));
     return failureRedirect(request, "user_profile_failed");
   }
 
@@ -120,12 +108,7 @@ export async function GET(request: Request) {
         },
       });
     } catch (error) {
-      console.error("[google-auth] Google connection save failed", {
-        message: error instanceof Error ? error.message : String(error),
-        code: error && typeof error === "object" && "code" in error ? (error as { code?: unknown }).code : undefined,
-        details: error && typeof error === "object" && "details" in error ? (error as { details?: unknown }).details : undefined,
-        hint: error && typeof error === "object" && "hint" in error ? (error as { hint?: unknown }).hint : undefined,
-      });
+      console.error("[google-auth] Google connection save failed", errorLogFields(error));
       return failureRedirect(request, "user_profile_failed");
     }
   }
@@ -137,4 +120,13 @@ export async function GET(request: Request) {
     expiresAt: Math.floor(Date.now() / 1000) + 3600,
   }), sessionCookieOptions());
   return response;
+}
+
+export async function GET(request: Request): Promise<Response> {
+  try {
+    return await handle(request);
+  } catch (error) {
+    console.error("[google-auth] Callback failed unexpectedly", errorLogFields(error));
+    return failureRedirect(request, "google_oauth_failed");
+  }
 }

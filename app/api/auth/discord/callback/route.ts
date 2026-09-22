@@ -1,88 +1,19 @@
 import { createHash } from "node:crypto";
 import { NextResponse } from "next/server";
-import { getAppOrigin } from "../../../../../lib/app-url";
+import { appRedirect, getAppOrigin } from "../../../../../lib/app-url";
+import { errorLogFields } from "../../../../../lib/auth/log";
 import { getHostUserId } from "../../../../../lib/auth/session";
 import { supabaseRestRequest } from "../../../../../lib/db/supabase-rest/api";
 import { getTournamentDiscordConfig } from "../../../../../lib/discord/api";
-import {
-  completePlayerDiscordSignIn,
-  PLAYER_DISCORD_RETURN_TO_COOKIE,
-  PLAYER_DISCORD_STATE_COOKIE,
-  safePlayerReturnPath,
-} from "../../../../../lib/auth/player-discord-oauth";
-import { PLAYER_SESSION_COOKIE_NAME } from "../../../../../lib/auth/player-session";
 
 export const runtime = "nodejs";
 
+// Organizer manager-invite claim callback. Player sign-in has its own
+// redirect URI and route (/api/auth/discord/player/callback) so the two
+// flows can never be confused by a shared cookie.
+
 function cookieValue(request: Request, name: string): string {
   return request.headers.get("cookie")?.match(new RegExp(`(?:^|;\\s*)${name}=([^;]+)`))?.[1] ?? "";
-}
-
-function clearPlayerCookies(response: NextResponse): NextResponse {
-  for (const name of [PLAYER_DISCORD_STATE_COOKIE, PLAYER_DISCORD_RETURN_TO_COOKIE]) {
-    response.cookies.set(name, "", { maxAge: 0, path: "/api/auth/discord" });
-  }
-  return response;
-}
-
-function playerFail(request: Request, message: string): Response {
-  const returnTo = safePlayerReturnPath(cookieValue(request, PLAYER_DISCORD_RETURN_TO_COOKIE));
-  const destination = new URL("/player/signin", request.url);
-  destination.searchParams.set("playerAuthError", message);
-  destination.searchParams.set("returnTo", returnTo);
-  return clearPlayerCookies(NextResponse.redirect(destination));
-}
-
-// Player sign-in reuses this route's already-registered redirect URI (adding a
-// second one requires a Discord Developer Portal change and otherwise fails
-// with "invalid oauth2 redirect_uri"). The player authorize route is the only
-// one that sets the player state cookie, so its presence selects this branch.
-async function handlePlayerCallback(request: Request, url: URL): Promise<Response> {
-  const code = url.searchParams.get("code") ?? "";
-  const state = url.searchParams.get("state") ?? "";
-  const expectedState = cookieValue(request, PLAYER_DISCORD_STATE_COOKIE);
-  if (!code || !state || !expectedState || state !== expectedState) return playerFail(request, "discord_state_invalid");
-  const clientId = process.env.DISCORD_CLIENT_ID;
-  const clientSecret = process.env.DISCORD_CLIENT_SECRET;
-  if (!clientId || !clientSecret) return playerFail(request, "discord_oauth_not_configured");
-  if (!process.env.PLAYER_SESSION_SECRET) return playerFail(request, "player_session_not_configured");
-  const appUrl = getAppOrigin(request);
-  const tokenResponse = await fetch("https://discord.com/api/v10/oauth2/token", {
-    method: "POST",
-    headers: { "Content-Type": "application/x-www-form-urlencoded" },
-    body: new URLSearchParams({
-      client_id: clientId,
-      client_secret: clientSecret,
-      grant_type: "authorization_code",
-      code,
-      redirect_uri: `${appUrl.replace(/\/$/, "")}/api/auth/discord/callback`,
-    }),
-  });
-  if (!tokenResponse.ok) return playerFail(request, "discord_oauth_failed");
-  const token = (await tokenResponse.json()) as { access_token?: string };
-  if (!token.access_token) return playerFail(request, "discord_oauth_failed");
-  const userResponse = await fetch("https://discord.com/api/v10/users/@me", {
-    headers: { Authorization: `Bearer ${token.access_token}` },
-  });
-  if (!userResponse.ok) return playerFail(request, "discord_identity_failed");
-  const discordUser = (await userResponse.json()) as { id?: string; username?: string; avatar?: string | null };
-  if (!discordUser.id) return playerFail(request, "discord_identity_failed");
-
-  let completed;
-  try {
-    completed = await completePlayerDiscordSignIn({ id: discordUser.id, username: discordUser.username, avatar: discordUser.avatar });
-  } catch {
-    return playerFail(request, "player_account_failed");
-  }
-  // Always land on the player home after signing in. Redirecting to a stored
-  // returnTo previously produced a blank white screen when the stored path
-  // resolved somewhere the freshly-set player session was not honored; the
-  // player home is the canonical post-sign-in destination.
-  const destination = new URL("/player", request.url);
-  destination.searchParams.set("playerAuth", "success");
-  const response = clearPlayerCookies(NextResponse.redirect(destination));
-  response.cookies.set(PLAYER_SESSION_COOKIE_NAME, completed.sessionToken, completed.sessionCookie);
-  return response;
 }
 
 function clearCookies(response: NextResponse): NextResponse {
@@ -90,14 +21,12 @@ function clearCookies(response: NextResponse): NextResponse {
   return response;
 }
 
-function fail(request: Request, message: string): Response {
-  const response = NextResponse.redirect(new URL(`/signin?authError=${encodeURIComponent(message)}`, request.url));
-  return clearCookies(response);
+function fail(request: Request, message: string): NextResponse {
+  return clearCookies(appRedirect("/signin", { authError: message }));
 }
 
-export async function GET(request: Request): Promise<Response> {
+async function handle(request: Request): Promise<Response> {
   const url = new URL(request.url);
-  if (cookieValue(request, PLAYER_DISCORD_STATE_COOKIE)) return handlePlayerCallback(request, url);
   const code = url.searchParams.get("code") ?? "";
   const state = url.searchParams.get("state") ?? "";
   const expectedState = cookieValue(request, "tftourney-discord-state");
@@ -154,6 +83,14 @@ export async function GET(request: Request): Promise<Response> {
     prefer: "resolution=merge-duplicates,return=minimal",
     body: { tournament_id: invite.tournament_id, user_id: hostUserId, discord_user_id: discordUser.id, revoked_at: null },
   });
-  const destination = new URL(`/tournaments/${invite.tournament_id}?discordManager=granted`, request.url);
-  return clearCookies(NextResponse.redirect(destination));
+  return clearCookies(appRedirect(`/tournaments/${invite.tournament_id}`, { discordManager: "granted" }));
+}
+
+export async function GET(request: Request): Promise<Response> {
+  try {
+    return await handle(request);
+  } catch (error) {
+    console.error("[discord-auth] Manager invite callback failed unexpectedly", errorLogFields(error));
+    return fail(request, "discord_callback_failed");
+  }
 }

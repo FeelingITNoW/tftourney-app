@@ -1,4 +1,4 @@
-import { NextResponse } from "next/server";
+import { appRedirect } from "../../../../lib/app-url";
 import { sessionCookieOptions } from "../../../../lib/auth/session";
 import {
   PLAYER_SESSION_COOKIE_NAME,
@@ -11,8 +11,7 @@ function safeReturnPath(value: string | null): string {
 
 export async function GET(request: Request) {
   const requestUrl = new URL(request.url);
-  const destination = new URL(safeReturnPath(requestUrl.searchParams.get("returnTo")), request.url);
-  const response = NextResponse.redirect(destination);
+  const response = appRedirect(safeReturnPath(requestUrl.searchParams.get("returnTo")));
   response.cookies.set("tftourney-session", "", { ...sessionCookieOptions(), maxAge: 0 });
   // Clear the stateless player cookie too, so a shared "sign out" link also
   // ends a player session and not just the organizer one.

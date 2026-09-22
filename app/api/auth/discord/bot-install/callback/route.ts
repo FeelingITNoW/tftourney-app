@@ -1,4 +1,6 @@
 import { NextResponse } from "next/server";
+import { appRedirect } from "../../../../../../lib/app-url";
+import { errorLogFields } from "../../../../../../lib/auth/log";
 import { getHostUserId } from "../../../../../../lib/auth/session";
 import { assertTournamentHost } from "../../../../../../lib/db/tournaments/api";
 import { supabaseRestRequest } from "../../../../../../lib/db/supabase-rest/api";
@@ -18,12 +20,11 @@ function clearCookies(response: NextResponse): NextResponse {
   return response;
 }
 
-function fail(request: Request, returnTo: string, message: string): Response {
-  const response = NextResponse.redirect(new URL(`${returnTo}?discordError=${encodeURIComponent(message)}`, request.url));
-  return clearCookies(response);
+function fail(request: Request, returnTo: string, message: string): NextResponse {
+  return clearCookies(appRedirect(returnTo, { discordError: message }));
 }
 
-export async function GET(request: Request): Promise<Response> {
+async function handle(request: Request): Promise<Response> {
   const url = new URL(request.url);
   const guildId = url.searchParams.get("guild_id") ?? "";
   const state = url.searchParams.get("state") ?? "";
@@ -62,9 +63,19 @@ export async function GET(request: Request): Promise<Response> {
       payload: { guildId },
     });
   } catch (error) {
+    console.error("[discord-auth] Bot-install provisioning failed", errorLogFields(error));
     return fail(request, returnTo, error instanceof Error ? error.message : "Discord could not be connected.");
   }
 
-  const response = NextResponse.redirect(new URL(`${returnTo}?discordConnected=true`, request.url));
-  return clearCookies(response);
+  return clearCookies(appRedirect(returnTo, { discordConnected: "true" }));
+}
+
+export async function GET(request: Request): Promise<Response> {
+  try {
+    return await handle(request);
+  } catch (error) {
+    console.error("[discord-auth] Bot-install callback failed unexpectedly", errorLogFields(error));
+    const tournamentId = cookieValue(request, "tftourney-discord-bot-tournament");
+    return fail(request, tournamentId ? `/tournaments/${tournamentId}` : "/", "Discord could not be connected. Please try again.");
+  }
 }

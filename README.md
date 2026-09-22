@@ -102,6 +102,33 @@ resolves to `localhost` behind a reverse proxy such as Railway. Set:
 TFTOURNEY_APP_URL=https://tftourney-app-production.up.railway.app
 ```
 
+A bare host with no `https://` (some platforms, including Railway, generate a
+domain variable without a scheme) is accepted too — `lib/app-url.ts` adds the
+scheme automatically — but set the full origin to avoid relying on that.
+
+### Deploying on Railway
+
+Google and Discord sign-in both depend on the app knowing its own public
+origin, which `next start` cannot reliably read from the incoming request
+behind Railway's proxy. Checklist for a working deployment:
+
+- Railway service variables: `TFTOURNEY_APP_URL` (the Railway public domain,
+  with `https://`), `NEXT_PUBLIC_SUPABASE_URL`, `SUPABASE_SERVICE_ROLE_KEY`,
+  `TFT_REQUIRE_AUTH=true`, `DISCORD_CLIENT_ID`, `DISCORD_CLIENT_SECRET`,
+  `DISCORD_BOT_TOKEN`, `PLAYER_SESSION_SECRET` (generate with
+  `openssl rand -base64 32`), and for Sheets publishing `GOOGLE_CLIENT_ID`,
+  `GOOGLE_CLIENT_SECRET`, `GOOGLE_TOKEN_ENCRYPTION_KEY`.
+- Supabase Dashboard → Authentication → URL Configuration → add
+  `https://<railway-domain>/api/auth/google/callback` to the redirect
+  allow list (the Google Cloud OAuth client itself only needs the Supabase
+  callback shown above).
+- Discord Developer Portal → OAuth2 → Redirects → add the three URIs in
+  [Discord tournament operations](#discord-tournament-operations) below for
+  the Railway domain.
+- Apply all Supabase migrations, including
+  `20260921000003_fix_player_account_function_ambiguity.sql` — without it,
+  player Discord sign-in fails with `player_account_failed`.
+
 The scheduled worker is exposed through the Supabase Edge Function at
 `supabase/functions/sync-tournament-sheets`. Configure Supabase Cron to invoke
 it every minute and set `TFTOURNEY_APP_URL` and `GOOGLE_SHEET_WORKER_SECRET` in
@@ -143,10 +170,17 @@ the local and deployed redirect URIs under OAuth2 → Redirects:
 
 ```text
 http://localhost:3000/api/auth/discord/callback
+http://localhost:3000/api/auth/discord/player/callback
 http://localhost:3000/api/auth/discord/bot-install/callback
 https://tftourney-app-production.up.railway.app/api/auth/discord/callback
+https://tftourney-app-production.up.railway.app/api/auth/discord/player/callback
 https://tftourney-app-production.up.railway.app/api/auth/discord/bot-install/callback
 ```
+
+Player sign-in with Discord (`/player/signin`) uses its own callback route
+(`/api/auth/discord/player/callback`), separate from the organizer
+manager-invite callback (`/api/auth/discord/callback`), so the two flows never
+share a redirect URI or a cookie.
 
 Run the worker locally with:
 
