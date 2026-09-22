@@ -115,9 +115,12 @@ behind Railway's proxy. Checklist for a working deployment:
 - Railway service variables: `TFTOURNEY_APP_URL` (the Railway public domain,
   with `https://`), `NEXT_PUBLIC_SUPABASE_URL`, `SUPABASE_SERVICE_ROLE_KEY`,
   `TFT_REQUIRE_AUTH=true`, `DISCORD_CLIENT_ID`, `DISCORD_CLIENT_SECRET`,
-  `DISCORD_BOT_TOKEN`, `PLAYER_SESSION_SECRET` (generate with
-  `openssl rand -base64 32`), and for Sheets publishing `GOOGLE_CLIENT_ID`,
-  `GOOGLE_CLIENT_SECRET`, `GOOGLE_TOKEN_ENCRYPTION_KEY`.
+  `DISCORD_BOT_TOKEN`, and for Sheets publishing `GOOGLE_CLIENT_ID`,
+  `GOOGLE_CLIENT_SECRET`, `GOOGLE_TOKEN_ENCRYPTION_KEY`. Recommended:
+  `PLAYER_SESSION_SECRET` (generate with `openssl rand -base64 32`) — without
+  it, player Discord sign-in still works by deriving a signing key from
+  `SUPABASE_SERVICE_ROLE_KEY`, but an explicit secret means player sessions
+  survive a service-role-key rotation.
 - Supabase Dashboard → Authentication → URL Configuration → add
   `https://<railway-domain>/api/auth/google/callback` to the redirect
   allow list (the Google Cloud OAuth client itself only needs the Supabase

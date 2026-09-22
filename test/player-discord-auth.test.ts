@@ -91,6 +91,74 @@ test("player Discord callback exchanges the code, claims the account, and sets t
   }
 });
 
+test("player Discord callback succeeds without PLAYER_SESSION_SECRET by deriving a key from SUPABASE_SERVICE_ROLE_KEY", async () => {
+  const saved = snapshotEnv(ENV_KEYS);
+  const originalFetch = globalThis.fetch;
+  setEnv();
+  delete process.env.PLAYER_SESSION_SECRET;
+  globalThis.fetch = (async (input: RequestInfo | URL) => {
+    const url = String(input);
+    if (url.includes("/oauth2/token")) {
+      return new Response(JSON.stringify({ access_token: "discord-access" }), { status: 200 });
+    }
+    if (url.includes("/users/@me")) {
+      return new Response(JSON.stringify({ id: "discord-1", username: "FuuTime", avatar: "abcd" }), { status: 200 });
+    }
+    if (url.includes("/rpc/claim_or_create_player_by_discord")) {
+      return new Response(
+        JSON.stringify([{ id: 42, discord_user_id: "discord-1", discord_username: "FuuTime", discord_avatar: "abcd", riot_puuid: null, riot_game_tag: null, auth_user_id: null, email: null, created_at: "2026-09-21T00:00:00Z", updated_at: "2026-09-21T00:00:00Z" }]),
+        { status: 200 },
+      );
+    }
+    throw new Error(`Unexpected callback request: ${url}`);
+  }) as typeof fetch;
+  try {
+    const response = await callback(
+      new Request("https://app.example/api/auth/discord/player/callback?code=oauth-code&state=state-1", {
+        headers: {
+          cookie:
+            "tftourney-player-discord-state=state-1; tftourney-player-discord-return-to=%2Fplayer",
+        },
+      }),
+    );
+    assert.equal(response.status, 307);
+    assert.equal(response.headers.get("location"), "/player?playerAuth=success");
+    assert.match(response.headers.get("set-cookie") ?? "", new RegExp(`${PLAYER_SESSION_COOKIE_NAME}=`));
+  } finally {
+    globalThis.fetch = originalFetch;
+    restoreEnv(saved);
+  }
+});
+
+test("player Discord callback fails with player_session_not_configured when neither PLAYER_SESSION_SECRET nor SUPABASE_SERVICE_ROLE_KEY is set", async () => {
+  const saved = snapshotEnv(ENV_KEYS);
+  const originalFetch = globalThis.fetch;
+  setEnv();
+  delete process.env.PLAYER_SESSION_SECRET;
+  delete process.env.SUPABASE_SERVICE_ROLE_KEY;
+  globalThis.fetch = (async () => {
+    throw new Error("fetch should not be called");
+  }) as typeof fetch;
+  try {
+    const response = await callback(
+      new Request("https://app.example/api/auth/discord/player/callback?code=oauth-code&state=state-1", {
+        headers: {
+          cookie:
+            "tftourney-player-discord-state=state-1; tftourney-player-discord-return-to=%2Fplayer",
+        },
+      }),
+    );
+    assert.equal(response.status, 307);
+    assert.equal(
+      response.headers.get("location"),
+      "/player/signin?playerAuthError=player_session_not_configured&returnTo=%2Fplayer",
+    );
+  } finally {
+    globalThis.fetch = originalFetch;
+    restoreEnv(saved);
+  }
+});
+
 test("player Discord callback rejects a mismatched state", async () => {
   const saved = snapshotEnv(ENV_KEYS);
   const originalFetch = globalThis.fetch;
