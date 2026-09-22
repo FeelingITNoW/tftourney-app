@@ -57,7 +57,16 @@ async function handle(request: Request): Promise<Response> {
   // silently falling back to a plain sign-in/signup, which would link (or
   // create) the wrong account without the player realizing their original
   // intent was ignored.
-  if (mode === "link" && !activeSession) return playerFail(request, "discord_link_requires_session");
+  if (mode === "link" && !activeSession) {
+    // Distinguish "no session cookie arrived at all" from "a cookie arrived
+    // but didn't verify" (expired/tampered/wrong secret) without logging the
+    // token itself.
+    const rawSessionCookie = cookieValue(request, PLAYER_SESSION_COOKIE_NAME);
+    console.error("[discord-auth] Discord link requires an active player session", {
+      sessionCookiePresent: rawSessionCookie.length > 0,
+    });
+    return playerFail(request, "discord_link_requires_session");
+  }
 
   const appUrl = getAppOrigin(request);
   const tokenResponse = await fetch("https://discord.com/api/v10/oauth2/token", {

@@ -31,9 +31,15 @@ function safeReturnTo(value: string): string {
 export default async function PlayerSignInPage({ searchParams }: { searchParams: SearchParams }) {
   const query = await searchParams;
   const returnTo = safeReturnTo(first(query.returnTo) || "/player");
-  const player = await getPlayerSession();
-  if (player) redirect(returnTo);
   const error = first(query.playerAuthError);
+  const player = await getPlayerSession();
+  // A signed-in player can still land here with an error -- e.g. the Discord
+  // "link" flow fails here when the session expires mid-OAuth-round-trip,
+  // and by the time the browser gets back here the (new) session is valid
+  // again. Auto-redirecting away in that case silently threw the error away
+  // and bounced the player back to returnTo with no indication anything went
+  // wrong. Only skip the sign-in page when there is nothing to show.
+  if (player && !error) redirect(returnTo);
 
   return (
     <main className="min-h-screen bg-stone-50 px-6 py-12 text-zinc-950 sm:px-8">
