@@ -23,24 +23,46 @@ function needsRefresh(expiresAt: number | undefined): boolean {
   return expiresAt !== undefined && expiresAt <= Math.floor(Date.now() / 1000) + 60;
 }
 
-async function refreshSession(session: ReturnType<typeof decodeSessionCookie>) {
-  if (!session?.refreshToken) return null;
+type RefreshOutcome =
+  | { kind: "refreshed"; session: { accessToken: string; refreshToken: string; expiresAt: number } }
+  | { kind: "rejected" }
+  | { kind: "error" };
+
+// A non-OK response from Supabase means the refresh token is genuinely no
+// longer valid -- the caller should sign the host out. A thrown error (network
+// blip, DNS hiccup, Supabase briefly unreachable) says nothing about whether
+// the session is still good, so the caller must NOT treat it the same way:
+// doing so would sign out every host on the next transient failure and, worse,
+// turn it into a 500 for any Route Handler that reads the session through
+// getHostUserId(request) without going through this proxy at all.
+async function refreshSession(session: ReturnType<typeof decodeSessionCookie>): Promise<RefreshOutcome> {
+  if (!session?.refreshToken) return { kind: "rejected" };
   const config = supabaseConfig();
-  if (!config) return null;
-  const response = await fetch(`${config.url}/auth/v1/token?grant_type=refresh_token`, {
-    method: "POST",
-    headers: { apikey: config.key, "Content-Type": "application/json" },
-    body: JSON.stringify({ refresh_token: session.refreshToken }),
-    cache: "no-store",
-  });
-  if (!response.ok) return null;
-  const token = (await response.json()) as RefreshedToken;
-  if (!token.access_token) return null;
-  return {
-    accessToken: token.access_token,
-    refreshToken: token.refresh_token ?? session.refreshToken,
-    expiresAt: Math.floor(Date.now() / 1000) + (token.expires_in ?? 3600),
-  };
+  if (!config) return { kind: "rejected" };
+  try {
+    const response = await fetch(`${config.url}/auth/v1/token?grant_type=refresh_token`, {
+      method: "POST",
+      headers: { apikey: config.key, "Content-Type": "application/json" },
+      body: JSON.stringify({ refresh_token: session.refreshToken }),
+      cache: "no-store",
+    });
+    if (!response.ok) return { kind: "rejected" };
+    const token = (await response.json()) as RefreshedToken;
+    if (!token.access_token) return { kind: "rejected" };
+    return {
+      kind: "refreshed",
+      session: {
+        accessToken: token.access_token,
+        refreshToken: token.refresh_token ?? session.refreshToken,
+        expiresAt: Math.floor(Date.now() / 1000) + (token.expires_in ?? 3600),
+      },
+    };
+  } catch (error) {
+    console.error("[session-refresh] Refresh request failed; leaving the session cookie unchanged", {
+      message: error instanceof Error ? error.message : String(error),
+    });
+    return { kind: "error" };
+  }
 }
 
 export async function proxy(request: NextRequest) {
@@ -58,17 +80,18 @@ export async function proxy(request: NextRequest) {
   const session = decodeSessionCookie(request.cookies.get(SESSION_COOKIE_NAME)?.value);
   if (!session || !needsRefresh(session.expiresAt)) return NextResponse.next();
 
-  const refreshed = await refreshSession(session);
-  if (!refreshed) {
+  const outcome = await refreshSession(session);
+  if (outcome.kind === "error") return NextResponse.next();
+  if (outcome.kind === "rejected") {
     request.cookies.delete(SESSION_COOKIE_NAME);
     const response = NextResponse.next({ request });
     response.cookies.delete(SESSION_COOKIE_NAME);
     return response;
   }
 
-  request.cookies.set(SESSION_COOKIE_NAME, encodeSessionCookie(refreshed));
+  request.cookies.set(SESSION_COOKIE_NAME, encodeSessionCookie(outcome.session));
   const response = NextResponse.next({ request });
-  response.cookies.set(SESSION_COOKIE_NAME, encodeSessionCookie(refreshed), sessionCookieOptions());
+  response.cookies.set(SESSION_COOKIE_NAME, encodeSessionCookie(outcome.session), sessionCookieOptions());
   return response;
 }
 

@@ -1,6 +1,7 @@
 import { createHash, randomBytes } from "node:crypto";
 import { NextResponse } from "next/server";
-import { getAppOrigin } from "../../../../lib/app-url";
+import { appRedirect, getAppOrigin } from "../../../../lib/app-url";
+import { errorLogFields } from "../../../../lib/auth/log";
 
 export const runtime = "nodejs";
 
@@ -18,7 +19,7 @@ function authIntent(value: string | null): "signin" | "sheets" {
   return value === "sheets" ? "sheets" : "signin";
 }
 
-export async function GET(request: Request) {
+async function handle(request: Request): Promise<Response> {
   const requestUrl = new URL(request.url);
   const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL ?? process.env.SUPABASE_URL;
   const supabaseKey = process.env.SUPABASE_SERVICE_ROLE_KEY ?? process.env.SUPABASE_ANON_KEY;
@@ -27,9 +28,7 @@ export async function GET(request: Request) {
   const returnTo = safeReturnPath(requestUrl.searchParams.get("returnTo"));
   const intent = authIntent(requestUrl.searchParams.get("intent"));
   if (intent === "sheets" && !process.env.GOOGLE_TOKEN_ENCRYPTION_KEY) {
-    const destination = new URL(returnTo, request.url);
-    destination.searchParams.set("authError", "google_token_encryption_missing");
-    return NextResponse.redirect(destination);
+    return appRedirect(returnTo, { authError: "google_token_encryption_missing" });
   }
 
   const verifier = base64Url(randomBytes(32));
@@ -69,4 +68,13 @@ export async function GET(request: Request) {
     path: "/api/auth/google",
   });
   return response;
+}
+
+export async function GET(request: Request): Promise<Response> {
+  try {
+    return await handle(request);
+  } catch (error) {
+    console.error("[google-auth] Authorize failed unexpectedly", errorLogFields(error));
+    return appRedirect("/signin", { authError: "google_oauth_failed" });
+  }
 }

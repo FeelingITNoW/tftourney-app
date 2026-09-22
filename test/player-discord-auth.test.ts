@@ -72,9 +72,7 @@ test("player Discord callback exchanges the code, claims the account, and sets t
       }),
     );
     assert.equal(response.status, 307);
-    const location = new URL(response.headers.get("location") as string);
-    assert.equal(location.pathname, "/player");
-    assert.equal(location.searchParams.get("playerAuth"), "success");
+    assert.equal(response.headers.get("location"), "/player?playerAuth=success");
     assert.match(response.headers.get("set-cookie") ?? "", new RegExp(`${PLAYER_SESSION_COOKIE_NAME}=`));
     const claim = calls.find((call) => call.url.includes("/rpc/claim_or_create_player_by_discord"));
     assert.ok(claim);
@@ -83,6 +81,10 @@ test("player Discord callback exchanges the code, claims the account, and sets t
       p_discord_username: "FuuTime",
       p_discord_avatar: "abcd",
     });
+    const tokenExchange = calls.find((call) => call.url.includes("/oauth2/token"));
+    assert.ok(tokenExchange);
+    const body = new URLSearchParams(String(tokenExchange!.body));
+    assert.equal(body.get("redirect_uri"), "https://app.example/api/auth/discord/player/callback");
   } finally {
     globalThis.fetch = originalFetch;
     restoreEnv(saved);
@@ -106,9 +108,7 @@ test("player Discord callback rejects a mismatched state", async () => {
       }),
     );
     assert.equal(response.status, 307);
-    const location = new URL(response.headers.get("location") as string);
-    assert.equal(location.pathname, "/player/signin");
-    assert.equal(location.searchParams.get("playerAuthError"), "discord_state_invalid");
+    assert.equal(response.headers.get("location"), "/player/signin?playerAuthError=discord_state_invalid&returnTo=%2Fplayer");
   } finally {
     globalThis.fetch = originalFetch;
     restoreEnv(saved);
@@ -133,8 +133,30 @@ test("player Discord callback fails cleanly when OAuth is not configured", async
       }),
     );
     assert.equal(response.status, 307);
-    const location = new URL(response.headers.get("location") as string);
-    assert.equal(location.searchParams.get("playerAuthError"), "discord_oauth_not_configured");
+    assert.equal(response.headers.get("location"), "/player/signin?playerAuthError=discord_oauth_not_configured&returnTo=%2Fplayer");
+  } finally {
+    globalThis.fetch = originalFetch;
+    restoreEnv(saved);
+  }
+});
+test("player Discord callback fails soft instead of throwing when a provider request errors unexpectedly", async () => {
+  const saved = snapshotEnv(ENV_KEYS);
+  const originalFetch = globalThis.fetch;
+  setEnv();
+  globalThis.fetch = (async (input: RequestInfo | URL) => {
+    const url = String(input);
+    if (url.includes("/oauth2/token")) return new Response(JSON.stringify({ access_token: "discord-access" }), { status: 200 });
+    if (url.includes("/users/@me")) throw new Error("network unreachable");
+    throw new Error(`Unexpected callback request: ${url}`);
+  }) as typeof fetch;
+  try {
+    const response = await callback(
+      new Request("https://app.example/api/auth/discord/player/callback?code=oauth-code&state=state-1", {
+        headers: { cookie: "tftourney-player-discord-state=state-1; tftourney-player-discord-return-to=%2Fplayer" },
+      }),
+    );
+    assert.equal(response.status, 307);
+    assert.equal(response.headers.get("location"), "/player/signin?playerAuthError=discord_oauth_failed&returnTo=%2Fplayer");
   } finally {
     globalThis.fetch = originalFetch;
     restoreEnv(saved);

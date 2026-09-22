@@ -23,8 +23,13 @@ Configure these OAuth callback URLs:
 
 ```text
 https://deploy-tapping-unwed.ngrok-free.dev/api/auth/discord/callback
+https://deploy-tapping-unwed.ngrok-free.dev/api/auth/discord/player/callback
 https://deploy-tapping-unwed.ngrok-free.dev/api/auth/discord/bot-install/callback
 ```
+
+The player and manager-invite flows use separate callback routes (and
+therefore separate redirect URIs) so a stale cookie from one flow can never be
+mistaken for the other; see [Player accounts](#player-accounts) below.
 
 The manager claim flow requests `identify guilds.join`. The claimant must first sign in to TFTourney with Google, then open the one-time manager link. The bot adds the Discord member and assigns the tournament-specific role before activating the app manager record.
 
@@ -48,8 +53,11 @@ DISCORD_CLIENT_ID=
 DISCORD_CLIENT_SECRET=
 DISCORD_BOT_TOKEN=
 DISCORD_BOT_API_SECRET=
-DISCORD_OAUTH_STATE_SECRET=
+PLAYER_SESSION_SECRET=
 ```
+
+`PLAYER_SESSION_SECRET` signs the stateless player session cookie set by player
+Discord sign-in; generate one with `openssl rand -base64 32`.
 
 Run the app and worker in separate supervised processes:
 
@@ -105,12 +113,14 @@ by index and ignores unknown fields, so older bot builds keep working while the
 membership id becomes available. Web players sign in with Discord at
 `/api/auth/discord/player` and manage their tournaments at `/player`.
 
-The player OAuth flow reuses the registered `/api/auth/discord/callback`
-redirect URI (it sets a `tftourney-player-discord-state` cookie, and the shared
-callback routes to the player flow when that cookie is present). Do not add a
-separate player callback URL to the Discord Developer Portal redirect list
-unless you also change the authorize route to use it — Discord returns
-`invalid oauth2 redirect_uri` for any unregistered redirect URI.
+The player OAuth flow uses its own redirect URI, `/api/auth/discord/player/callback`
+(`PLAYER_DISCORD_CALLBACK_PATH` in `lib/auth/player-discord-oauth.ts`), separate
+from the organizer manager-invite flow's `/api/auth/discord/callback`. Register
+both in the Discord Developer Portal's redirect list (see
+[Discord application setup](#discord-application-setup)) — Discord returns
+`invalid oauth2 redirect_uri` for any unregistered redirect URI. Player sign-in
+also requires `PLAYER_SESSION_SECRET` to be set (see [Environment](#environment));
+without it the callback fails with `player_session_not_configured`.
 
 ## Check-in
 

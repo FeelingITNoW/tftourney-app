@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { getAppOrigin, getAppOriginFromHost } from "../lib/app-url";
+import { appRedirect, getAppOrigin, getAppOriginFromHost } from "../lib/app-url";
 
 type Saved = Record<string, string | undefined>;
 
@@ -68,4 +68,82 @@ test("getAppOriginFromHost returns an empty string when the host is missing", ()
     assert.equal(getAppOriginFromHost(null), "");
     assert.equal(getAppOriginFromHost(undefined), "");
   });
+});
+
+test("getAppOrigin adds https:// to a scheme-less configured deployment URL", () => {
+  withEnv("tftourney-app-production.up.railway.app", () => {
+    assert.equal(getAppOrigin(), "https://tftourney-app-production.up.railway.app");
+  });
+});
+
+test("getAppOrigin adds http:// to a scheme-less localhost configured URL", () => {
+  withEnv("localhost:3000", () => {
+    assert.equal(getAppOrigin(), "http://localhost:3000");
+  });
+});
+
+test("getAppOrigin ignores an invalid configured URL and falls back", () => {
+  withEnv("not a url", () => {
+    assert.equal(getAppOrigin(new Request("https://app.example/api/auth/google")), "https://app.example");
+  });
+});
+
+test("getAppOrigin uses forwarded headers before the request origin", () => {
+  withEnv(undefined, () => {
+    const request = new Request("http://localhost:8080/api/auth/google", {
+      headers: { "x-forwarded-proto": "https", "x-forwarded-host": "tftourney-app-production.up.railway.app" },
+    });
+    assert.equal(getAppOrigin(request), "https://tftourney-app-production.up.railway.app");
+  });
+});
+
+test("getAppOrigin uses only the first value of a comma-separated forwarded header", () => {
+  withEnv(undefined, () => {
+    const request = new Request("http://localhost:8080/api/auth/google", {
+      headers: { "x-forwarded-proto": "https, http", "x-forwarded-host": "app.example, internal.proxy" },
+    });
+    assert.equal(getAppOrigin(request), "https://app.example");
+  });
+});
+
+test("getAppOrigin ignores x-forwarded-port so it never appends the internal listen port", () => {
+  withEnv(undefined, () => {
+    const request = new Request("http://localhost:8080/api/auth/google", {
+      headers: { "x-forwarded-proto": "https", "x-forwarded-host": "app.example", "x-forwarded-port": "8080" },
+    });
+    assert.equal(getAppOrigin(request), "https://app.example");
+  });
+});
+
+test("getAppOrigin falls back to RAILWAY_PUBLIC_DOMAIN when configured and forwarded headers are both absent", () => {
+  withEnv(undefined, () => {
+    const saved = process.env.RAILWAY_PUBLIC_DOMAIN;
+    process.env.RAILWAY_PUBLIC_DOMAIN = "tftourney-app-production.up.railway.app";
+    try {
+      assert.equal(getAppOrigin(new Request("http://localhost:8080/api/auth/google")), "https://tftourney-app-production.up.railway.app");
+    } finally {
+      if (saved === undefined) delete process.env.RAILWAY_PUBLIC_DOMAIN;
+      else process.env.RAILWAY_PUBLIC_DOMAIN = saved;
+    }
+  });
+});
+
+test("appRedirect returns a relative Location header", () => {
+  const response = appRedirect("/dashboard");
+  assert.equal(response.status, 307);
+  assert.equal(response.headers.get("location"), "/dashboard");
+});
+
+test("appRedirect appends and encodes query params", () => {
+  const response = appRedirect("/signin", { authError: "google_oauth_failed", returnTo: "/a b" });
+  const location = response.headers.get("location") ?? "";
+  assert.match(location, /^\/signin\?/);
+  const params = new URLSearchParams(location.split("?")[1]);
+  assert.equal(params.get("authError"), "google_oauth_failed");
+  assert.equal(params.get("returnTo"), "/a b");
+});
+
+test("appRedirect rejects a protocol-relative path and uses the fallback", () => {
+  const response = appRedirect("//evil.example/phish");
+  assert.equal(response.headers.get("location"), "/");
 });
