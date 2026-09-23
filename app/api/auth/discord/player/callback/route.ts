@@ -69,6 +69,12 @@ async function handle(request: Request): Promise<Response> {
   }
 
   const appUrl = getAppOrigin(request);
+  // Discord requires this to be byte-identical to the redirect_uri sent at the
+  // authorize step (app/api/auth/discord/player/route.ts), which builds it the
+  // same way. A mismatch here is rejected with invalid_grant, so log both the
+  // URI we sent and Discord's own error body -- guessing at this failure from
+  // a generic "sign-in could not be completed" is impossible otherwise.
+  const redirectUri = `${appUrl.replace(/\/$/, "")}${PLAYER_DISCORD_CALLBACK_PATH}`;
   const tokenResponse = await fetch("https://discord.com/api/v10/oauth2/token", {
     method: "POST",
     headers: { "Content-Type": "application/x-www-form-urlencoded" },
@@ -77,12 +83,23 @@ async function handle(request: Request): Promise<Response> {
       client_secret: clientSecret,
       grant_type: "authorization_code",
       code,
-      redirect_uri: `${appUrl.replace(/\/$/, "")}${PLAYER_DISCORD_CALLBACK_PATH}`,
+      redirect_uri: redirectUri,
     }),
   });
-  if (!tokenResponse.ok) return playerFail(request, "discord_oauth_failed");
+  if (!tokenResponse.ok) {
+    console.error("[discord-auth] Discord token exchange failed", {
+      status: tokenResponse.status,
+      body: (await tokenResponse.text()).slice(0, 500),
+      redirectUri,
+      mode,
+    });
+    return playerFail(request, "discord_oauth_failed");
+  }
   const token = (await tokenResponse.json()) as { access_token?: string };
-  if (!token.access_token) return playerFail(request, "discord_oauth_failed");
+  if (!token.access_token) {
+    console.error("[discord-auth] Discord token response had no access_token", { redirectUri, mode });
+    return playerFail(request, "discord_oauth_failed");
+  }
   const userResponse = await fetch("https://discord.com/api/v10/users/@me", {
     headers: { Authorization: `Bearer ${token.access_token}` },
   });
