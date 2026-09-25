@@ -1,6 +1,7 @@
 import Link from "next/link";
 import { redirect } from "next/navigation";
 import { signInPlayerAccountAction } from "@/app/player/actions";
+import { SiteHeader } from "@/components/layout/site-header";
 import { PendingButton } from "@/components/ui/pending-button";
 import { getPlayerSession } from "@/lib/auth/player-session";
 
@@ -42,12 +43,11 @@ export default async function PlayerSignInPage({ searchParams }: { searchParams:
   if (player && !error) redirect(returnTo);
 
   return (
-    <main className="min-h-screen bg-stone-50 px-6 py-12 text-zinc-950 sm:px-8">
+    <main className="min-h-screen bg-stone-50 text-zinc-950">
+      <SiteHeader maxWidthClassName="max-w-md" mode="player" showNav={false} subtitle="Sign in to play" />
+      <div className="px-6 pb-12 pt-10 sm:px-8">
       <div className="mx-auto max-w-md">
-        <Link className="text-sm font-semibold uppercase tracking-[0.12em] text-emerald-700" href="/">
-          TFTourney
-        </Link>
-        <section className="mt-10 rounded-xl border border-zinc-200 bg-white p-7 shadow-sm">
+        <section className="rounded-xl border border-zinc-200 bg-white p-7 shadow-sm">
           <p className="text-sm font-semibold uppercase tracking-[0.12em] text-amber-700">Player access</p>
           <h1 className="mt-3 text-3xl font-semibold tracking-tight">Sign in to play.</h1>
           <p className="mt-4 text-sm leading-6 text-zinc-600">Sign in with your username and password to see available tournaments, sign up, and manage your account.</p>
@@ -80,8 +80,9 @@ export default async function PlayerSignInPage({ searchParams }: { searchParams:
               Create an account
             </Link>
           </p>
-          <Link className="mt-4 block text-center text-sm font-semibold text-emerald-800 hover:text-emerald-950" href="/">Continue browsing tournaments</Link>
+          <Link className="mt-4 block text-center text-sm font-semibold text-emerald-800 hover:text-emerald-950" href="/tournaments">Continue browsing tournaments</Link>
         </section>
+      </div>
       </div>
     </main>
   );
