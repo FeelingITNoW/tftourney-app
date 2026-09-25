@@ -1,6 +1,9 @@
 import Link from "next/link";
 import { checkInForTournamentAction, signUpForTournamentAction } from "@/app/player/actions";
+import { PlayerAccountChip } from "@/components/account/player-account-chip";
+import { SiteHeader } from "@/components/layout/site-header";
 import { PendingButton } from "@/components/ui/pending-button";
+import { getOrganizerSession } from "@/lib/auth/session";
 import { requirePlayer } from "@/lib/auth/player-session";
 import { getPlayerAccountById } from "@/lib/db/players/api";
 import { getPlayerDashboard } from "@/lib/db/players/dashboard";
@@ -115,9 +118,10 @@ function TournamentTable({ tournaments, hasRiotId, showSignUp }: { tournaments: 
 export default async function PlayerPage({ searchParams }: { searchParams: PlayerSearchParams }) {
   const query = await searchParams;
   const session = await requirePlayer("/player");
-  const [account, dashboard] = await Promise.all([
+  const [account, dashboard, organizer] = await Promise.all([
     getPlayerAccountById(session.playerAccountId).catch(() => null),
     getPlayerDashboard(session.playerAccountId).catch(() => null),
+    getOrganizerSession(),
   ]);
   const error = first(query.playerError);
   const signedUp = first(query.playerSignedUp);
@@ -133,33 +137,15 @@ export default async function PlayerPage({ searchParams }: { searchParams: Playe
 
   return (
     <main className="min-h-screen bg-stone-50 text-zinc-950">
+      <SiteHeader
+        actions={<PlayerAccountChip avatarUrl={avatarUrl} displayName={displayName} />}
+        maxWidthClassName="max-w-5xl"
+        mode="player"
+        subtitle="Player home"
+        switchHref={organizer ? "/dashboard" : undefined}
+        switchLabel="Switch to host view"
+      />
       <div className="mx-auto flex min-h-screen w-full max-w-5xl flex-col px-6 py-6 sm:px-8 lg:px-10">
-        <header className="flex flex-wrap items-center justify-between gap-3 border-b border-zinc-200 pb-5">
-          <div>
-            <Link className="text-sm font-semibold uppercase tracking-[0.12em] text-emerald-700 hover:text-emerald-900" href="/">
-              TFTourney
-            </Link>
-            <p className="mt-1 text-sm text-zinc-500">Player home</p>
-          </div>
-          <div className="flex items-center gap-3">
-            <Link className="flex items-center gap-2 rounded-full border border-zinc-200 bg-white py-1 pl-1 pr-3 shadow-sm hover:border-zinc-300" href="/player/account" title="Manage your account">
-              {avatarUrl ? (
-                // eslint-disable-next-line @next/next/no-img-element -- external Discord CDN avatar, dimensions are fixed
-                <img alt={`${displayName} avatar`} className="h-9 w-9 rounded-full object-cover" height={36} src={avatarUrl} width={36} />
-              ) : (
-                <span aria-hidden="true" className="flex h-9 w-9 items-center justify-center rounded-full bg-indigo-600 text-sm font-semibold text-white">
-                  {displayName.slice(0, 1).toUpperCase()}
-                </span>
-              )}
-              <span className="flex flex-col leading-tight">
-                <span className="text-xs font-semibold text-zinc-900">{displayName}</span>
-                <span className="text-[11px] font-medium text-zinc-500">Manage account</span>
-              </span>
-            </Link>
-            <a className="text-sm font-semibold text-zinc-500 hover:text-zinc-900" href={`/api/auth/signout?returnTo=${encodeURIComponent("/")}`}>Sign out</a>
-          </div>
-        </header>
-
         <section className="py-10">
           <p className="text-sm font-semibold uppercase tracking-[0.12em] text-amber-700">Available tournaments</p>
           <h1 className="mt-3 text-4xl font-semibold tracking-tight">Play TFT tournaments</h1>

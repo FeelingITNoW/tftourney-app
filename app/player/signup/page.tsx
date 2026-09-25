@@ -2,6 +2,7 @@ import Link from "next/link";
 import { cookies } from "next/headers";
 import { redirect } from "next/navigation";
 import { signUpPlayerAccountAction } from "@/app/player/actions";
+import { SiteHeader } from "@/components/layout/site-header";
 import { PendingButton } from "@/components/ui/pending-button";
 import { getPlayerSession } from "@/lib/auth/player-session";
 import {
@@ -45,12 +46,11 @@ export default async function PlayerSignUpPage({ searchParams }: { searchParams:
   const formError = first(query.formError);
 
   return (
-    <main className="min-h-screen bg-stone-50 px-6 py-12 text-zinc-950 sm:px-8">
-      <div className="mx-auto max-w-md">
-        <Link className="text-sm font-semibold uppercase tracking-[0.12em] text-emerald-700" href="/">
-          TFTourney
-        </Link>
-        <section className="mt-10 rounded-xl border border-zinc-200 bg-white p-7 shadow-sm">
+    <main className="min-h-screen bg-stone-50 text-zinc-950">
+      <SiteHeader maxWidthClassName="max-w-md" mode="player" showNav={false} subtitle="Create a player account" />
+      <div className="px-6 pb-12 pt-10 sm:px-8">
+        <div className="mx-auto max-w-md">
+        <section className="rounded-xl border border-zinc-200 bg-white p-7 shadow-sm">
           <p className="text-sm font-semibold uppercase tracking-[0.12em] text-amber-700">Player access</p>
           <h1 className="mt-3 text-3xl font-semibold tracking-tight">Create your account.</h1>
           <p className="mt-4 text-sm leading-6 text-zinc-600">
@@ -95,6 +95,7 @@ export default async function PlayerSignUpPage({ searchParams }: { searchParams:
             </Link>
           </p>
         </section>
+        </div>
       </div>
     </main>
   );

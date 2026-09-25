@@ -1,5 +1,6 @@
-import Link from "next/link";
 import { AccountHeader } from "@/components/account/account-header";
+import { SiteHeader } from "@/components/layout/site-header";
+import { getPlayerSession } from "@/lib/auth/player-session";
 import { getOrganizerSession } from "@/lib/auth/session";
 import { notFound } from "next/navigation";
 import { LobbyResultsEditor } from "@/components/tournaments/lobby-results-editor";
@@ -38,7 +39,10 @@ export default async function LobbyScoresPage({
   searchParams: LobbyPageSearchParams;
 }) {
   const { tournamentId, lobbyId } = await params;
-  const organizer = await getOrganizerSession();
+  const [organizer, playerSession] = await Promise.all([
+    getOrganizerSession(),
+    getPlayerSession(),
+  ]);
   const query = await searchParams;
   const returnGame = getSearchValue(query.game);
   const returnPage = getSearchValue(query.page);
@@ -78,6 +82,11 @@ export default async function LobbyScoresPage({
     tournamentHeader && organizer && await isTournamentManager(tournamentId, organizer.hostUserId).catch(() => false),
   );
   const isReadOnly = tournamentHeader?.status === "completed" || !isTournamentOperator;
+  const viewerMode: "host" | "player" | "public" = isTournamentOperator
+    ? "host"
+    : playerSession
+      ? "player"
+      : "public";
   const backQuery = new URLSearchParams();
   if (returnGame) {
     backQuery.set("game", returnGame);
@@ -94,22 +103,18 @@ export default async function LobbyScoresPage({
 
   return (
     <main className="min-h-screen bg-stone-50 text-zinc-950">
+      <SiteHeader
+        actions={
+          viewerMode === "player" ? undefined : <AccountHeader organizer={organizer} returnTo={backToTournamentHref} />
+        }
+        backHref={backToTournamentHref}
+        backLabel="Back to lobby browser"
+        maxWidthClassName="max-w-5xl"
+        mode={viewerMode}
+        showNav={false}
+        subtitle={viewerMode === "host" ? "Record official results" : "Lobby results (read-only)"}
+      />
       <div className="mx-auto flex min-h-screen w-full max-w-5xl flex-col px-6 py-6 sm:px-8 lg:px-10">
-        <header className="flex items-center justify-between border-b border-zinc-200 pb-5">
-          <div>
-            <Link
-              className="text-sm font-semibold uppercase tracking-[0.12em] text-emerald-700 hover:text-emerald-900"
-              href="/"
-            >
-              TFTourney
-            </Link>
-            <p className="mt-1 text-sm text-zinc-500">
-              Inspect the lobby and record official results
-            </p>
-          </div>
-          <div className="flex items-center gap-4"><Link className="rounded-md border border-zinc-200 bg-white px-3 py-2 text-sm font-medium text-zinc-600 shadow-sm hover:bg-zinc-50" href={backToTournamentHref}>Back to lobby browser</Link><AccountHeader organizer={organizer} returnTo={backToTournamentHref} /></div>
-        </header>
-
         {databaseError ? (
           <section className="py-10">
             <div className="rounded-md border border-amber-200 bg-amber-50 p-4">

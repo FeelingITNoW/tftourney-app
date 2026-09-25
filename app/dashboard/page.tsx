@@ -1,7 +1,9 @@
 import Link from "next/link";
 import { redirect } from "next/navigation";
 import { AccountHeader } from "@/components/account/account-header";
+import { SiteHeader } from "@/components/layout/site-header";
 import { TournamentPagination } from "@/components/tournaments/tournament-pagination";
+import { getPlayerSession } from "@/lib/auth/player-session";
 import { requireOrganizer } from "@/lib/auth/session";
 import {
   listHostedTournaments,
@@ -30,7 +32,10 @@ export default async function DashboardPage({
   if (parsedPage.redirectPage !== null) {
     redirect(buildPageHref("/dashboard", parsedPage.redirectPage));
   }
-  const organizer = await requireOrganizer("/dashboard");
+  const [organizer, player] = await Promise.all([
+    requireOrganizer("/dashboard"),
+    getPlayerSession(),
+  ]);
   let tournamentPage: TournamentListPageViewModel = {
     items: [],
     page: parsedPage.page,
@@ -54,22 +59,21 @@ export default async function DashboardPage({
 
   return (
     <main className="min-h-screen bg-stone-50 text-zinc-950">
+      <SiteHeader
+        actions={<AccountHeader organizer={organizer} returnTo="/dashboard" />}
+        mode="host"
+        subtitle="Your tournament dashboard"
+        switchHref={player ? "/player" : undefined}
+        switchLabel="Switch to player view"
+      />
       <div className="mx-auto flex min-h-screen w-full max-w-6xl flex-col px-6 py-6 sm:px-8 lg:px-10">
-        <header className="flex items-center justify-between border-b border-zinc-200 pb-5">
-          <div>
-            <Link className="text-sm font-semibold uppercase tracking-[0.12em] text-emerald-700" href="/">TFTourney</Link>
-            <p className="mt-1 text-sm text-zinc-500">Your tournament dashboard</p>
-          </div>
-          <AccountHeader organizer={organizer} returnTo="/dashboard" />
-        </header>
-
-        <section className="flex items-end justify-between gap-4 py-10">
+        <section className="flex flex-wrap items-end justify-between gap-4 py-10">
           <div>
             <p className="text-sm font-semibold uppercase tracking-[0.12em] text-amber-700">Organizer workspace</p>
             <h1 className="mt-3 text-4xl font-semibold tracking-tight">Hosted tournaments</h1>
             <p className="mt-3 max-w-xl text-base leading-7 text-zinc-600">Open a tournament to manage players, lobbies, results, and publishing.</p>
           </div>
-          <Link className="hidden rounded-md bg-zinc-950 px-4 py-2.5 text-sm font-semibold text-white hover:bg-zinc-800 sm:inline-flex" href="/tournaments/new">Create tournament</Link>
+          <Link className="inline-flex rounded-md bg-zinc-950 px-4 py-2.5 text-sm font-semibold text-white hover:bg-zinc-800" href="/tournaments/new">Create tournament</Link>
         </section>
 
         {databaseError ? (
@@ -107,7 +111,6 @@ export default async function DashboardPage({
             </div>
           </section>
         )}
-        <Link className="mt-5 inline-flex self-start rounded-md border border-zinc-300 bg-white px-4 py-2.5 text-sm font-semibold text-zinc-700 hover:bg-zinc-50 sm:hidden" href="/tournaments/new">Create tournament</Link>
       </div>
     </main>
   );

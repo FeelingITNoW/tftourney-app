@@ -17,12 +17,14 @@ import { TournamentDetails } from "@/components/tournaments/tournament-details";
 import { GoogleSheetsPublishingPanel } from "@/components/tournaments/google-sheets-publishing-panel";
 import { DiscordPanel } from "@/components/tournaments/discord-panel";
 import { AccountHeader } from "@/components/account/account-header";
+import { SiteHeader } from "@/components/layout/site-header";
 import { PendingButton } from "@/components/ui/pending-button";
 import {
   getTournamentPageViewModel,
   TOURNAMENT_STATUS_ACCEPTING_PLAYERS,
 } from "@/lib/db/tournaments/api";
 import type { TournamentDetail, TournamentDetailPageViewModel, TournamentPanelView } from "@/lib/db/tournaments/types";
+import { getPlayerSession } from "@/lib/auth/player-session";
 import { getOrganizerSession } from "@/lib/auth/session";
 import { selectTournamentEntrants } from "@/lib/tournament/start/api";
 import { getTournamentCheckInState, getTournamentDiscordConfig, isDiscordConfigPendingTooLong } from "@/lib/discord/api";
@@ -101,7 +103,10 @@ export default async function TournamentPage({
   const discordDisconnected = getSearchValue(query.discordDisconnected);
   const discordManagerGranted = getSearchValue(query.discordManager) === "granted";
   const managerInvite = getSearchValue(query.managerInvite);
-  const organizer = await getOrganizerSession();
+  const [organizer, playerSession] = await Promise.all([
+    getOrganizerSession(),
+    getPlayerSession(),
+  ]);
   const view: TournamentPanelView = requestedView === "scoresheet" || requestedView === "graph" || requestedView === "details" || requestedView === "lobbies"
     ? requestedView
     : "lobbies";
@@ -147,6 +152,13 @@ export default async function TournamentPage({
   }
 
   const isTournamentHost = Boolean(tournament && organizer && organizer.hostUserId === tournament.hostUserId);
+  const viewerMode: "host" | "player" | "public" = isTournamentHost
+    ? "host"
+    : playerSession
+      ? "player"
+      : "public";
+  const modeBackHref = viewerMode === "host" ? "/dashboard" : viewerMode === "player" ? "/player" : "/tournaments";
+  const modeBackLabel = viewerMode === "host" ? "Back to dashboard" : viewerMode === "player" ? "Back to player home" : "Back to tournaments";
   const rawDiscordConfig = tournament && isTournamentHost ? await getTournamentDiscordConfig(tournament.id).catch(() => null) : null;
   // A "disabled" config is a soft-disconnect (see disconnectDiscordAction):
   // treat it as not connected everywhere on this page.
@@ -239,22 +251,20 @@ export default async function TournamentPage({
             (rawDiscordConfig?.state === "disabled" && rawDiscordConfig.cleanupAction && !rawDiscordConfig.cleanupCompletedAt),
         )}
       />
+      <SiteHeader
+        actions={
+          viewerMode === "player" ? undefined : <AccountHeader organizer={organizer} returnTo={`/tournaments/${tournamentId}`} />
+        }
+        backHref={modeBackHref}
+        backLabel={modeBackLabel}
+        maxWidthClassName="max-w-5xl"
+        mode={viewerMode}
+        showNav={false}
+        subtitle="Registered players and tournament status"
+        switchHref={viewerMode === "host" && playerSession ? "/player" : viewerMode === "player" && organizer ? "/dashboard" : undefined}
+        switchLabel={viewerMode === "host" ? "Switch to player view" : "Switch to host view"}
+      />
       <div className="mx-auto flex min-h-screen w-full max-w-5xl flex-col px-6 py-6 sm:px-8 lg:px-10">
-        <header className="flex items-center justify-between border-b border-zinc-200 pb-5">
-          <div>
-            <Link
-              className="text-sm font-semibold uppercase tracking-[0.12em] text-emerald-700 hover:text-emerald-900"
-              href="/"
-            >
-              TFTourney
-            </Link>
-            <p className="mt-1 text-sm text-zinc-500">
-              Registered players and tournament status
-            </p>
-          </div>
-          <div className="flex items-center gap-4"><Link className="rounded-md border border-zinc-200 bg-white px-3 py-2 text-sm font-medium text-zinc-600 shadow-sm hover:bg-zinc-50" href="/">Back to tournaments</Link><AccountHeader organizer={organizer} returnTo={`/tournaments/${tournamentId}`} /></div>
-        </header>
-
         {databaseError ? (
           <section className="py-10">
             <div className="rounded-md border border-amber-200 bg-amber-50 p-4">
@@ -267,7 +277,21 @@ export default async function TournamentPage({
         ) : tournament ? (
           <>
             <div className="py-6">
-              {!isTournamentHost ? <div className="mb-4 rounded-md border border-zinc-200 bg-white p-4 text-sm text-zinc-600">You are viewing this tournament publicly. Sign in as its host to manage players, results, or Sheets publishing.</div> : null}
+              {viewerMode === "host" ? (
+                <div className="mb-4 rounded-md border border-emerald-200 bg-emerald-50 px-4 py-2 text-sm font-semibold text-emerald-900">
+                  Managing as host
+                </div>
+              ) : viewerMode === "player" ? (
+                <div className="mb-4 rounded-md border border-indigo-200 bg-indigo-50 p-4 text-sm text-indigo-900">
+                  You&apos;re viewing as a player. Sign up, check in, and manage your account from{" "}
+                  <Link className="underline" href="/player">
+                    Player home
+                  </Link>
+                  .
+                </div>
+              ) : (
+                <div className="mb-4 rounded-md border border-zinc-200 bg-white p-4 text-sm text-zinc-600">You are viewing this tournament publicly. Sign in as its host to manage players, results, or Sheets publishing.</div>
+              )}
               {isTournamentHost ? <GoogleSheetsPublishingPanel authError={authError} authSuccess={authSuccess} initialStatus={tournament.sheetStatus} initiallyAuthenticated={hasSheetSession} tournamentId={tournament.id} /> : <div className="rounded-lg border border-indigo-200 bg-indigo-50 p-5 text-sm text-indigo-900"><p className="font-semibold">Google Sheets scoreboard</p><p className="mt-1">The tournament host can connect Google Drive to generate and publish a workbook.</p></div>}
             </div>
             {authorizationError ? <p className="mb-5 rounded-md border border-red-200 bg-red-50 p-4 text-sm font-medium text-red-800" role="alert">{authorizationError}</p> : null}

@@ -1,4 +1,3 @@
-import Link from "next/link";
 import {
   changeEmailAction,
   changePasswordAction,
@@ -6,6 +5,7 @@ import {
   linkRiotAccountAction,
   unlinkDiscordAccountAction,
 } from "@/app/player/account/actions";
+import { SiteHeader } from "@/components/layout/site-header";
 import { PendingButton } from "@/components/ui/pending-button";
 import { requirePlayer } from "@/lib/auth/player-session";
 import { getPlayerAccountById } from "@/lib/db/players/api";
@@ -51,17 +51,21 @@ export default async function PlayerAccountPage({ searchParams }: { searchParams
 
   return (
     <main className="min-h-screen bg-stone-50 text-zinc-950">
+      <SiteHeader
+        actions={
+          <a className="text-sm font-semibold text-zinc-500 hover:text-zinc-900" href={`/api/auth/signout?returnTo=${encodeURIComponent("/")}`}>
+            Sign out
+          </a>
+        }
+        backHref="/player"
+        backLabel="Back to player home"
+        maxWidthClassName="max-w-3xl"
+        mode="player"
+        showNav={false}
+        subtitle="Your account"
+      />
       <div className="mx-auto flex min-h-screen w-full max-w-3xl flex-col px-6 py-6 sm:px-8">
-        <header className="flex flex-wrap items-center justify-between gap-3 border-b border-zinc-200 pb-5">
-          <div>
-            <Link className="text-sm font-semibold uppercase tracking-[0.12em] text-emerald-700 hover:text-emerald-900" href="/player">
-              ← Player home
-            </Link>
-            <p className="mt-1 text-2xl font-semibold tracking-tight">Your account</p>
-          </div>
-          <a className="text-sm font-semibold text-zinc-500 hover:text-zinc-900" href={`/api/auth/signout?returnTo=${encodeURIComponent("/")}`}>Sign out</a>
-        </header>
-
+        <h1 className="pt-2 text-2xl font-semibold tracking-tight">Your account</h1>
         {error ? <p className="mt-6 rounded-md border border-red-200 bg-red-50 p-4 text-sm font-medium text-red-800" role="alert">{error}</p> : null}
         {updated ? <p className="mt-6 rounded-md border border-emerald-200 bg-emerald-50 p-4 text-sm font-medium text-emerald-900" role="status">{UPDATE_MESSAGES[updated] ?? "Your account was updated."}</p> : null}
 

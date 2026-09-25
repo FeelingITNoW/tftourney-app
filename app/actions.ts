@@ -93,7 +93,7 @@ async function requireTournamentOperator(tournamentId: string, returnTo: string)
 }
 
 export async function createTournamentAction(formData: FormData) {
-  const organizer = await requireOrganizer("/");
+  const organizer = await requireOrganizer("/tournaments/new");
   const input = {
     name: getFormString(formData, "tournamentName"),
     playerCount: getFormString(formData, "playerCount"),
@@ -102,7 +102,7 @@ export async function createTournamentAction(formData: FormData) {
   const validation = validateTournamentCreation(input);
 
   if (!validation.success) {
-    redirectWithParams("/", {
+    redirectWithParams("/tournaments/new", {
       tournamentName: input.name,
       playerCount: input.playerCount,
       formatId: input.formatId,
@@ -122,7 +122,7 @@ export async function createTournamentAction(formData: FormData) {
     });
     tournamentId = tournament.id;
   } catch (error) {
-    redirectWithParams("/", {
+    redirectWithParams("/tournaments/new", {
       tournamentName: input.name,
       playerCount: input.playerCount,
       formatId: input.formatId,
@@ -133,7 +133,7 @@ export async function createTournamentAction(formData: FormData) {
     });
   }
 
-  revalidatePath("/");
+  revalidatePath("/dashboard");
   redirect(`/tournaments/${tournamentId}`);
 }
 
@@ -241,7 +241,7 @@ export async function createCustomTournamentAction(
       graphErrors: [],
     };
   }
-  revalidatePath("/");
+  revalidatePath("/dashboard");
   redirect(`/tournaments/${tournamentId}`);
 }
 
@@ -567,7 +567,7 @@ export async function deleteTournamentAction(formData: FormData) {
   const detailPath = `/tournaments/${tournamentId}`;
 
   if (!tournamentId) {
-    redirectWithParams("/", {
+    redirectWithParams("/dashboard", {
       createError: "Tournament was not found.",
     });
   }
@@ -589,9 +589,9 @@ export async function deleteTournamentAction(formData: FormData) {
     });
   }
 
-  revalidatePath("/");
+  revalidatePath("/dashboard");
   revalidatePath(detailPath);
-  redirect("/");
+  redirect("/dashboard");
 }
 
 export async function updateLobbyScoresAction(formData: FormData) {
