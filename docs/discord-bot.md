@@ -78,6 +78,24 @@ npm start
 npm run bot:start
 ```
 
+### Deploying the bot on Railway
+
+Run the bot as a second service in the same Railway project as the app, from the same repo:
+
+1. **New → GitHub Repo** (same repo), then in the new service's Settings set **Config-as-code → Railway config file** to `/railway.bot.json`. That file sets the build (`npm run bot:build`) and start (`npm run bot:start`) commands, one replica (two bots on one token would process every event twice), and always-restart. Don't generate a public domain for it; the bot serves no HTTP.
+2. Set the bot service's variables. Railway reference variables keep the shared secrets in sync with the app service (named `tftourney-app` here):
+
+   ```text
+   TFTOURNEY_APP_URL=https://${{tftourney-app.RAILWAY_PUBLIC_DOMAIN}}
+   TFTOURNEY_INTERNAL_URL=http://${{tftourney-app.RAILWAY_PRIVATE_DOMAIN}}:${{tftourney-app.PORT}}
+   DISCORD_BOT_TOKEN=${{tftourney-app.DISCORD_BOT_TOKEN}}
+   DISCORD_BOT_API_SECRET=${{tftourney-app.DISCORD_BOT_API_SECRET}}
+   OCR_API_SECRET=${{tftourney-app.OCR_API_SECRET}}
+   ```
+
+   `TFTOURNEY_APP_URL` is only used for links the bot posts in Discord, so it must be the public origin. Every API and OCR call goes to `TFTOURNEY_INTERNAL_URL` over Railway's private network, which skips the public edge (whose rate limiting otherwise answers the bot's 2-second queue poll with `429 rate limited`). Set `PORT` explicitly on the app service (e.g. `8080`) so the reference resolves.
+3. Stop any local `npm run bot:dev` using the same token once the Railway bot is running.
+
 Apply the Discord migration before connecting a tournament (`supabase db push`) and create a private Supabase Storage bucket named `discord-score-images`. Limit it to PNG/JPEG/WebP and 7 MB. The bucket is private; the worker accesses images through the protected app route. The bot runs retention cleanup hourly and deletes image objects and submission rows seven days after a tournament ends.
 
 ## Provisioning and permissions
