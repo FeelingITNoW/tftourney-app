@@ -128,6 +128,8 @@ behind Railway's proxy. Checklist for a working deployment:
 - Discord Developer Portal → OAuth2 → Redirects → add the three URIs in
   [Discord tournament operations](#discord-tournament-operations) below for
   the Railway domain.
+- Discord bot: run it as a second Railway service using `railway.bot.json`;
+  see [docs/discord-bot.md](docs/discord-bot.md#deploying-the-bot-on-railway).
 - Apply all Supabase migrations, including
   `20260921000003_fix_player_account_function_ambiguity.sql` — without it,
   player Discord sign-in fails with `player_account_failed` — and

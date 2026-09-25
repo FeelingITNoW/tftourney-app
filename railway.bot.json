@@ -1,0 +1,12 @@
+{
+  "$schema": "https://railway.com/railway.schema.json",
+  "build": {
+    "buildCommand": "npm run bot:build",
+    "watchPatterns": ["bot/**", "lib/discord/**", "package.json", "package-lock.json"]
+  },
+  "deploy": {
+    "startCommand": "npm run bot:start",
+    "numReplicas": 1,
+    "restartPolicyType": "ALWAYS"
+  }
+}

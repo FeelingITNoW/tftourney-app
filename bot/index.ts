@@ -79,7 +79,21 @@ type ClaimedSubmission =
       retryAfterSeconds: number;
     };
 
-const appUrl = (process.env.TFTOURNEY_APP_URL ?? "http://localhost:3000").replace(/\/$/, "");
+// Accept a bare host (Railway shows domains without a scheme) the same way
+// lib/app-url.ts does; that module can't be imported here (it pulls in next/server).
+function normalizeOrigin(raw: string): string {
+  const trimmed = raw.trim().replace(/\/+$/, "");
+  if (/^https?:\/\//i.test(trimmed)) return trimmed;
+  const local = /^(localhost|127\.0\.0\.1|\[::1\])(:\d+)?$/.test(trimmed) || /\.railway\.internal(:\d+)?$/.test(trimmed);
+  return `${local ? "http" : "https"}://${trimmed}`;
+}
+
+// Public origin, used for links posted in Discord.
+const appUrl = normalizeOrigin(process.env.TFTOURNEY_APP_URL || "http://localhost:3000");
+// Origin the bot calls the app's API on. On Railway, point this at the app's
+// private domain (http://<service>.railway.internal:<port>) so bot traffic skips
+// the public edge and its rate limits; defaults to the public origin.
+const apiUrl = process.env.TFTOURNEY_INTERNAL_URL ? normalizeOrigin(process.env.TFTOURNEY_INTERNAL_URL) : appUrl;
 const botToken = process.env.DISCORD_BOT_TOKEN;
 const apiSecret = process.env.DISCORD_BOT_API_SECRET;
 const ocrSecret = process.env.OCR_API_SECRET;
@@ -107,7 +121,7 @@ let reconciling = false;
 async function appFetch(path: string, init: RequestInit = {}): Promise<Response> {
   const headers = new Headers(init.headers);
   headers.set("Authorization", `Bearer ${apiSecret}`);
-  return fetch(`${appUrl}${path}`, { ...init, headers });
+  return fetch(`${apiUrl}${path}`, { ...init, headers });
 }
 
 function buttonRow(tournamentId: string, kind: "signup" | "checkin", disabled = false): ActionRowBuilder<ButtonBuilder> {
@@ -520,7 +534,7 @@ async function processSubmission(): Promise<void> {
     const form = new FormData();
     form.append("image", new Blob([imageBytes], { type: imageResponse.headers.get("content-type") ?? "image/png" }), "score.png");
     form.append("roster", JSON.stringify(claim.roster));
-    const ocrResponse = await fetch(`${appUrl}/api/ocr/placements`, { method: "POST", headers: { Authorization: `Bearer ${ocrSecret}` }, body: form });
+    const ocrResponse = await fetch(`${apiUrl}/api/ocr/placements`, { method: "POST", headers: { Authorization: `Bearer ${ocrSecret}` }, body: form });
     const ocr = await ocrResponse.json() as {
       status?: string;
       strategy?: string;
