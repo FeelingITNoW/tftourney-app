@@ -51,20 +51,20 @@ function sessionForPlayer(playerAccountId: string): Pick<PlayerAuthResult, "sess
   };
 }
 
-// Maps a raise'd Postgres exception message (embedded verbatim in the
-// PostgREST error body, see registerTournamentPlayer in
-// lib/db/tournaments/api.ts for the established pattern) to a clean error --
-// a field error where the message maps to a form field, otherwise a plain
-// Error carrying just the clean message instead of the raw PostgREST body.
+// Maps a raise'd Postgres exception (DatabaseRequestError.message is
+// PostgREST's parsed, clean message field -- see supabaseRestRequest in
+// lib/db/supabase-rest/api.ts -- not the raw response body) to a clean
+// error: a field error where the message maps to a form field, otherwise a
+// plain Error carrying just that message.
 function accountConflictError(error: unknown): Error | null {
   if (!(error instanceof DatabaseRequestError)) return null;
-  if (error.message.includes("That username is already taken.")) {
+  if (error.message === "That username is already taken.") {
     return new PlayerAccountValidationError({ username: "That username is already taken." });
   }
-  if (error.message.includes("That email is already in use by another player.")) {
+  if (error.message === "That email is already in use by another player.") {
     return new PlayerAccountValidationError({ email: "That email is already in use by another player." });
   }
-  if (error.message.includes("That Discord account is already linked to another player.")) {
+  if (error.message === "That Discord account is already linked to another player.") {
     return new Error("That Discord account is already linked to another player.");
   }
   return null;

@@ -39,9 +39,21 @@ export default async function LobbyScoresPage({
   searchParams: LobbyPageSearchParams;
 }) {
   const { tournamentId, lobbyId } = await params;
-  const [organizer, playerSession] = await Promise.all([
+  // The view model fetch doesn't depend on either session, so run all three
+  // in parallel instead of waiting for the sessions before starting it.
+  // Only the view model fetch is caught here (matching the previous
+  // behavior): a session lookup failure still surfaces as an unhandled
+  // rejection, same as before this was combined into one Promise.all.
+  const [organizer, playerSession, tournamentOutcome] = await Promise.all([
     getOrganizerSession(),
     getPlayerSession(),
+    getTournamentLobbyViewModel(tournamentId, lobbyId).then(
+      (value) => ({ value, error: null }),
+      (error: unknown) => ({
+        value: undefined,
+        error: error instanceof Error ? error.message : "Lobby data could not be loaded.",
+      }),
+    ),
   ]);
   const query = await searchParams;
   const returnGame = getSearchValue(query.game);
@@ -49,19 +61,10 @@ export default async function LobbyScoresPage({
   const scoreError = getSearchValue(query.scoreError);
   const saved = getSearchValue(query.saved) === "true";
   const authorizationError = getSearchValue(query.authorizationError);
-  let tournament:
+  const tournament:
     | Awaited<ReturnType<typeof getTournamentLobbyViewModel>>
-    | undefined;
-  let databaseError = "";
-
-  try {
-    tournament = await getTournamentLobbyViewModel(tournamentId, lobbyId);
-  } catch (error) {
-    databaseError =
-      error instanceof Error
-        ? error.message
-        : "Lobby data could not be loaded.";
-  }
+    | undefined = tournamentOutcome.value;
+  const databaseError = tournamentOutcome.error ?? "";
 
   const lobby = tournament?.lobby;
   const tournamentHeader = tournament?.tournament;

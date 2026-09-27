@@ -161,7 +161,6 @@ test("claim route returns a cooldown rejection without loading the lobby view mo
       assert.equal(body.claimStatus, "rejected_cooldown");
       assert.equal(body.discordMessageId, "m1");
       assert.equal(body.retryAfterSeconds, 30);
-      assert.equal("imageUrl" in body, false);
       assert.equal(fetchCalls, 1);
     } finally {
       globalThis.fetch = originalFetch;
@@ -169,10 +168,12 @@ test("claim route returns a cooldown rejection without loading the lobby view mo
   });
 });
 
-test("claim route enriches a claimed submission with the lobby roster and image URL", async () => {
+test("claim route returns a claimed submission's ids with no second (lobby view model) round trip", async () => {
   await withEnv(async () => {
+    let fetchCalls = 0;
     const originalFetch = globalThis.fetch;
     globalThis.fetch = async (input) => {
+      fetchCalls += 1;
       const url = new URL(String(input));
       if (url.pathname.endsWith("rpc/claim_discord_score_submission")) {
         return new Response(JSON.stringify([{
@@ -190,18 +191,6 @@ test("claim route enriches a claimed submission with the lobby roster and image 
           retry_after_seconds: null,
         }]), { status: 200 });
       }
-      if (url.pathname.endsWith("rpc/get_tournament_lobby_view_model")) {
-        return new Response(JSON.stringify([{
-          view_model: {
-            tournament: { id: "t1", host_user_id: "7", name: "Test", status: "in_progress", has_started: true },
-            format_config: {},
-            round: { id: "r1", round_number: 1, format_round_id: null, status: "active" },
-            lobby: { id: "l1", round_id: "r1", game_number: 1, lobby_number: 1, participants: [{ participant_id: "p1", display_name: "Alice", slot_number: 1 }] },
-            participants: [{ id: "p1", display_name_at_start: "Alice", registration_id: "reg1", seed_number: 1 }],
-            scores: [],
-          },
-        }]), { status: 200 });
-      }
       throw new Error(`Unexpected request to ${url.pathname}`);
     };
     try {
@@ -213,8 +202,11 @@ test("claim route enriches a claimed submission with the lobby roster and image 
       const body = await response.json();
       assert.equal(body.claimStatus, "claimed");
       assert.equal(body.discordMessageId, "m2");
-      assert.equal(body.imageUrl, "/api/internal/discord/submissions/s2/image");
-      assert.deepEqual(body.roster, [{ id: "p1", displayName: "Alice" }]);
+      assert.equal(body.lobbyId, "l1");
+      assert.equal(body.leaseToken, "lease-1");
+      assert.equal("roster" in body, false);
+      assert.equal("storagePath" in body, false);
+      assert.equal(fetchCalls, 1);
     } finally {
       globalThis.fetch = originalFetch;
     }

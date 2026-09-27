@@ -1,6 +1,8 @@
+import { cache } from "react";
+import { createRemoteJWKSet, errors as joseErrors, jwtVerify } from "jose";
 import { cookies } from "next/headers";
 import { redirect } from "next/navigation";
-import { supabaseRestRequest } from "../db/supabase-rest/api";
+import { getSupabaseConfig, supabaseRestRequest } from "../db/supabase-rest/api";
 
 export const SESSION_COOKIE_NAME = "tftourney-session";
 const LOCAL_HOST_USER_ID = "1";
@@ -85,21 +87,55 @@ export function sessionFromCookieValue(value: string | undefined): StoredSession
   return decodeSessionCookie(value);
 }
 
-function supabaseConfig(): { url: string; key: string } | null {
-  const url = process.env.NEXT_PUBLIC_SUPABASE_URL ?? process.env.SUPABASE_URL;
-  const key = process.env.SUPABASE_SERVICE_ROLE_KEY ?? process.env.SUPABASE_ANON_KEY;
-  return url && key ? { url: url.replace(/\/$/, ""), key } : null;
-}
-
-async function getSupabaseUser(accessToken: string): Promise<SupabaseUser | null> {
-  const config = supabaseConfig();
-  if (!config) return null;
-  const response = await fetch(`${config.url}/auth/v1/user`, {
-    headers: { apikey: config.key, Authorization: `Bearer ${accessToken}` },
+async function getSupabaseUserFromNetwork(accessToken: string, supabaseUrl: string, apiKey: string): Promise<SupabaseUser | null> {
+  const response = await fetch(`${supabaseUrl}/auth/v1/user`, {
+    headers: { apikey: apiKey, Authorization: `Bearer ${accessToken}` },
     cache: "no-store",
   });
   if (!response.ok) return null;
   return (await response.json()) as SupabaseUser;
+}
+
+// One JWKS fetcher per Supabase URL, reused for the life of the process.
+// createRemoteJWKSet caches the fetched keys itself and only refetches on a
+// kid it hasn't seen, so this turns what used to be a network round trip to
+// /auth/v1/user on every request into, in steady state, no network call at
+// all -- just a local signature check.
+let cachedJwks: { url: string; keySet: ReturnType<typeof createRemoteJWKSet> } | null = null;
+
+function remoteJwks(supabaseUrl: string): ReturnType<typeof createRemoteJWKSet> {
+  if (cachedJwks?.url !== supabaseUrl) {
+    cachedJwks = { url: supabaseUrl, keySet: createRemoteJWKSet(new URL(`${supabaseUrl}/auth/v1/.well-known/jwks.json`)) };
+  }
+  return cachedJwks.keySet;
+}
+
+// Verifies the access token's signature and claims locally against
+// Supabase's published JWKS -- no per-request network call once the key set
+// is warm. Only errors that mean the token itself is genuinely bad (forged
+// signature, expired, wrong issuer/audience, malformed) are treated as
+// signed-out directly. Anything else -- no key matches the token's kid (a
+// project still on the legacy shared HS256 secret, which Supabase does not
+// publish via JWKS -- true for local `supabase start` today), a JWKS fetch
+// failure, or any other unexpected error -- falls back to the previous
+// /auth/v1/user network call, so a project or environment this can't verify
+// locally still works exactly as it did before this change.
+async function getSupabaseUser(accessToken: string): Promise<SupabaseUser | null> {
+  const config = getSupabaseConfig();
+  if (!config) return null;
+  try {
+    const { payload } = await jwtVerify(accessToken, remoteJwks(config.url), { issuer: `${config.url}/auth/v1` });
+    if (typeof payload.sub !== "string") return null;
+    return { id: payload.sub, email: typeof payload.email === "string" ? payload.email : undefined };
+  } catch (error) {
+    const tokenIsInvalid = error instanceof joseErrors.JWSInvalid ||
+      error instanceof joseErrors.JWSSignatureVerificationFailed ||
+      error instanceof joseErrors.JWTExpired ||
+      error instanceof joseErrors.JWTClaimValidationFailed ||
+      error instanceof joseErrors.JWTInvalid;
+    if (tokenIsInvalid) return null;
+    return getSupabaseUserFromNetwork(accessToken, config.url, config.key);
+  }
 }
 
 async function getOrganizerForAuthUser(user: SupabaseUser): Promise<OrganizerRow | null> {
@@ -150,12 +186,15 @@ function localOrganizer(): OrganizerSession {
   };
 }
 
-export async function getOrganizerSession(): Promise<OrganizerSession | null> {
+// Deduplicates repeat calls within one request/render pass -- harmless today
+// since each page calls this once, but it means a future layout or nested
+// component that also needs the organizer doesn't cost a second lookup.
+export const getOrganizerSession = cache(async (): Promise<OrganizerSession | null> => {
   const rawSession = (await cookies()).get(SESSION_COOKIE_NAME)?.value;
   const session = decodeSessionCookie(rawSession);
   if (!session) return process.env.TFT_REQUIRE_AUTH === "false" ? localOrganizer() : null;
   return organizerFromStoredSession(session);
-}
+});
 
 export async function requireOrganizer(returnTo = "/dashboard"): Promise<OrganizerSession> {
   const organizer = await getOrganizerSession();

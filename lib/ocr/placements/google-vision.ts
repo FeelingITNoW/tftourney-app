@@ -96,10 +96,20 @@ function annotationExtent(annotations: VisionAnnotation[], axis: "x" | "y"): num
   return Number.isFinite(extent) && extent > 0 ? extent : 1;
 }
 
+// Memoized at module scope: constructing an ImageAnnotatorClient does auth
+// setup and opens a gRPC channel, and createGoogleVisionTextDetector() used
+// to pay that cost on every single /api/ocr/placements request. Credentials
+// are read once from the environment for the life of the process, matching
+// every other credential lookup in this app (e.g. googleClientCredentials in
+// lib/sheets/sync.ts). Left uncached if credentialsFromEnvironment() throws,
+// so a transient misconfiguration doesn't get stuck -- the next call retries.
+let cachedClient: ImageAnnotatorClient | null = null;
+
 function clientFromEnvironment(): ImageAnnotatorClient {
+  if (cachedClient) return cachedClient;
   const credentials = credentialsFromEnvironment();
-  if (!credentials) return new ImageAnnotatorClient();
-  return new ImageAnnotatorClient(credentials);
+  cachedClient = credentials ? new ImageAnnotatorClient(credentials) : new ImageAnnotatorClient();
+  return cachedClient;
 }
 
 export function extractVisionWords(result: unknown): OcrWord[] {

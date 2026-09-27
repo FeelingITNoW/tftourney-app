@@ -32,27 +32,15 @@ import {
   parseCooldownSeconds,
 } from "../lib/discord/cooldown";
 import { canManageLobbyCooldown, selectTournamentForCommand, type CommandTournament } from "../lib/discord/commands";
+import type { DiscordReconcileTournament } from "../lib/discord/api";
+import { canSkipProvisioning, computeReconcileFingerprint, type ProvisionCacheEntry } from "../lib/discord/reconcile-fingerprint";
 
 dotenv.config({ path: ".env.local" });
 dotenv.config();
 
-type ReconcileConfig = {
-  tournamentId: string;
-  name: string;
-  status: string;
-  checkInStatus: string;
-  registeredCount: number;
-  checkedInCount: number;
-  config: Record<string, unknown>;
-  activeLobbies: Array<{
-    id: string;
-    roundId: string;
-    gameNumber: number;
-    lobbyNumber: number;
-    participants: Array<{ discordUserId: string | null; displayName: string }>;
-  }>;
-  threads: Array<{ roundId: string; lobbyNumber: number; threadId: string; state: string }>;
-};
+// The app's own type for one reconcile-payload entry (lib/discord/api.ts),
+// reused here instead of re-declaring an equivalent shape by hand.
+type ReconcileConfig = DiscordReconcileTournament;
 
 type ClaimedSubmission =
   | {
@@ -65,9 +53,6 @@ type ClaimedSubmission =
       lobbyId: string;
       gameNumber: number;
       leaseToken: string;
-      attemptCount: number;
-      roster: Array<{ id: string; displayName: string }>;
-      imageUrl: string;
     }
   | {
       claimStatus: "rejected_cooldown";
@@ -96,10 +81,9 @@ const appUrl = normalizeOrigin(process.env.TFTOURNEY_APP_URL || "http://localhos
 const apiUrl = process.env.TFTOURNEY_INTERNAL_URL ? normalizeOrigin(process.env.TFTOURNEY_INTERNAL_URL) : appUrl;
 const botToken = process.env.DISCORD_BOT_TOKEN;
 const apiSecret = process.env.DISCORD_BOT_API_SECRET;
-const ocrSecret = process.env.OCR_API_SECRET;
 
-if (!botToken || !apiSecret || !ocrSecret) {
-  throw new Error("DISCORD_BOT_TOKEN, DISCORD_BOT_API_SECRET, and OCR_API_SECRET are required.");
+if (!botToken || !apiSecret) {
+  throw new Error("DISCORD_BOT_TOKEN and DISCORD_BOT_API_SECRET are required.");
 }
 
 const client = new Client({
@@ -115,8 +99,25 @@ const threadParticipantKeys = new Map<string, string>();
 // reconcile() just fetched. Values can lag by up to one 10s tick after a
 // tournament's Discord resources first provision.
 const guildTournaments = new Map<string, CommandTournament[]>();
-let processing = false;
+// The database claim (claim_discord_score_submission) already permits only
+// one active worker per lobby thread, so several workers can safely run at
+// once across different threads. Each processSubmission() call claims and
+// fully processes at most one submission, so this cap is the maximum number
+// of submissions (across all threads) in flight at any moment.
+const MAX_CONCURRENT_SUBMISSION_WORKERS = 3;
+let activeSubmissionWorkers = 0;
 let reconciling = false;
+
+// Per-tournament record of the last time provisionTournament actually ran,
+// and the fingerprint of the config that produced that run -- lets reconcile()
+// skip the expensive Discord API sequence (a full channel-list fetch, role
+// fetch, 3 channel fetches, 2 message edits) on ticks where nothing
+// provisioning-relevant has changed. See lib/discord/reconcile-fingerprint.ts.
+const provisionCache = new Map<string, ProvisionCacheEntry>();
+// How long a tournament can go without a full provisioning pass even if its
+// fingerprint hasn't changed. Catches drift the fingerprint can't see on its
+// own, such as a channel or role deleted directly in Discord.
+const PROVISION_SELF_HEAL_INTERVAL_MS = 5 * 60_000;
 
 async function appFetch(path: string, init: RequestInit = {}): Promise<Response> {
   const headers = new Headers(init.headers);
@@ -329,11 +330,26 @@ async function reconcile(): Promise<void> {
     const guild = await client.guilds.fetch(guildId).catch(() => null);
     if (!guild) continue;
     let provisioned: ReconcileConfig;
-    try {
-      provisioned = await provisionTournament(config, guild);
-    } catch (error) {
-      await reportProvisionError(config.tournamentId, error);
-      continue;
+    const provisionCheckedAt = Date.now();
+    const cachedProvisioning = provisionCache.get(config.tournamentId);
+    if (canSkipProvisioning(config.config.state, config, cachedProvisioning, provisionCheckedAt, PROVISION_SELF_HEAL_INTERVAL_MS)) {
+      // Already active, every Discord ID is present, and nothing
+      // provisioning-relevant has changed since the last full pass -- skip
+      // the channel-list fetch, role/channel fetches, and panel edits
+      // entirely, and leave the heartbeat at its last value until the next
+      // self-heal pass (or a real change) runs provisionTournament again.
+      provisioned = config;
+    } else {
+      try {
+        provisioned = await provisionTournament(config, guild);
+        provisionCache.set(config.tournamentId, {
+          fingerprint: computeReconcileFingerprint(provisioned),
+          lastCheckedAt: provisionCheckedAt,
+        });
+      } catch (error) {
+        await reportProvisionError(config.tournamentId, error);
+        continue;
+      }
     }
     const parent = await guild.channels.fetch(String(provisioned.config.score_channel_id)) as TextChannel | null;
     if (!parent || parent.type !== ChannelType.GuildText) continue;
@@ -350,7 +366,7 @@ async function reconcile(): Promise<void> {
         thread = await parent.threads.create({ name: `Round ${lobby.roundId} • Lobby ${lobby.lobbyNumber}`, type: ChannelType.PrivateThread, autoArchiveDuration: 10080, reason: "TFTourney score recording lobby" });
         await appFetch("/api/internal/discord/threads", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ roundId: lobby.roundId, lobbyNumber: lobby.lobbyNumber, threadId: thread.id }) });
         await thread.send({ content: `This thread records Lobby ${lobby.lobbyNumber}. Screenshots are processed in order; the bot announces each accepted game.` });
-        existing.set(key, { roundId: lobby.roundId, lobbyNumber: lobby.lobbyNumber, threadId: thread.id, state: "active" });
+        existing.set(key, { roundId: lobby.roundId, lobbyNumber: lobby.lobbyNumber, threadId: thread.id, state: "active", acceptedImageCount: 0, lastGameNumber: null });
       }
       const participantIds = lobby.participants.map((participant) => participant.discordUserId).filter((id): id is string => Boolean(id)).sort();
       const participantKey = participantIds.join(",");
@@ -380,6 +396,13 @@ async function reconcile(): Promise<void> {
     } catch (error) {
       console.error(`[discord-reconcile] tournament ${config.tournamentId}`, error);
     }
+    }
+    // Drop cache entries for tournaments the payload no longer includes
+    // (disconnected, or excluded per the view model's own filters -- see
+    // get_discord_reconcile_view_model) so this map doesn't grow forever.
+    const currentTournamentIds = new Set(payload.tournaments.map((config) => config.tournamentId));
+    for (const tournamentId of provisionCache.keys()) {
+      if (!currentTournamentIds.has(tournamentId)) provisionCache.delete(tournamentId);
     }
   } finally {
     reconciling = false;
@@ -507,9 +530,8 @@ async function runCleanup(): Promise<void> {
 }
 
 async function processSubmission(): Promise<void> {
-  if (processing) return;
-  processing = true;
-  let claim: ClaimedSubmission | null = null;
+  if (activeSubmissionWorkers >= MAX_CONCURRENT_SUBMISSION_WORKERS) return;
+  activeSubmissionWorkers += 1;
   try {
     const claimResponse = await appFetch("/api/internal/discord/submissions/claim", { method: "POST" });
     if (claimResponse.status === 204) return;
@@ -517,7 +539,7 @@ async function processSubmission(): Promise<void> {
       console.error(`[discord-score-worker] claim request failed with ${claimResponse.status}`, await claimResponse.text().catch(() => ""));
       return;
     }
-    claim = await claimResponse.json() as ClaimedSubmission;
+    const claim = await claimResponse.json() as ClaimedSubmission;
     if (claim.claimStatus === "rejected_cooldown") {
       const thread = await client.channels.fetch(claim.threadId).catch(() => null) as ThreadChannel | null;
       if (thread) await replyInThread(thread, claim.discordMessageId, cooldownRejectionMessage(claim.retryAfterSeconds));
@@ -527,62 +549,37 @@ async function processSubmission(): Promise<void> {
     const currentContext = threadContext.get(claim.threadId);
     if (currentThread && currentContext) threadContext.set(claim.threadId, { ...currentContext, lobbyId: claim.lobbyId });
     const logPrefix = `[discord-score-worker] submission ${claim.submissionId} (tournament ${claim.tournamentId}, lobby ${claim.lobbyId}, game ${claim.gameNumber})`;
-    console.log(`${logPrefix}: claimed, running OCR against a ${claim.roster.length}-player roster`);
-    const imageResponse = await appFetch(claim.imageUrl);
-    if (!imageResponse.ok) throw new Error("Stored screenshot could not be loaded.");
-    const imageBytes = await imageResponse.arrayBuffer();
-    const form = new FormData();
-    form.append("image", new Blob([imageBytes], { type: imageResponse.headers.get("content-type") ?? "image/png" }), "score.png");
-    form.append("roster", JSON.stringify(claim.roster));
-    const ocrResponse = await fetch(`${apiUrl}/api/ocr/placements`, { method: "POST", headers: { Authorization: `Bearer ${ocrSecret}` }, body: form });
-    const ocr = await ocrResponse.json() as {
-      status?: string;
-      strategy?: string;
-      placements?: Array<{ placement: number; extractedName?: string; matchStatus: string; matchedRosterEntry?: { id: string; displayName?: string } | null }>;
-      issues?: Array<{ code?: string; message?: string }>;
-      debug?: { layoutConfidence?: number; selectedProfile?: string };
+    console.log(`${logPrefix}: claimed, processing`);
+    // Storage access, OCR, and the score write all happen inside this one
+    // call now (see processDiscordSubmission in lib/discord/submissions.ts);
+    // the bot no longer downloads the screenshot or talks to Vision itself.
+    const processResponse = await appFetch(`/api/internal/discord/submissions/${claim.submissionId}/process`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ leaseToken: claim.leaseToken }),
+    });
+    const outcome = await processResponse.json().catch(() => ({})) as {
+      outcome?: string;
+      gameNumber?: number;
+      message?: string;
       error?: string;
-      code?: string;
     };
-    if (!ocrResponse.ok) {
-      console.error(`${logPrefix}: OCR request failed with ${ocrResponse.status} (${ocr.code ?? "unknown"}) ${ocr.error ?? ""}`);
-    } else {
-      const matched = ocr.placements?.filter((row) => row.matchStatus === "matched").length ?? 0;
-      console.log(`${logPrefix}: OCR status=${ocr.status ?? "n/a"} strategy=${ocr.strategy ?? "n/a"} profile=${ocr.debug?.selectedProfile ?? "n/a"} confidence=${ocr.debug?.layoutConfidence?.toFixed(2) ?? "n/a"} matched=${matched}/${claim.roster.length}`);
+    if (!processResponse.ok) {
+      console.error(`${logPrefix}: process request failed with ${processResponse.status} ${outcome.error ?? ""}`);
+      return;
     }
-    const complete = ocrResponse.ok && ocr.status === "complete" && Array.isArray(ocr.placements) && ocr.placements.length === claim.roster.length && ocr.placements.every((row) => row.matchStatus === "matched" && row.matchedRosterEntry?.id);
     const thread = await client.channels.fetch(claim.threadId).catch(() => null) as ThreadChannel | null;
-    if (!complete) {
-      if (ocrResponse.ok) {
-        for (const row of ocr.placements ?? []) {
-          if (row.matchStatus !== "matched") console.log(`${logPrefix}:   #${row.placement} "${row.extractedName}" -> ${row.matchStatus}`);
-        }
-        for (const issue of ocr.issues ?? []) console.log(`${logPrefix}:   issue: ${issue.code} - ${issue.message}`);
-      }
-      await appFetch(`/api/internal/discord/submissions/${claim.submissionId}/review`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ leaseToken: claim.leaseToken, ocrResult: ocr, errorCode: "OCR_REVIEW_REQUIRED", errorMessage: "OCR could not produce an unambiguous complete roster." }) });
-      if (thread) await notifyFacilitator(thread, "OCR could not validate this screenshot. A facilitator must review it before the next image is processed.");
+    if (outcome.outcome === "accepted") {
+      console.log(`${logPrefix}: recorded`);
+      if (thread) await replyInThread(thread, claim.discordMessageId, `✅ Game ${outcome.gameNumber ?? claim.gameNumber} has been recorded.`);
       return;
     }
-    const results = ocr.placements!.map((row) => ({ participantId: row.matchedRosterEntry!.id, placement: row.placement }));
-    const scoreResponse = await appFetch(`/api/tournaments/${claim.tournamentId}/lobbies/${claim.lobbyId}/results`, { method: "POST", headers: { "Content-Type": "application/json", "Idempotency-Key": claim.submissionId }, body: JSON.stringify({ results, submissionId: claim.submissionId, mode: "record" }) });
-    if (!scoreResponse.ok) {
-      const error = await scoreResponse.json().catch(() => ({})) as { error?: string; code?: string };
-      console.error(`${logPrefix}: score write failed with ${scoreResponse.status} (${error.code ?? "unknown"}) ${error.error ?? ""}`);
-      await appFetch(`/api/internal/discord/submissions/${claim.submissionId}/review`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ leaseToken: claim.leaseToken, ocrResult: ocr, errorCode: "SCORE_WRITE_FAILED", errorMessage: error.error ?? "The score could not be recorded." }) });
-      if (thread) await notifyFacilitator(thread, error.error ?? "The score could not be recorded; facilitator review is required.");
-      return;
-    }
-    console.log(`${logPrefix}: recorded`);
-    if (thread) await replyInThread(thread, claim.discordMessageId, `✅ Game ${claim.gameNumber} has been recorded.`);
+    console.log(`${logPrefix}: ${outcome.outcome ?? "unknown outcome"}`);
+    if (thread) await notifyFacilitator(thread, outcome.message ?? "The screenshot could not be processed; facilitator review is required.");
   } catch (error) {
     console.error("[discord-score-worker]", error);
-    if (claim?.claimStatus === "claimed" && claim.attemptCount >= 3) {
-      const thread = await client.channels.fetch(claim.threadId).catch(() => null) as ThreadChannel | null;
-      await appFetch(`/api/internal/discord/submissions/${claim.submissionId}/review`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ leaseToken: claim.leaseToken, errorCode: "PROCESSING_RETRIES_EXHAUSTED", errorMessage: "The screenshot worker could not process this image after three attempts." }) }).catch(() => undefined);
-      if (thread) await notifyFacilitator(thread, "The screenshot worker could not process this image after three attempts. A facilitator must review it.");
-    }
   } finally {
-    processing = false;
+    activeSubmissionWorkers -= 1;
   }
 }
 
@@ -646,6 +643,9 @@ async function handleMessage(message: Message): Promise<void> {
     await notifyFacilitator(message.channel as ThreadChannel, result.error ?? "The screenshot could not be queued.");
   } else {
     await message.reply({ content: `Screenshot queued${result.queuePosition ? ` at position ${result.queuePosition}` : ""}.`, allowedMentions: { repliedUser: false } });
+    // Claim it now rather than waiting out the rest of the 2s poll interval;
+    // processSubmission() is a no-op if every worker slot is already busy.
+    void processSubmission();
   }
 }
 

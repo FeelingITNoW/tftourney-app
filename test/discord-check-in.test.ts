@@ -1,9 +1,10 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import {
+  closeTournamentCheckIn,
+  disconnectTournamentDiscord,
   getTournamentCheckInState,
-  prepareTournamentStartRoster,
-  restoreTournamentStartRoster,
+  openTournamentCheckIn,
   setRegistrationCheckIn,
 } from "../lib/discord/api";
 
@@ -45,114 +46,49 @@ function stubFetch(calls: Call[], respond: (call: Call) => unknown): void {
   }) as typeof fetch;
 }
 
+// open/close/set-check-in and disconnect are now each a single RPC call --
+// see 20260926000002_atomic_checkin_and_discord_mutations.sql for the
+// business logic and atomicity this used to need several sequential
+// PostgREST writes (and, for start_tournament, a separate compensating
+// restore step) to approximate. These tests cover the thin wrapper: the
+// right RPC, the right params, and the right result/error propagation.
+// The SQL functions' own validation and rollback behavior were verified
+// directly against a local Postgres built from this migration history.
 
-test("prepareTournamentStartRoster is a no-op when there is no Discord config", async () => {
+test("openTournamentCheckIn posts to the RPC and returns whether it reopened", async () => {
   await withEnv(async (calls) => {
-    stubFetch(calls, (call) => {
-      if (call.pathname === "/rest/v1/tournament_discord_configs") return [];
-      throw new Error(`Unexpected call to ${call.pathname}`);
-    });
-    const result = await prepareTournamentStartRoster("t1");
-    assert.deepEqual(result, []);
+    stubFetch(calls, () => [{ reopened: true }]);
+    const result = await openTournamentCheckIn("t1");
+    assert.deepEqual(result, { reopened: true });
     assert.equal(calls.length, 1);
+    assert.equal(calls[0]?.pathname, "/rest/v1/rpc/open_tournament_check_in");
+    assert.deepEqual(calls[0]?.body, { p_tournament_id: "t1" });
   });
 });
 
-test("prepareTournamentStartRoster is a no-op when the config is disabled", async () => {
+test("openTournamentCheckIn throws when the RPC returns no row", async () => {
   await withEnv(async (calls) => {
-    stubFetch(calls, (call) => {
-      if (call.pathname === "/rest/v1/tournament_discord_configs") {
-        return [{ tournament_id: "t1", guild_id: "g1", state: "disabled" }];
-      }
-      throw new Error(`Unexpected call to ${call.pathname}`);
-    });
-    const result = await prepareTournamentStartRoster("t1");
-    assert.deepEqual(result, []);
-    assert.equal(calls.length, 1);
+    stubFetch(calls, () => []);
+    await assert.rejects(() => openTournamentCheckIn("t1"));
   });
 });
 
-test("prepareTournamentStartRoster is a no-op when check-in has never opened", async () => {
-  await withEnv(async (calls) => {
-    stubFetch(calls, (call) => {
-      if (call.pathname === "/rest/v1/tournament_discord_configs") return [{ tournament_id: "t1", guild_id: "g1", state: "active" }];
-      if (call.pathname === "/rest/v1/tournaments") return [{ check_in_status: "not_started" }];
-      if (call.pathname === "/rest/v1/tournament_registrations") return [];
-      throw new Error(`Unexpected call to ${call.pathname}`);
-    });
-    const result = await prepareTournamentStartRoster("t1");
-    assert.deepEqual(result, []);
-    assert.equal(calls.some((call) => call.method === "PATCH"), false);
-  });
-});
-
-test("prepareTournamentStartRoster closes an open check-in before demoting non-checked-in registered players", async () => {
-  await withEnv(async (calls) => {
-    stubFetch(calls, (call) => {
-      if (call.pathname === "/rest/v1/tournament_discord_configs") return [{ tournament_id: "t1", guild_id: "g1", state: "active" }];
-      if (call.pathname === "/rest/v1/tournaments") return [{ check_in_status: "open" }];
-      if (call.pathname === "/rest/v1/tournament_registrations") {
-        if (call.method === "PATCH") return [{ id: "reg-1" }, { id: "reg-2" }];
-        return [];
-      }
-      throw new Error(`Unexpected call to ${call.pathname}`);
-    });
-    const result = await prepareTournamentStartRoster("t1");
-    assert.deepEqual(result, ["reg-1", "reg-2"]);
-
-    const closeCall = calls.find((call) => call.pathname === "/rest/v1/tournaments" && call.method === "PATCH");
-    assert.ok(closeCall);
-    assert.equal((closeCall!.body as Record<string, unknown>).check_in_status, "closed");
-
-    const demoteCall = calls.find((call) => call.pathname === "/rest/v1/tournament_registrations" && call.method === "PATCH");
-    assert.ok(demoteCall);
-    assert.match(demoteCall!.search, /registration_status=eq\.registered/);
-    assert.match(demoteCall!.search, /checked_in_at=is\.null/);
-    assert.match(demoteCall!.search, /select=id/);
-    assert.equal((demoteCall!.body as Record<string, unknown>).registration_status, "waitlisted");
-
-    // The tournaments PATCH (close) must happen before the registrations PATCH (demote).
-    const closeIndex = calls.indexOf(closeCall!);
-    const demoteIndex = calls.indexOf(demoteCall!);
-    assert.ok(closeIndex < demoteIndex);
-  });
-});
-
-test("prepareTournamentStartRoster demotes without closing when check-in is already closed", async () => {
-  await withEnv(async (calls) => {
-    stubFetch(calls, (call) => {
-      if (call.pathname === "/rest/v1/tournament_discord_configs") return [{ tournament_id: "t1", guild_id: "g1", state: "active" }];
-      if (call.pathname === "/rest/v1/tournaments") return [{ check_in_status: "closed" }];
-      if (call.pathname === "/rest/v1/tournament_registrations") {
-        if (call.method === "PATCH") return [{ id: "reg-1" }];
-        return [];
-      }
-      throw new Error(`Unexpected call to ${call.pathname}`);
-    });
-    const result = await prepareTournamentStartRoster("t1");
-    assert.deepEqual(result, ["reg-1"]);
-    assert.equal(calls.some((call) => call.pathname === "/rest/v1/tournaments" && call.method === "PATCH"), false);
-  });
-});
-
-test("restoreTournamentStartRoster is a no-op for an empty list", async () => {
-  await withEnv(async (calls) => {
-    stubFetch(calls, () => {
-      throw new Error("fetch should not be called");
-    });
-    await restoreTournamentStartRoster([]);
-    assert.equal(calls.length, 0);
-  });
-});
-
-test("restoreTournamentStartRoster restores the given registrations to registered", async () => {
+test("closeTournamentCheckIn posts to the RPC with the tournament id", async () => {
   await withEnv(async (calls) => {
     stubFetch(calls, () => null);
-    await restoreTournamentStartRoster(["a", "b"]);
+    await closeTournamentCheckIn("t1");
     assert.equal(calls.length, 1);
-    assert.equal(calls[0]?.pathname, "/rest/v1/tournament_registrations");
-    assert.match(calls[0]?.search ?? "", /id=in\.\(a,b\)/);
-    assert.deepEqual(calls[0]?.body, { registration_status: "registered" });
+    assert.equal(calls[0]?.pathname, "/rest/v1/rpc/close_tournament_check_in");
+    assert.deepEqual(calls[0]?.body, { p_tournament_id: "t1" });
+  });
+});
+
+test("closeTournamentCheckIn propagates a rejection from the RPC (e.g. check-in not open)", async () => {
+  await withEnv(async (calls) => {
+    globalThis.fetch = (async () =>
+      new Response(JSON.stringify({ code: "P0001", message: "Check-in is not open." }), { status: 400 })) as typeof fetch;
+    void calls;
+    await assert.rejects(() => closeTournamentCheckIn("t1"), /Check-in is not open\./);
   });
 });
 
@@ -179,67 +115,34 @@ test("getTournamentCheckInState distinguishes checkedInCount from checkedInRegis
   });
 });
 
-test("setRegistrationCheckIn rejects when check-in has never opened", async () => {
+test("setRegistrationCheckIn posts registration id, tournament id, and the desired state to the RPC", async () => {
   await withEnv(async (calls) => {
-    stubFetch(calls, (call) => {
-      if (call.pathname === "/rest/v1/tournament_discord_configs") return [{ tournament_id: "t1", guild_id: "g1", state: "active" }];
-      if (call.pathname === "/rest/v1/tournaments") return [{ check_in_status: "not_started" }];
-      if (call.pathname === "/rest/v1/tournament_registrations") return [];
-      throw new Error(`Unexpected call to ${call.pathname}`);
-    });
-    await assert.rejects(() => setRegistrationCheckIn({ tournamentId: "t1", registrationId: "r1", checkedIn: true }));
-  });
-});
-
-test("setRegistrationCheckIn scopes the write by tournament and sets/clears checked_in_at", async () => {
-  await withEnv(async (calls) => {
-    stubFetch(calls, (call) => {
-      if (call.pathname === "/rest/v1/tournament_discord_configs") return [{ tournament_id: "t1", guild_id: "g1", state: "active" }];
-      if (call.pathname === "/rest/v1/tournaments") return [{ check_in_status: "closed" }];
-      if (call.pathname === "/rest/v1/tournament_registrations") {
-        if (call.method === "PATCH") return [{ id: "r1" }];
-        return [];
-      }
-      throw new Error(`Unexpected call to ${call.pathname}`);
-    });
+    stubFetch(calls, () => null);
     await setRegistrationCheckIn({ tournamentId: "t1", registrationId: "r1", checkedIn: true });
-    const patchCall = calls.find((call) => call.pathname === "/rest/v1/tournament_registrations" && call.method === "PATCH");
-    assert.ok(patchCall);
-    assert.match(patchCall!.search, /id=eq\.r1/);
-    assert.match(patchCall!.search, /tournament_id=eq\.t1/);
-    assert.match(patchCall!.search, /registration_status=in\.\(registered,waitlisted\)/);
-    assert.ok((patchCall!.body as Record<string, unknown>).checked_in_at);
+    assert.equal(calls.length, 1);
+    assert.equal(calls[0]?.pathname, "/rest/v1/rpc/set_registration_check_in");
+    assert.deepEqual(calls[0]?.body, { p_tournament_id: "t1", p_registration_id: "r1", p_checked_in: true });
   });
 });
 
-test("setRegistrationCheckIn clears checked_in_at when un-checking a player", async () => {
+test("setRegistrationCheckIn propagates a rejection from the RPC (e.g. registration not found)", async () => {
   await withEnv(async (calls) => {
-    stubFetch(calls, (call) => {
-      if (call.pathname === "/rest/v1/tournament_discord_configs") return [{ tournament_id: "t1", guild_id: "g1", state: "active" }];
-      if (call.pathname === "/rest/v1/tournaments") return [{ check_in_status: "closed" }];
-      if (call.pathname === "/rest/v1/tournament_registrations") {
-        if (call.method === "PATCH") return [{ id: "r1" }];
-        return [];
-      }
-      throw new Error(`Unexpected call to ${call.pathname}`);
-    });
-    await setRegistrationCheckIn({ tournamentId: "t1", registrationId: "r1", checkedIn: false });
-    const patchCall = calls.find((call) => call.pathname === "/rest/v1/tournament_registrations" && call.method === "PATCH");
-    assert.equal((patchCall!.body as Record<string, unknown>).checked_in_at, null);
+    globalThis.fetch = (async () =>
+      new Response(JSON.stringify({ code: "P0001", message: "Registration was not found." }), { status: 400 })) as typeof fetch;
+    void calls;
+    await assert.rejects(
+      () => setRegistrationCheckIn({ tournamentId: "t1", registrationId: "missing", checkedIn: true }),
+      /Registration was not found\./,
+    );
   });
 });
 
-test("setRegistrationCheckIn throws when the registration is not found", async () => {
+test("disconnectTournamentDiscord posts the tournament id and cleanup action to the RPC", async () => {
   await withEnv(async (calls) => {
-    stubFetch(calls, (call) => {
-      if (call.pathname === "/rest/v1/tournament_discord_configs") return [{ tournament_id: "t1", guild_id: "g1", state: "active" }];
-      if (call.pathname === "/rest/v1/tournaments") return [{ check_in_status: "closed" }];
-      if (call.pathname === "/rest/v1/tournament_registrations") {
-        if (call.method === "PATCH") return [];
-        return [];
-      }
-      throw new Error(`Unexpected call to ${call.pathname}`);
-    });
-    await assert.rejects(() => setRegistrationCheckIn({ tournamentId: "t1", registrationId: "missing", checkedIn: true }));
+    stubFetch(calls, () => null);
+    await disconnectTournamentDiscord({ tournamentId: "t1", cleanupAction: "archive" });
+    assert.equal(calls.length, 1);
+    assert.equal(calls[0]?.pathname, "/rest/v1/rpc/disconnect_tournament_discord");
+    assert.deepEqual(calls[0]?.body, { p_tournament_id: "t1", p_cleanup_action: "archive" });
   });
 });

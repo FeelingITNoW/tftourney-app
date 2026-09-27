@@ -156,28 +156,10 @@ export type TournamentLobby = {
   participants: TournamentLobbyParticipant[];
 };
 
-export type TournamentLobbyRosterParticipant = Pick<
-  TournamentLobbyParticipant,
-  "id" | "displayName" | "seedNumber" | "slotNumber"
->;
-
-export type TournamentLobbyRoster = Omit<TournamentLobby, "participants"> & {
-  participants: TournamentLobbyRosterParticipant[];
-};
-
 export type TournamentOverview = Omit<
   TournamentDetail,
   "lobbies" | "gameScores" | "scores" | "roundProgress" | "progressionAction"
 >;
-
-export type TournamentRoundDetail = {
-  round: TournamentRound;
-  lobbies: TournamentLobby[];
-  gameScores: TournamentGameScore[];
-  scores: TournamentScore[];
-  roundProgress: TournamentRoundProgress | null;
-  progressionAction: TournamentProgressionAction;
-};
 
 export type TournamentLobbyDetail = {
   tournament: Pick<
@@ -236,6 +218,11 @@ export type TournamentDetailPageShellViewModel = Omit<
   activeNodeIds: string[];
   selectedNodeId: string | null;
   sheetStatus: TournamentSheetStatus | null;
+  // Both host-gated, computed inside get_tournament_page_view_model itself
+  // (see docs/database-schema.md) -- null for a player/public viewer, or for
+  // a host whose tournament has no Discord config row yet.
+  discordConfig: import("@/lib/discord/api").TournamentDiscordConfig | null;
+  checkInState: import("@/lib/discord/api").TournamentCheckInState | null;
 };
 
 export type TournamentDetailPageViewModel = TournamentDetailPageShellViewModel & {
@@ -285,18 +272,6 @@ export type TournamentRow = {
   created_at: string;
 };
 
-export type TournamentEdgeRow = {
-  id: string | number;
-  tournament_id: string | number;
-  format_edge_id: string;
-  source_round_id: string | number;
-  destination_round_id: string | number;
-  priority: number;
-  condition: unknown;
-  status: "pending" | "resolved";
-  advanced_player_count: number;
-};
-
 export type TournamentRegistrationRow = {
   id: string | number;
   tournament_id: string | number;
@@ -307,26 +282,6 @@ export type TournamentRegistrationRow = {
   created_at: string;
 };
 
-export type TournamentParticipantRow = {
-  id: string;
-  tournament_id: string | number;
-  registration_id: string | number;
-  seed_number: number;
-  display_name_at_start: string;
-  created_at: string;
-};
-
-export type TournamentScoreRow = {
-  id: string;
-  participant_id: string;
-  round_id: string | number;
-  round_seed_number: number;
-  score: number;
-  source_edge_id?: string | number | null;
-  source_rank?: number | null;
-  created_at: string;
-};
-
 export type TournamentRoundRow = {
   id: string | number;
   tournament_id?: string | number;
@@ -334,23 +289,6 @@ export type TournamentRoundRow = {
   format_round_id: string | null;
   stage_name?: string | null;
   status: "pending" | "active" | "completed" | "cancelled" | "skipped";
-};
-
-export type TournamentLobbyRow = {
-  id: string | number;
-  round_id: string | number;
-  game_number: number;
-  lobby_number: number;
-};
-
-export type TournamentLobbyParticipantRow = {
-  id: string | number;
-  lobby_id: string | number;
-  participant_id: string;
-  slot_number: number;
-  placement: number | null;
-  points: number | null;
-  result_status: "pending" | "confirmed" | "corrected" | "disputed";
 };
 
 export type StartTournamentResult = {

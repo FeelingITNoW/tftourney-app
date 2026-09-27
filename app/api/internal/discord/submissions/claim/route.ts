@@ -9,10 +9,7 @@ export async function POST(request: Request): Promise<Response> {
   try {
     const result = await claimDiscordSubmission();
     if (!result) return new Response(null, { status: 204 });
-    const body = result.claimStatus === "claimed"
-      ? { ...result, imageUrl: `/api/internal/discord/submissions/${result.submissionId}/image` }
-      : result;
-    return Response.json(body, { status: 200 });
+    return Response.json(result, { status: 200 });
   } catch (error) {
     return discordErrorResponse(error, "Screenshot queue could not be claimed.");
   }

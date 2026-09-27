@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { GoogleSheetsHttpAdapter, GoogleApiError, refreshGoogleAccessToken } from "../lib/sheets/google-api";
+import { GoogleSheetsHttpAdapter, GoogleApiError, clearGoogleAccessTokenCache, getCachedGoogleAccessToken, refreshGoogleAccessToken } from "../lib/sheets/google-api";
 import type { TournamentWorkbookModel } from "../lib/sheets/types";
 
 function jsonResponse(value: unknown, status = 200): Response {
@@ -80,4 +80,73 @@ test("creates a shared workbook with stable tabs and writes managed ranges", asy
   assert.equal(valuesUpdate.valueInputOption, "RAW");
   assert.deepEqual(valuesUpdate.data?.[1]?.values?.[0], ["Rank", "Score"]);
   assert.ok(calls.some((call) => call.url.includes(":batchUpdate") && call.body && typeof call.body === "object" && "requests" in (call.body as object)));
+});
+
+test("getCachedGoogleAccessToken reuses a token until it nears expiry, then refreshes", async () => {
+  clearGoogleAccessTokenCache();
+  let exchangeCount = 0;
+  const fetchImpl = async () => {
+    exchangeCount += 1;
+    return jsonResponse({ access_token: `access-token-${exchangeCount}`, expires_in: 3600 });
+  };
+
+  const first = await getCachedGoogleAccessToken({
+    cacheKey: "host-1",
+    refreshToken: "refresh-token",
+    clientId: "client-id",
+    clientSecret: "client-secret",
+    fetchImpl,
+    now: 0,
+  });
+  assert.equal(first, "access-token-1");
+  assert.equal(exchangeCount, 1);
+
+  // Well within the cached token's lifetime: no new exchange.
+  const second = await getCachedGoogleAccessToken({
+    cacheKey: "host-1",
+    refreshToken: "refresh-token",
+    clientId: "client-id",
+    clientSecret: "client-secret",
+    fetchImpl,
+    now: 30 * 60_000,
+  });
+  assert.equal(second, "access-token-1");
+  assert.equal(exchangeCount, 1);
+
+  // A different host never shares a cached token.
+  const otherHost = await getCachedGoogleAccessToken({
+    cacheKey: "host-2",
+    refreshToken: "refresh-token",
+    clientId: "client-id",
+    clientSecret: "client-secret",
+    fetchImpl,
+    now: 30 * 60_000,
+  });
+  assert.equal(otherHost, "access-token-2");
+  assert.equal(exchangeCount, 2);
+
+  // A new refresh token for the same host (e.g. reconnected Google) is never
+  // served the token cached under the old one.
+  const reconnected = await getCachedGoogleAccessToken({
+    cacheKey: "host-1",
+    refreshToken: "new-refresh-token",
+    clientId: "client-id",
+    clientSecret: "client-secret",
+    fetchImpl,
+    now: 30 * 60_000,
+  });
+  assert.equal(reconnected, "access-token-3");
+  assert.equal(exchangeCount, 3);
+
+  // Within the expiry buffer of the original token: refreshes again.
+  const refreshed = await getCachedGoogleAccessToken({
+    cacheKey: "host-1",
+    refreshToken: "refresh-token",
+    clientId: "client-id",
+    clientSecret: "client-secret",
+    fetchImpl,
+    now: 3600_000 - 30_000,
+  });
+  assert.equal(refreshed, "access-token-4");
+  assert.equal(exchangeCount, 4);
 });

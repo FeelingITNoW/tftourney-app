@@ -1,5 +1,5 @@
 import { supabaseRestRequest } from "../db/supabase-rest/api";
-import type { TournamentRow } from "../db/tournaments/types";
+import { assertTournamentHost } from "../db/tournaments/api";
 import type {
   GoogleSheetExportRow,
   GoogleSheetExportStatus,
@@ -42,16 +42,6 @@ function mapExportRow(tournamentId: string, row: GoogleSheetExportRow | undefine
         ? { code: row.last_error_code ?? "SHEET_EXPORT_ERROR", message: row.last_error_message ?? "Sheet export failed." }
         : null,
   };
-}
-
-async function assertTournamentHost(tournamentId: string, hostUserId: string): Promise<void> {
-  const tournaments = await supabaseRestRequest<Pick<TournamentRow, "id" | "host_user_id">[]>("tournaments", {
-    query: { select: "id,host_user_id", id: `eq.${tournamentId}`, limit: "1" },
-  });
-  const tournament = tournaments[0];
-  if (!tournament || String(tournament.host_user_id ?? STANDARD_HOST_USER_ID) !== hostUserId) {
-    throw new Error("TOURNAMENT_NOT_FOUND");
-  }
 }
 
 export async function getGoogleSheetExportStatus(
