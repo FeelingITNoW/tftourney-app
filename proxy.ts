@@ -6,18 +6,13 @@ import {
   SESSION_COOKIE_NAME,
   sessionCookieOptions,
 } from "./lib/auth/session";
+import { getSupabaseConfig } from "./lib/db/supabase-rest/api";
 
 type RefreshedToken = {
   access_token?: string;
   refresh_token?: string;
   expires_in?: number;
 };
-
-function supabaseConfig(): { url: string; key: string } | null {
-  const url = process.env.NEXT_PUBLIC_SUPABASE_URL ?? process.env.SUPABASE_URL;
-  const key = process.env.SUPABASE_SERVICE_ROLE_KEY ?? process.env.SUPABASE_ANON_KEY;
-  return url && key ? { url: url.replace(/\/$/, ""), key } : null;
-}
 
 function needsRefresh(expiresAt: number | undefined): boolean {
   return expiresAt !== undefined && expiresAt <= Math.floor(Date.now() / 1000) + 60;
@@ -37,7 +32,7 @@ type RefreshOutcome =
 // getHostUserId(request) without going through this proxy at all.
 async function refreshSession(session: ReturnType<typeof decodeSessionCookie>): Promise<RefreshOutcome> {
   if (!session?.refreshToken) return { kind: "rejected" };
-  const config = supabaseConfig();
+  const config = getSupabaseConfig();
   if (!config) return { kind: "rejected" };
   try {
     const response = await fetch(`${config.url}/auth/v1/token?grant_type=refresh_token`, {

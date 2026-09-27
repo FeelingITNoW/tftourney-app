@@ -2,8 +2,8 @@
 
 The Discord integration is split into two processes:
 
-1. Next.js owns authentication, Riot verification, Supabase transactions, OCR, and the protected bot HTTP API.
-2. `bot/index.ts` owns the Discord Gateway connection, channel/thread provisioning, Discord interactions, screenshot intake, and the OCR worker loop.
+1. Next.js owns authentication, Riot verification, Supabase transactions, OCR, and the protected bot HTTP API -- including processing a claimed screenshot end to end (storage, OCR, and the score write) behind `/api/internal/discord/submissions/:id/process`.
+2. `bot/index.ts` owns the Discord Gateway connection, channel/thread provisioning, Discord interactions, and screenshot intake and claiming. It never downloads a screenshot or talks to Vision itself; it claims a submission, asks the app to process it, and reports the outcome back into the thread.
 
 Ngrok exposes the Next.js process at `https://deploy-tapping-unwed.ngrok-free.dev`. The Gateway connection is outbound and does not require a public bot webhook; the public URL is required for Google/Discord OAuth callbacks and links sent to facilitators. Ngrok forwards the URL to the local Next.js port with:
 
@@ -90,13 +90,12 @@ Run the bot as a second service in the same Railway project as the app, from the
    TFTOURNEY_INTERNAL_URL=http://${{tftourney-app.RAILWAY_PRIVATE_DOMAIN}}:${{tftourney-app.PORT}}
    DISCORD_BOT_TOKEN=${{tftourney-app.DISCORD_BOT_TOKEN}}
    DISCORD_BOT_API_SECRET=${{tftourney-app.DISCORD_BOT_API_SECRET}}
-   OCR_API_SECRET=${{tftourney-app.OCR_API_SECRET}}
    ```
 
-   `TFTOURNEY_APP_URL` is only used for links the bot posts in Discord, so it must be the public origin. Every API and OCR call goes to `TFTOURNEY_INTERNAL_URL` over Railway's private network, which skips the public edge (whose rate limiting otherwise answers the bot's 2-second queue poll with `429 rate limited`). Set `PORT` explicitly on the app service (e.g. `8080`) so the reference resolves.
+   `TFTOURNEY_APP_URL` is only used for links the bot posts in Discord, so it must be the public origin. Every API call goes to `TFTOURNEY_INTERNAL_URL` over Railway's private network, which skips the public edge (whose rate limiting otherwise answers the bot's 2-second queue poll with `429 rate limited`). Set `PORT` explicitly on the app service (e.g. `8080`) so the reference resolves. The bot does not need `OCR_API_SECRET`: screenshot storage access, OCR, and the score write all happen inside the app's `/api/internal/discord/submissions/:id/process` endpoint (see `processDiscordSubmission` in `lib/discord/submissions.ts`), so the image bytes never cross to the bot process at all.
 3. Stop any local `npm run bot:dev` using the same token once the Railway bot is running.
 
-Apply the Discord migration before connecting a tournament (`supabase db push`) and create a private Supabase Storage bucket named `discord-score-images`. Limit it to PNG/JPEG/WebP and 7 MB. The bucket is private; the worker accesses images through the protected app route. The bot runs retention cleanup hourly and deletes image objects and submission rows seven days after a tournament ends.
+Apply the Discord migration before connecting a tournament (`supabase db push`) and create a private Supabase Storage bucket named `discord-score-images`. Limit it to PNG/JPEG/WebP and 7 MB. The bucket is private; only the app accesses it, via the service-role key, when it processes a claimed submission. The bot runs retention cleanup hourly and deletes image objects and submission rows seven days after a tournament ends.
 
 ## Provisioning and permissions
 
@@ -175,9 +174,9 @@ The claim transaction reserves the earliest pending game for that round/lobby nu
 
 **Per-lobby score cooldown.** Independent of the ten-second upload cooldown above, each tournament has a `tournament_discord_configs.score_cooldown_seconds` setting (default `60`, `0` disables it, max `3600`) that blocks new screenshots for a lobby *thread* for that many seconds after one of its games is accepted — so a stray duplicate screenshot can't silently overwrite the next pending game. It is enforced twice: at enqueue time (a screenshot posted while the cooldown is active is rejected immediately) and at claim time (a screenshot that was already queued before the cooldown started, but reaches the front of the queue after another screenshot in the same thread was accepted, is rejected instead of claimed). Either way the submission is marked `rejected_cooldown`, the sender gets a reply naming the remaining wait, and — unlike overflow or an OCR failure — the tournament manager role is **not** pinged, since this is a routine, expected rejection. Recording a game via the web lobby editor (with no Discord submission attached) does not start or check the cooldown; only a Discord-sourced accept does.
 
-The worker downloads the stored image, posts it to `/api/ocr/placements` with the authoritative lobby roster, and accepts only a complete result where every placement maps uniquely to a current participant. It then calls the score endpoint with `Idempotency-Key: <submission id>`. PostgreSQL locks the tournament, round, and lobby, sets a five-second lock timeout, validates the full roster/unique placements, derives format points, recalculates round totals, and records the idempotency response in the same transaction.
+Once the bot claims a submission, it calls `POST /api/internal/discord/submissions/<id>/process` with the lease token and does nothing else until that call returns. `processDiscordSubmission` (`lib/discord/submissions.ts`) does the rest in one process: it re-reads the submission row (re-deriving the lobby and storage path rather than trusting anything the bot might have cached from claim time), downloads the stored image from Supabase Storage, runs it through Vision against the authoritative lobby roster, and accepts only a complete result where every placement maps uniquely to a current participant. It then calls `submitLobbyResults` with `submissionId` as the idempotency key, in the same process -- no second HTTP hop. PostgreSQL locks the tournament, round, and lobby, sets a five-second lock timeout, validates the full roster/unique placements, derives format points, recalculates round totals, and records the idempotency response in the same transaction.
 
-The score endpoint is also available to an authenticated host/manager for manual correction:
+`/api/tournaments/<id>/lobbies/<id>/results` (the same endpoint `submitLobbyResults` calls into) is also available directly to an authenticated host/manager for manual correction:
 
 ```http
 POST /api/tournaments/<tournament-id>/lobbies/<lobby-id>/results

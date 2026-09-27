@@ -1,6 +1,9 @@
 import { randomUUID } from "node:crypto";
 import { DatabaseRequestError, supabaseRestRequest } from "../db/supabase-rest/api";
-import { getTournamentLobbyViewModel } from "../db/tournaments/api";
+import { getTournamentLobbyViewModel, submitLobbyResults } from "../db/tournaments/api";
+import { createGoogleVisionTextDetector } from "../ocr/placements/google-vision";
+import { parsePlacementImage } from "../ocr/placements/parser";
+import type { PlacementParseResult } from "../ocr/placements/types";
 import { parseSubmissionResult, type DiscordScoreSubmissionResult } from "./http";
 
 export const DISCORD_IMAGE_MAX_BYTES = 7 * 1024 * 1024;
@@ -28,9 +31,6 @@ export type ClaimedDiscordSubmission =
       lobbyId: string;
       gameNumber: number;
       leaseToken: string;
-      storagePath: string;
-      attemptCount: number;
-      roster: Array<{ id: string; displayName: string }>;
     }
   | {
       claimStatus: "rejected_cooldown";
@@ -136,9 +136,6 @@ export async function claimDiscordSubmission(): Promise<ClaimedDiscordSubmission
       retryAfterSeconds: Number(row.retry_after_seconds ?? 0),
     };
   }
-  const lobbyId = String(row.lobby_id ?? "");
-  const model = await getTournamentLobbyViewModel(tournamentId, lobbyId);
-  if (!model) throw new Error("Claimed Discord submission points to a missing lobby.");
   return {
     claimStatus: "claimed",
     submissionId: String(row.submission_id),
@@ -146,12 +143,9 @@ export async function claimDiscordSubmission(): Promise<ClaimedDiscordSubmission
     roundId: String(row.round_id),
     threadId: String(row.thread_id),
     discordMessageId,
-    lobbyId,
+    lobbyId: String(row.lobby_id ?? ""),
     gameNumber: Number(row.game_number),
     leaseToken: String(row.lease_token),
-    storagePath: String(row.storage_path),
-    attemptCount: Number(row.attempt_count),
-    roster: model.lobby.participants.map((participant) => ({ id: participant.id, displayName: participant.displayName })),
   };
 }
 
@@ -172,6 +166,117 @@ export async function markDiscordSubmissionReview(input: {
       p_error_message: input.errorMessage,
     },
   });
+}
+
+export type ProcessDiscordSubmissionResult =
+  | { outcome: "accepted"; gameNumber: number; roundId: string; lobbyNumber: number }
+  | { outcome: "review_required"; message: string }
+  | { outcome: "score_write_failed"; message: string }
+  | { outcome: "retries_exhausted"; message: string };
+
+export type ProcessDiscordSubmissionDependencies = {
+  parseImage: (image: Uint8Array, roster: Array<{ id: string; displayName: string }>) => Promise<PlacementParseResult>;
+};
+
+// Mirrors defaultPlacementOcrDependencies() in lib/ocr/placements/http.ts:
+// the Vision client is expensive to construct but memoized at module scope,
+// so building this fresh per call is cheap once warm.
+function defaultProcessDependencies(): ProcessDiscordSubmissionDependencies {
+  const detector = createGoogleVisionTextDetector();
+  return { parseImage: (image, roster) => parsePlacementImage(image, detector, roster) };
+}
+
+// Collapses what used to be a bot-driven chain of app round trips -- download
+// the stored screenshot, re-upload it to /api/ocr/placements, then POST the
+// parsed results -- into one call the bot makes right after claiming a
+// submission. Storage access, OCR, and the score write all happen in this
+// process instead, so the image bytes never leave the app. Re-derives the
+// lobby and storage path from the submission row (rather than trusting
+// claim-time values the caller might have held onto) and relies on the same
+// status/lease_token guard claim_discord_score_submission and
+// mark_discord_submission_review already use.
+export async function processDiscordSubmission(
+  submissionId: string,
+  leaseToken: string,
+  dependencies: ProcessDiscordSubmissionDependencies = defaultProcessDependencies(),
+): Promise<ProcessDiscordSubmissionResult> {
+  const rows = await supabaseRestRequest<Array<{
+    tournament_id: string;
+    target_lobby_id: string | null;
+    storage_path: string;
+    status: string;
+    lease_token: string | null;
+    attempt_count: number;
+  }>>("discord_score_submissions", {
+    query: { select: "tournament_id,target_lobby_id,storage_path,status,lease_token,attempt_count", id: `eq.${submissionId}`, limit: "1" },
+  });
+  const submission = rows[0];
+  if (!submission || submission.status !== "processing" || submission.lease_token !== leaseToken || !submission.target_lobby_id) {
+    throw new Error("Submission is not held by this lease.");
+  }
+  const tournamentId = submission.tournament_id;
+  const lobbyId = submission.target_lobby_id;
+
+  try {
+    const model = await getTournamentLobbyViewModel(tournamentId, lobbyId);
+    if (!model) throw new Error("Claimed Discord submission points to a missing lobby.");
+    const roster = model.lobby.participants.map((participant) => ({ id: participant.id, displayName: participant.displayName }));
+
+    const image = await downloadDiscordImage(submission.storage_path);
+    if (!image.ok || !image.body) throw new Error("Stored screenshot could not be downloaded.");
+    const imageBytes = new Uint8Array(await image.arrayBuffer());
+
+    const ocr = await dependencies.parseImage(imageBytes, roster);
+    const complete = ocr.status === "complete" &&
+      ocr.placements.length === roster.length &&
+      ocr.placements.every((row) => row.matchStatus === "matched" && row.matchedRosterEntry?.id);
+    console.log(`[discord-score-worker] submission ${submissionId} (tournament ${tournamentId}, lobby ${lobbyId}): OCR status=${ocr.status} strategy=${ocr.strategy} matched=${ocr.placements.filter((row) => row.matchStatus === "matched").length}/${roster.length}`);
+
+    if (!complete) {
+      await markDiscordSubmissionReview({
+        submissionId,
+        leaseToken,
+        ocrResult: ocr,
+        errorCode: "OCR_REVIEW_REQUIRED",
+        errorMessage: "OCR could not produce an unambiguous complete roster.",
+      });
+      return { outcome: "review_required", message: "OCR could not validate this screenshot. A facilitator must review it before the next image is processed." };
+    }
+
+    const results = ocr.placements.map((row) => ({ participantId: row.matchedRosterEntry!.id, placement: row.placement }));
+    try {
+      const result = await submitLobbyResults({
+        tournamentId,
+        lobbyId,
+        results,
+        idempotencyKey: submissionId,
+        source: "discord",
+        submissionId,
+        mode: "record",
+      });
+      return { outcome: "accepted", gameNumber: result.game_number, roundId: result.round_id, lobbyNumber: result.lobby_number };
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "The score could not be recorded.";
+      await markDiscordSubmissionReview({ submissionId, leaseToken, ocrResult: ocr, errorCode: "SCORE_WRITE_FAILED", errorMessage: message });
+      return { outcome: "score_write_failed", message };
+    }
+  } catch (error) {
+    // Mirrors the bot's old catch-all: only proactively flag for review once
+    // this was the last of the three attempts claim_discord_score_submission
+    // allows. Anything earlier is left alone -- the lease expires and the next
+    // claim resets the row to 'queued' for a fresh attempt.
+    if (submission.attempt_count >= 3) {
+      await markDiscordSubmissionReview({
+        submissionId,
+        leaseToken,
+        ocrResult: null,
+        errorCode: "PROCESSING_RETRIES_EXHAUSTED",
+        errorMessage: "The screenshot worker could not process this image after three attempts.",
+      }).catch(() => undefined);
+      return { outcome: "retries_exhausted", message: "The screenshot worker could not process this image after three attempts. A facilitator must review it." };
+    }
+    throw error;
+  }
 }
 
 export async function purgeExpiredDiscordImages(): Promise<number> {

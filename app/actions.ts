@@ -30,11 +30,10 @@ import type { CustomTournamentCreationState } from "@/lib/tournament/formats/cre
 import { scheduleTournamentSheetSync } from "@/lib/sheets/dispatch";
 import { supabaseRestRequest } from "@/lib/db/supabase-rest/api";
 import {
+  closeTournamentCheckIn,
+  disconnectTournamentDiscord,
   enqueueDiscordOutbox,
-  getTournamentCheckInState,
-  getTournamentDiscordConfig,
-  prepareTournamentStartRoster,
-  restoreTournamentStartRoster,
+  openTournamentCheckIn,
   setRegistrationCheckIn,
   createManagerInviteToken,
   isTournamentManager,
@@ -345,32 +344,16 @@ export async function startTournamentAction(formData: FormData) {
 
   const hostUserId = await requireTournamentHost(tournamentId, detailPath);
 
-  // Closing an open check-in (if any) and waitlisting non-checked-in players
-  // is kept separate from the start RPC itself so a start failure can restore
-  // the roster it just demoted, without also undoing side effects (outbox,
-  // Sheets sync) that only make sense once the tournament actually started.
-  let demotedRegistrationIds: string[] = [];
-  try {
-    demotedRegistrationIds = await prepareTournamentStartRoster(tournamentId);
-  } catch (error) {
-    redirectWithParams(detailPath, {
-      startError:
-        error instanceof Error ? error.message : "Tournament could not be started.",
-    });
-  }
-
+  // Closing an open check-in (if any) and narrowing the roster to checked-in
+  // players now happens inside start_tournament itself, in the same
+  // transaction as the start -- a failure anywhere in that RPC (e.g. an
+  // entrant-count mismatch) rolls the narrowing back too, so there's no
+  // separate compensating restore step to run here.
   try {
     await startTournament({ tournamentId });
   } catch (error) {
-    let restoreFailed = false;
-    await restoreTournamentStartRoster(demotedRegistrationIds).catch(() => {
-      restoreFailed = true;
-    });
-    const message = error instanceof Error ? error.message : "Tournament could not be started.";
     redirectWithParams(detailPath, {
-      startError: restoreFailed && demotedRegistrationIds.length > 0
-        ? `${message} Some players were left waitlisted -- reopen check-in to restore them.`
-        : message,
+      startError: error instanceof Error ? error.message : "Tournament could not be started.",
     });
   }
 
@@ -400,30 +383,7 @@ export async function openTournamentCheckInAction(formData: FormData) {
   await requireTournamentHost(tournamentId, detailPath);
   let reopened = false;
   try {
-    const config = await getTournamentDiscordConfig(tournamentId);
-    if (!config || config.state === "disabled") throw new Error("Connect this tournament to Discord before opening check-in.");
-    const state = await getTournamentCheckInState(tournamentId);
-    if (state?.status === "open") throw new Error("Check-in is already open.");
-    // Reopening after a close preserves existing check-ins instead of
-    // wiping them -- only the very first open resets the roster.
-    reopened = state?.status === "closed";
-    await supabaseRestRequest("tournaments", {
-      method: "PATCH",
-      query: { id: `eq.${tournamentId}` },
-      prefer: "return=minimal",
-      body: reopened
-        ? { check_in_status: "open", check_in_closed_at: null }
-        : { check_in_status: "open", check_in_opened_at: new Date().toISOString(), check_in_closed_at: null },
-    });
-    if (!reopened) {
-      await supabaseRestRequest("tournament_registrations", {
-        method: "PATCH",
-        query: { tournament_id: `eq.${tournamentId}`, or: "(registration_status.eq.registered,registration_status.eq.waitlisted)" },
-        prefer: "return=minimal",
-        body: { checked_in_at: null },
-      });
-    }
-    await enqueueDiscordOutbox({ tournamentId, eventType: "checkin_opened", dedupeKey: `checkin:opened:${Date.now()}` });
+    reopened = (await openTournamentCheckIn(tournamentId)).reopened;
   } catch (error) {
     redirectWithParams(detailPath, { checkInError: error instanceof Error ? error.message : "Check-in could not be opened." });
   }
@@ -454,15 +414,7 @@ export async function closeTournamentCheckInAction(formData: FormData) {
   if (!tournamentId) redirectWithParams("/", { createError: "Tournament was not found." });
   await requireTournamentHost(tournamentId, detailPath);
   try {
-    const state = await getTournamentCheckInState(tournamentId);
-    if (!state || state.status !== "open") throw new Error("Check-in is not open.");
-    await supabaseRestRequest("tournaments", {
-      method: "PATCH",
-      query: { id: `eq.${tournamentId}` },
-      prefer: "return=minimal",
-      body: { check_in_status: "closed", check_in_closed_at: new Date().toISOString() },
-    });
-    await enqueueDiscordOutbox({ tournamentId, eventType: "checkin_closed", dedupeKey: `checkin:closed:${Date.now()}` });
+    await closeTournamentCheckIn(tournamentId);
   } catch (error) {
     redirectWithParams(detailPath, { checkInError: error instanceof Error ? error.message : "Check-in could not be closed." });
   }
@@ -510,31 +462,7 @@ export async function disconnectDiscordAction(formData: FormData) {
     // onward; cleanup_action/cleanup_requested_at instead queue the one-time
     // archive-or-delete request the bot picks up from
     // /api/internal/discord/cleanup (see that route and bot/index.ts runCleanup).
-    await supabaseRestRequest("tournament_discord_configs", {
-      method: "PATCH",
-      query: { tournament_id: `eq.${tournamentId}` },
-      prefer: "return=minimal",
-      body: {
-        state: "disabled",
-        last_error: null,
-        cleanup_action: cleanupAction,
-        cleanup_requested_at: new Date().toISOString(),
-        cleanup_completed_at: null,
-        updated_at: new Date().toISOString(),
-      },
-    });
-    await supabaseRestRequest("tournaments", {
-      method: "PATCH",
-      query: { id: `eq.${tournamentId}` },
-      prefer: "return=minimal",
-      body: { check_in_status: "not_started", check_in_opened_at: null, check_in_closed_at: null },
-    });
-    await supabaseRestRequest("tournament_registrations", {
-      method: "PATCH",
-      query: { tournament_id: `eq.${tournamentId}`, or: "(registration_status.eq.registered,registration_status.eq.waitlisted)" },
-      prefer: "return=minimal",
-      body: { checked_in_at: null },
-    });
+    await disconnectTournamentDiscord({ tournamentId, cleanupAction });
   } catch (error) {
     redirectWithParams(detailPath, { discordError: error instanceof Error ? error.message : "Discord could not be disconnected." });
   }

@@ -382,6 +382,40 @@ one selected server tab and at most eight lobbies for one game/page;
 requested host owns the tournament. IDs are serialized as text and refresh
 tokens are never included.
 
+`20260926000000_fix_ambiguous_id_casts_and_lobby_overfetch.sql` rewrites
+`get_tournament_page_view_model`, `get_tournament_lobby_view_model`,
+`get_tournament_export_view_model`, `get_google_sheet_export_status_view_model`,
+`checkmate_decisive_game`, `submit_lobby_results`, `generate_round_lobbies`, and
+`finalize_tournament_node` to stop casting `tournaments`/`rounds`/`lobbies` id
+columns to text for lookups and filters (`id::text = p_tournament_id`,
+`round_id::text = v_round_id`, and so on). Each text id parameter is now
+converted once, by assignment into a local declared with `%type` off the real
+column, inside a block that catches `invalid_text_representation` and treats a
+malformed id the same as a well-typed but nonexistent one (unchanged error
+messages). Comparisons then use that native-typed local, so the planner can
+use the indexes above instead of scanning every row in the table regardless of
+which of the two id types in this file's header comment turns out to be live.
+This changes no return shape except `get_tournament_page_view_model`'s lobbies
+panel: `progress_lobbies` (every lobby and lobby participant in the selected
+round) is now only populated for rounds with at most eight entrants -- which
+always includes checkmate, since checkmate requires exactly eight -- and a
+larger fixed-games round's progress is derived entirely from `game_summaries`
+instead (see `getFixedGamesSummaryProgress` in `lib/db/tournaments/api.ts`).
+The lobbies panel also no longer returns the tournament-wide `participants`
+array, since every lobby-participant and score row it accompanied already
+carries its own `display_name`/`seed_number`/`round_seed_number`.
+
+`20260926000001_fold_discord_state_into_page_view_model.sql` adds
+`discord_config` and `check_in_state` to `get_tournament_page_view_model`'s
+top-level output, gated on host ownership exactly like `sheet_status` already
+is. They mirror `getTournamentDiscordConfig`/`getTournamentCheckInState`'s
+shape (see `lib/discord/api.ts`) so the tournament page's host-only Discord
+panel no longer needs those two extra round trips after the view model call --
+a host's page load and every 5s `LiveRefresh` poll while Discord is connected
+now cost one round trip instead of three. `check_in_state` is computed
+whenever the viewer is the host, independent of whether Discord is connected,
+matching the read model's existing gating on the caller side.
+
 `20260919000000_discord_reconcile_view_model.sql` adds
 `get_discord_reconcile_view_model`, which returns the entire payload for the
 bot's 10-second reconcile poll in one request. It replaces a route that issued

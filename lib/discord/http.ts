@@ -1,6 +1,6 @@
 import { getHostUserId } from "../auth/session";
 import { assertTournamentHost, submitLobbyResults } from "../db/tournaments/api";
-import { supabaseRestRequest } from "../db/supabase-rest/api";
+import { DatabaseRequestError, supabaseRestRequest } from "../db/supabase-rest/api";
 import { validateLobbyResults } from "../tournament/scoring/api";
 import type { LobbyResultInput } from "../db/tournaments/types";
 
@@ -53,11 +53,22 @@ export function discordErrorResponse(
 ): Response {
   const message = error instanceof Error ? error.message : fallback;
   const lower = message.toLowerCase();
+  // DatabaseRequestError.code is PostgREST's parsed SQLSTATE -- stable
+  // across wording/locale, unlike the message-substring checks below (which
+  // remain the only option for plain `raise exception` business errors,
+  // since those share Postgres's generic P0001 code with every other one).
+  const databaseErrorCode = error instanceof DatabaseRequestError ? error.code : null;
   let status = 500;
   let code = "DISCORD_OPERATION_FAILED";
   let retryable = false;
 
-  if (lower.includes("already registered")) {
+  if (databaseErrorCode === "55P03") {
+    // lock_timeout: another writer is mid-transaction on the same row (see
+    // set_config('lock_timeout', ...) in submit_lobby_results).
+    status = 409;
+    code = "LOBBY_BUSY";
+    retryable = true;
+  } else if (lower.includes("already registered")) {
     status = 409;
     code = "ALREADY_REGISTERED";
   } else if (lower.includes("check-in is not") || lower.includes("registration is closed") || lower.includes("already been recorded")) {

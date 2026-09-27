@@ -34,7 +34,8 @@ POST /api/ocr/placements
 ```
 
 The request must contain a multipart `image` field. PNG, JPEG, and WebP files
-up to 7 MB are accepted. A bot may optionally send a JSON `roster` field:
+up to 7 MB are accepted. A bearer-authenticated caller may optionally send a
+JSON `roster` field:
 
 ```bash
 curl -X POST http://localhost:3000/api/ocr/placements \
@@ -47,8 +48,15 @@ There are two authenticated request paths:
 
 | Caller | Authentication | Roster source |
 | --- | --- | --- |
-| Discord bot or other service | `Authorization: Bearer ...` matching `OCR_API_SECRET` | Optional JSON form field |
+| A service with the shared secret | `Authorization: Bearer ...` matching `OCR_API_SECRET` | Optional JSON form field |
 | Organizer web page | Existing session cookie | Server-loaded roster for `tournamentId` and `lobbyId` |
+
+The Discord bot's own screenshot pipeline does not use this HTTP endpoint: it
+calls `parsePlacementImage` in-process from `processDiscordSubmission`
+(`lib/discord/submissions.ts`), by way of the app's
+`/api/internal/discord/submissions/:id/process` route. This endpoint remains
+for the organizer web page's manual re-OCR path and for any other
+bearer-authenticated caller.
 
 The organizer path ignores a client-supplied roster. It loads the authoritative
 lobby participants after verifying that the session user owns the tournament.

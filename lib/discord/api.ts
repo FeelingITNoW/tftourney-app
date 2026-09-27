@@ -151,19 +151,24 @@ export async function isTournamentManager(tournamentId: string, userId: string):
 }
 
 export async function getTournamentCheckInState(tournamentId: string): Promise<TournamentCheckInState | null> {
-  const rows = await supabaseRestRequest<Record<string, unknown>[]>("tournaments", {
-    query: { select: "check_in_status,check_in_opened_at,check_in_closed_at", id: `eq.${tournamentId}`, limit: "1" },
-  });
+  // The registrations query is keyed on tournamentId, not on anything the
+  // tournaments-row query returns, so the two don't need to run serially --
+  // only the "does this tournament exist" check below depends on the first.
+  const [rows, registrations] = await Promise.all([
+    supabaseRestRequest<Record<string, unknown>[]>("tournaments", {
+      query: { select: "check_in_status,check_in_opened_at,check_in_closed_at", id: `eq.${tournamentId}`, limit: "1" },
+    }),
+    supabaseRestRequest<Array<{
+      id: string;
+      display_name: string;
+      registration_status: TournamentCheckInRegistration["registrationStatus"];
+      checked_in_at: string | null;
+      discord_user_id: string | null;
+    }>>("tournament_registrations", {
+      query: { select: "id,display_name,registration_status,checked_in_at,discord_user_id", tournament_id: `eq.${tournamentId}`, order: "created_at.asc,id.asc" },
+    }),
+  ]);
   if (!rows[0]) return null;
-  const registrations = await supabaseRestRequest<Array<{
-    id: string;
-    display_name: string;
-    registration_status: TournamentCheckInRegistration["registrationStatus"];
-    checked_in_at: string | null;
-    discord_user_id: string | null;
-  }>>("tournament_registrations", {
-    query: { select: "id,display_name,registration_status,checked_in_at,discord_user_id", tournament_id: `eq.${tournamentId}`, order: "created_at.asc,id.asc" },
-  });
   const isCheckedIn = (row: (typeof registrations)[number]) =>
     row.checked_in_at !== null && (row.registration_status === "registered" || row.registration_status === "waitlisted");
   return {
@@ -219,57 +224,38 @@ export async function enqueueDiscordOutbox(input: {
   });
 }
 
-function chunk<T>(values: T[], size: number): T[][] {
-  const chunks: T[][] = [];
-  for (let index = 0; index < values.length; index += size) chunks.push(values.slice(index, index + size));
-  return chunks;
-}
+// Each of the four functions below used to be several sequential PostgREST
+// requests with no transaction tying them together (see
+// 20260926000002_atomic_checkin_and_discord_mutations.sql for the RPCs and
+// the reasoning). They're now one request each; the RPC does the read-then-write
+// atomically and raises the same error messages these functions used to
+// produce by hand, so callers (the server actions in app/actions.ts) don't
+// need to change how they handle failures.
+//
+// Check-in itself is optional: with no Discord config, or check-in never
+// opened, every registered player enters a started tournament as before --
+// start_tournament only narrows the roster to checked-in players once the
+// host has actually used check-in, and closes it first if it's still open
+// when they start (one click covers both). That narrowing lives in
+// start_tournament itself now, in the same transaction as the start, so a
+// failed start (e.g. an entrant-count mismatch) can never need a
+// compensating restore step -- it was never applied in the first place.
 
-// Check-in is optional: with no Discord config, or check-in never opened,
-// every registered player enters as before. Only once the host has opened
-// check-in does the roster narrow to who checked in -- and starting while
-// check-in is still open closes it first (one click covers both), so a
-// partial roster is never seated by accident.
-export async function prepareTournamentStartRoster(tournamentId: string): Promise<string[]> {
-  const config = await getTournamentDiscordConfig(tournamentId);
-  if (!config || config.state === "disabled") return [];
-  const state = await getTournamentCheckInState(tournamentId);
-  if (!state || state.status === "not_started") return [];
-  if (state.status === "open") {
-    await supabaseRestRequest("tournaments", {
-      method: "PATCH",
-      query: { id: `eq.${tournamentId}` },
-      prefer: "return=minimal",
-      body: { check_in_status: "closed", check_in_closed_at: new Date().toISOString() },
-    });
-  }
-  const rows = await supabaseRestRequest<Array<{ id: string }>>("tournament_registrations", {
-    method: "PATCH",
-    query: {
-      select: "id",
-      tournament_id: `eq.${tournamentId}`,
-      registration_status: "eq.registered",
-      checked_in_at: "is.null",
-    },
-    prefer: "return=representation",
-    body: { registration_status: "waitlisted" },
+export async function openTournamentCheckIn(tournamentId: string): Promise<{ reopened: boolean }> {
+  const rows = await supabaseRestRequest<Array<{ reopened: boolean }>>("rpc/open_tournament_check_in", {
+    method: "POST",
+    body: { p_tournament_id: tournamentId },
   });
-  return (rows ?? []).map((row) => row.id);
+  const result = rows?.[0];
+  if (!result) throw new Error("Database did not return the check-in state.");
+  return result;
 }
 
-// Undoes prepareTournamentStartRoster's demotion after a failed start, so a
-// host whose start attempt errored (e.g. an entrant-count mismatch) isn't
-// left with players stuck as waitlisted for no reason.
-export async function restoreTournamentStartRoster(registrationIds: string[]): Promise<void> {
-  for (const batch of chunk(registrationIds, 64)) {
-    if (batch.length === 0) continue;
-    await supabaseRestRequest("tournament_registrations", {
-      method: "PATCH",
-      query: { id: `in.(${batch.join(",")})` },
-      prefer: "return=minimal",
-      body: { registration_status: "registered" },
-    });
-  }
+export async function closeTournamentCheckIn(tournamentId: string): Promise<void> {
+  await supabaseRestRequest("rpc/close_tournament_check_in", {
+    method: "POST",
+    body: { p_tournament_id: tournamentId },
+  });
 }
 
 export async function setRegistrationCheckIn(input: {
@@ -277,26 +263,24 @@ export async function setRegistrationCheckIn(input: {
   registrationId: string;
   checkedIn: boolean;
 }): Promise<void> {
-  const config = await getTournamentDiscordConfig(input.tournamentId);
-  if (!config || config.state === "disabled") {
-    throw new Error("Connect this tournament to Discord before using check-in.");
-  }
-  const state = await getTournamentCheckInState(input.tournamentId);
-  if (!state || state.status === "not_started") {
-    throw new Error("Open check-in before checking players in.");
-  }
-  const rows = await supabaseRestRequest<Array<{ id: string }>>("tournament_registrations", {
-    method: "PATCH",
-    query: {
-      select: "id",
-      id: `eq.${input.registrationId}`,
-      tournament_id: `eq.${input.tournamentId}`,
-      registration_status: "in.(registered,waitlisted)",
+  await supabaseRestRequest("rpc/set_registration_check_in", {
+    method: "POST",
+    body: {
+      p_tournament_id: input.tournamentId,
+      p_registration_id: input.registrationId,
+      p_checked_in: input.checkedIn,
     },
-    prefer: "return=representation",
-    body: { checked_in_at: input.checkedIn ? new Date().toISOString() : null },
   });
-  if (!rows?.[0]) throw new Error("Registration was not found.");
+}
+
+export async function disconnectTournamentDiscord(input: {
+  tournamentId: string;
+  cleanupAction: "archive" | "delete";
+}): Promise<void> {
+  await supabaseRestRequest("rpc/disconnect_tournament_discord", {
+    method: "POST",
+    body: { p_tournament_id: input.tournamentId, p_cleanup_action: input.cleanupAction },
+  });
 }
 
 // Kept as a small pure-looking helper (rather than inline `Date.now()` in the

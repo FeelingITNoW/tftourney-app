@@ -54,12 +54,14 @@ async function requestJson<T>(
   return body as T;
 }
 
-export async function refreshGoogleAccessToken(input: {
+type RefreshedGoogleToken = { accessToken: string; expiresInSeconds: number };
+
+async function requestGoogleAccessToken(input: {
   refreshToken: string;
   clientId: string;
   clientSecret: string;
   fetchImpl?: GoogleFetch;
-}): Promise<string> {
+}): Promise<RefreshedGoogleToken> {
   const fetchImpl = input.fetchImpl ?? fetch;
   const response = await fetchImpl("https://oauth2.googleapis.com/token", {
     method: "POST",
@@ -87,6 +89,61 @@ export async function refreshGoogleAccessToken(input: {
   if (typeof accessToken !== "string" || !accessToken) {
     throw new GoogleApiError("Google did not return an access token.", 502, "GOOGLE_TOKEN_INVALID");
   }
+  const rawExpiresIn = typeof body === "object" && body !== null ? (body as { expires_in?: unknown }).expires_in : null;
+  const expiresInSeconds = typeof rawExpiresIn === "number" && Number.isFinite(rawExpiresIn) && rawExpiresIn > 0 ? rawExpiresIn : 3600;
+  return { accessToken, expiresInSeconds };
+}
+
+export async function refreshGoogleAccessToken(input: {
+  refreshToken: string;
+  clientId: string;
+  clientSecret: string;
+  fetchImpl?: GoogleFetch;
+}): Promise<string> {
+  const { accessToken } = await requestGoogleAccessToken(input);
+  return accessToken;
+}
+
+type CachedGoogleToken = { accessToken: string; expiresAt: number };
+// Keyed by cacheKey + refreshToken (not cacheKey alone), so a host
+// reconnecting Google with a new refresh token can never be served a token
+// exchanged under the old one, and by cacheKey (not refreshToken alone) so
+// two hosts never share a slot as a side effect of colliding tokens.
+const googleAccessTokenCache = new Map<string, CachedGoogleToken>();
+// Refresh this long before actual expiry, so a token already close to
+// expiring is never handed out only to fail partway through a request.
+const GOOGLE_ACCESS_TOKEN_EXPIRY_BUFFER_MS = 60_000;
+
+/** Test-only: clears cached tokens so cases don't leak state into each other. */
+export function clearGoogleAccessTokenCache(): void {
+  googleAccessTokenCache.clear();
+}
+
+/**
+ * Like refreshGoogleAccessToken, but reuses a cached access token for the
+ * same cacheKey + refreshToken pair until it's within
+ * GOOGLE_ACCESS_TOKEN_EXPIRY_BUFFER_MS of expiring. Google access tokens are
+ * normally valid for about an hour, but every organizer mutation that
+ * touches tournament data schedules a sheet sync (see
+ * lib/sheets/dispatch.ts) which used to pay for a full OAuth token exchange
+ * on every single one of those syncs.
+ */
+export async function getCachedGoogleAccessToken(input: {
+  cacheKey: string;
+  refreshToken: string;
+  clientId: string;
+  clientSecret: string;
+  fetchImpl?: GoogleFetch;
+  now?: number;
+}): Promise<string> {
+  const now = input.now ?? Date.now();
+  const cacheEntryKey = `${input.cacheKey}:${input.refreshToken}`;
+  const cached = googleAccessTokenCache.get(cacheEntryKey);
+  if (cached && cached.expiresAt - GOOGLE_ACCESS_TOKEN_EXPIRY_BUFFER_MS > now) {
+    return cached.accessToken;
+  }
+  const { accessToken, expiresInSeconds } = await requestGoogleAccessToken(input);
+  googleAccessTokenCache.set(cacheEntryKey, { accessToken, expiresAt: now + expiresInSeconds * 1000 });
   return accessToken;
 }
 
