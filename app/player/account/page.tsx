@@ -1,3 +1,4 @@
+import Link from "next/link";
 import {
   changeEmailAction,
   changePasswordAction,
@@ -13,7 +14,13 @@ import { discordAvatarUrl, discordDisplayName } from "@/lib/discord/avatar";
 
 export const dynamic = "force-dynamic";
 
-type SearchParams = Promise<{ accountUpdated?: string | string[]; accountError?: string | string[] }>;
+type AccountSection = "profile" | "linked";
+
+type SearchParams = Promise<{
+  accountUpdated?: string | string[];
+  accountError?: string | string[];
+  section?: string | string[];
+}>;
 
 function first(value: string | string[] | undefined): string {
   return Array.isArray(value) ? value[0] ?? "" : value ?? "";
@@ -27,6 +34,11 @@ const UPDATE_MESSAGES: Record<string, string> = {
   discord: "Discord is linked to your account.",
   "discord-unlinked": "Discord was unlinked from your account.",
 };
+
+// Server actions attach `section` to every redirect, so this is mostly a
+// fallback for the Discord OAuth link callback (which isn't one of this
+// file's server actions and doesn't set it).
+const LINKED_UPDATES = new Set(["riot", "discord", "discord-unlinked"]);
 
 export default async function PlayerAccountPage({ searchParams }: { searchParams: SearchParams }) {
   const query = await searchParams;
@@ -48,6 +60,13 @@ export default async function PlayerAccountPage({ searchParams }: { searchParams
   const hasDiscord = Boolean(account.discordUserId);
   const avatarUrl = discordAvatarUrl(account.discordUserId, account.discordAvatar);
   const discordName = discordDisplayName(account.discordUsername);
+  const requestedSection = first(query.section);
+  const section: AccountSection =
+    requestedSection === "linked" || requestedSection === "profile"
+      ? requestedSection
+      : LINKED_UPDATES.has(updated)
+        ? "linked"
+        : "profile";
 
   return (
     <main className="min-h-screen bg-stone-50 text-zinc-950">
@@ -69,6 +88,29 @@ export default async function PlayerAccountPage({ searchParams }: { searchParams
         {error ? <p className="mt-6 rounded-md border border-red-200 bg-red-50 p-4 text-sm font-medium text-red-800" role="alert">{error}</p> : null}
         {updated ? <p className="mt-6 rounded-md border border-emerald-200 bg-emerald-50 p-4 text-sm font-medium text-emerald-900" role="status">{UPDATE_MESSAGES[updated] ?? "Your account was updated."}</p> : null}
 
+        <div aria-label="Account sections" className="mt-6 flex flex-wrap gap-1 border-b border-zinc-200" role="tablist">
+          <Link
+            aria-current={section === "profile" ? "page" : undefined}
+            aria-selected={section === "profile"}
+            className={`border-b-2 px-4 py-3 text-sm font-semibold transition focus:outline-none focus:ring-2 focus:ring-emerald-600 focus:ring-offset-2 ${section === "profile" ? "border-emerald-700 text-emerald-800" : "border-transparent text-zinc-500 hover:border-zinc-300 hover:text-zinc-800"}`}
+            href="/player/account?section=profile"
+            role="tab"
+          >
+            Profile
+          </Link>
+          <Link
+            aria-current={section === "linked" ? "page" : undefined}
+            aria-selected={section === "linked"}
+            className={`border-b-2 px-4 py-3 text-sm font-semibold transition focus:outline-none focus:ring-2 focus:ring-emerald-600 focus:ring-offset-2 ${section === "linked" ? "border-emerald-700 text-emerald-800" : "border-transparent text-zinc-500 hover:border-zinc-300 hover:text-zinc-800"}`}
+            href="/player/account?section=linked"
+            role="tab"
+          >
+            Linked accounts
+          </Link>
+        </div>
+
+        {section === "profile" ? (
+        <>
         {!hasCredentials ? (
           <section className="mt-8 rounded-xl border border-amber-200 bg-amber-50 p-6">
             <h2 className="text-lg font-semibold text-amber-900">Set a username and password</h2>
@@ -144,8 +186,10 @@ export default async function PlayerAccountPage({ searchParams }: { searchParams
             </section>
           </>
         )}
-
-        <section className="mt-6 rounded-xl border border-zinc-200 bg-white p-6 shadow-sm">
+        </>
+        ) : (
+        <>
+        <section className="mt-8 rounded-xl border border-zinc-200 bg-white p-6 shadow-sm">
           <h2 className="text-lg font-semibold text-zinc-950">Riot account</h2>
           <p className="mt-1 text-sm text-zinc-500">Used to verify you when you sign up for a tournament.</p>
           <p className="mt-3 text-sm">
@@ -190,6 +234,8 @@ export default async function PlayerAccountPage({ searchParams }: { searchParams
             </a>
           )}
         </section>
+        </>
+        )}
       </div>
     </main>
   );

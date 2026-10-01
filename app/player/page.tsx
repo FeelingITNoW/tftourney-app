@@ -16,7 +16,10 @@ type PlayerSearchParams = Promise<{
   playerSignedUp?: string | string[];
   playerCheckedIn?: string | string[];
   playerAuth?: string | string[];
+  tab?: string | string[];
 }>;
+
+type PlayerTab = "mine" | "available";
 
 function first(value: string | string[] | undefined): string {
   return Array.isArray(value) ? value[0] ?? "" : value ?? "";
@@ -129,6 +132,23 @@ export default async function PlayerPage({ searchParams }: { searchParams: Playe
   const tournaments = dashboard?.tournaments ?? [];
   const myTournaments = tournaments.filter((tournament) => tournament.isRegistered);
   const availableTournaments = tournaments.filter((tournament) => !tournament.isRegistered);
+  // Signing up, checking in, or a sign-up failure all land back here with no
+  // `tab` param -- route each to the tab where the message is relevant
+  // (checkedIn and a successful signedUp confirm something on "mine"; an
+  // error is most often a bad Riot ID typed into the "available" sign-up
+  // form, since only sign-up takes a Riot ID field). Otherwise default to
+  // whichever list actually has something in it.
+  const requestedTab = first(query.tab);
+  const tab: PlayerTab =
+    requestedTab === "available" || requestedTab === "mine"
+      ? requestedTab
+      : signedUp || checkedIn
+        ? "mine"
+        : error
+          ? "available"
+          : myTournaments.length > 0
+            ? "mine"
+            : "available";
   const hasRiotId = Boolean(account?.riotGameTag);
   const hasDiscord = Boolean(account?.discordUserId);
   const avatarUrl = discordAvatarUrl(account?.discordUserId, account?.discordAvatar);
@@ -172,40 +192,51 @@ export default async function PlayerPage({ searchParams }: { searchParams: Playe
           {checkedIn ? <p className="mt-5 rounded-md border border-emerald-200 bg-emerald-50 p-4 text-sm font-medium text-emerald-900" role="status">You are checked in.</p> : null}
         </section>
 
-        <section aria-label="Your tournaments" className="border-t border-zinc-200 py-8">
-          <div className="flex items-end justify-between gap-4">
-            <div>
-              <h2 className="text-2xl font-semibold text-zinc-950">Your tournaments</h2>
-              <p className="mt-1 text-sm text-zinc-500">Tournaments you have signed up for.</p>
-            </div>
+        <section className="border-t border-zinc-200 py-8">
+          <div aria-label="Tournament lists" className="flex flex-wrap gap-1 border-b border-zinc-200" role="tablist">
+            <Link
+              aria-current={tab === "mine" ? "page" : undefined}
+              aria-selected={tab === "mine"}
+              className={`border-b-2 px-4 py-3 text-sm font-semibold transition focus:outline-none focus:ring-2 focus:ring-emerald-600 focus:ring-offset-2 ${tab === "mine" ? "border-emerald-700 text-emerald-800" : "border-transparent text-zinc-500 hover:border-zinc-300 hover:text-zinc-800"}`}
+              href="/player?tab=mine"
+              role="tab"
+            >
+              Your tournaments{myTournaments.length > 0 ? ` (${myTournaments.length})` : ""}
+            </Link>
+            <Link
+              aria-current={tab === "available" ? "page" : undefined}
+              aria-selected={tab === "available"}
+              className={`border-b-2 px-4 py-3 text-sm font-semibold transition focus:outline-none focus:ring-2 focus:ring-emerald-600 focus:ring-offset-2 ${tab === "available" ? "border-emerald-700 text-emerald-800" : "border-transparent text-zinc-500 hover:border-zinc-300 hover:text-zinc-800"}`}
+              href="/player?tab=available"
+              role="tab"
+            >
+              Available tournaments{availableTournaments.length > 0 ? ` (${availableTournaments.length})` : ""}
+            </Link>
           </div>
-          <div className="mt-5">
-            {myTournaments.length === 0 ? (
-              <div className="rounded-md border border-dashed border-zinc-300 bg-white p-5 text-sm text-zinc-500">
-                You are not signed up for any tournaments yet. Join one below.
-              </div>
-            ) : (
-              <TournamentTable tournaments={myTournaments} hasRiotId={hasRiotId} showSignUp />
-            )}
-          </div>
-        </section>
 
-        <section aria-label="Available tournaments" className="border-t border-zinc-200 py-8">
-          <div className="flex items-end justify-between gap-4">
-            <div>
-              <h2 className="text-2xl font-semibold text-zinc-950">Available tournaments</h2>
-              <p className="mt-1 text-sm text-zinc-500">Open tournaments you can still join.</p>
+          {tab === "mine" ? (
+            <div aria-label="Your tournaments" className="mt-5" role="tabpanel">
+              <p className="mb-3 text-sm text-zinc-500">Tournaments you have signed up for.</p>
+              {myTournaments.length === 0 ? (
+                <div className="rounded-md border border-dashed border-zinc-300 bg-white p-5 text-sm text-zinc-500">
+                  You are not signed up for any tournaments yet. Check the Available tournaments tab to join one.
+                </div>
+              ) : (
+                <TournamentTable tournaments={myTournaments} hasRiotId={hasRiotId} showSignUp />
+              )}
             </div>
-          </div>
-          <div className="mt-5">
-            {availableTournaments.length === 0 ? (
-              <div className="rounded-md border border-zinc-200 bg-white p-5 text-sm text-zinc-500">
-                No tournaments are available to play right now.
-              </div>
-            ) : (
-              <TournamentTable tournaments={availableTournaments} hasRiotId={hasRiotId} showSignUp />
-            )}
-          </div>
+          ) : (
+            <div aria-label="Available tournaments" className="mt-5" role="tabpanel">
+              <p className="mb-3 text-sm text-zinc-500">Open tournaments you can still join.</p>
+              {availableTournaments.length === 0 ? (
+                <div className="rounded-md border border-zinc-200 bg-white p-5 text-sm text-zinc-500">
+                  No tournaments are available to play right now.
+                </div>
+              ) : (
+                <TournamentTable tournaments={availableTournaments} hasRiotId={hasRiotId} showSignUp />
+              )}
+            </div>
+          )}
         </section>
       </div>
     </main>

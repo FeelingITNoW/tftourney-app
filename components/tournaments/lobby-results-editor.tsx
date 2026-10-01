@@ -3,7 +3,7 @@
 import Link from "next/link";
 import { useEffect, useState } from "react";
 import { updateLobbyScoresAction } from "@/app/actions";
-import { RandomizeLobbyScoresButton } from "./randomize-lobby-scores-button";
+import { Modal } from "@/components/ui/modal";
 import type { TournamentLobbyParticipant } from "@/lib/db/tournaments/types";
 import type { PlacementParseResult } from "@/lib/ocr/placements/types";
 
@@ -97,90 +97,71 @@ export function LobbyResultsEditor({
 
   return (
     <>
-      <div className="mt-5 rounded-lg border border-sky-200 bg-sky-50 p-4">
-        <div className="flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
-          <div>
-            <h3 className="text-sm font-semibold text-sky-950">Prefill from screenshot</h3>
-            <p className="mt-1 text-sm text-sky-900">
-              Upload a TFT results screen to suggest placements. The image is sent to Google Cloud Vision and is not saved.
-            </p>
-          </div>
-          <div className="flex flex-wrap items-center gap-2">
-            <label className={`flex h-10 cursor-pointer items-center rounded-md border border-sky-300 bg-white px-4 text-sm font-semibold text-sky-900 hover:bg-sky-100 ${isReadOnly ? "cursor-not-allowed opacity-50" : ""}`}>
-              Choose image
-              <input
-                accept="image/png,image/jpeg,image/webp"
-                className="sr-only"
-                disabled={isReadOnly}
-                onChange={(event) => {
-                  const nextFile = event.target.files?.[0] ?? null;
-                  setSelectedFile(nextFile);
-                  setPreviewUrl(nextFile ? URL.createObjectURL(nextFile) : null);
-                }}
-                type="file"
-              />
-            </label>
-            <button
-              className="h-10 rounded-md bg-sky-700 px-4 text-sm font-semibold text-white hover:bg-sky-800 disabled:cursor-not-allowed disabled:bg-sky-300"
-              disabled={!selectedFile || parsing || isReadOnly}
-              onClick={parseScreenshot}
-              type="button"
-            >
-              {parsing ? "Parsing…" : "Parse placements"}
-            </button>
-          </div>
-        </div>
-        {selectedFile ? <p className="mt-2 text-xs text-sky-800">Selected: {selectedFile.name}</p> : null}
-        {previewUrl ? (
-          // Blob URLs cannot be passed through next/image's optimizer.
-          // eslint-disable-next-line @next/next/no-img-element
-          <img alt="Selected TFT results screenshot preview" className="mt-3 max-h-48 rounded border border-sky-200 object-contain" src={previewUrl} />
-        ) : null}
-        {parseError ? <p className="mt-3 text-sm font-medium text-red-700" role="alert">{parseError}</p> : null}
-        {parseResult ? (
-          <div className="mt-3 text-sm text-sky-950" role="status">
-            <p className="font-semibold">
-              {parseResult.status === "complete" ? "All placements matched. Review them below before saving." : "Some placements need review before saving."}
-            </p>
-            {parseResult.issues.length ? (
-              <ul className="mt-2 list-disc space-y-1 pl-5 text-sky-900">
-                {parseResult.issues.map((issue, index) => <li key={`${issue.code}-${issue.placement ?? index}`}>{issue.message}</li>)}
-              </ul>
-            ) : null}
-            <details className="mt-3 rounded border border-sky-200 bg-white p-3 text-xs">
-              <summary className="cursor-pointer font-semibold">OCR debug trace</summary>
-              <p className="mt-2">
-                Strategy: {parseResult.strategy}. Roster supplied: {parseResult.debug.rosterProvided ? `yes (${parseResult.debug.rosterSize})` : "no"}.
-                Profile: {parseResult.debug.selectedProfile}. Layout confidence: {parseResult.debug.layoutConfidence.toFixed(2)}. Rank anchors detected: {parseResult.debug.rankAnchors.length}.
-              </p>
-              <p className="mt-3 font-semibold">Detected OCR words</p>
-              <pre className="mt-1 max-h-40 overflow-auto whitespace-pre-wrap rounded bg-zinc-950 p-2 text-zinc-100">
-                {parseResult.debug.detectedWords.map((word) => {
-                  const x = ((word.box.left + word.box.right) / 2).toFixed(3);
-                  const y = ((word.box.top + word.box.bottom) / 2).toFixed(3);
-                  return `${word.text} [x=${x}, y=${y}]`;
-                }).join("\n")}
-              </pre>
-              <p className="mt-3 font-semibold">Top-to-bottom name candidates</p>
-              <ol className="mt-1 list-decimal space-y-1 pl-5">
-                {parseResult.debug.orderedNameCandidates.map((name, index) => <li key={`${index}-${name}`}>{name}</li>)}
-              </ol>
-              <p className="mt-3 font-semibold">Finalized ordering</p>
-              <ol className="mt-1 list-decimal space-y-1 pl-5">
-                {parseResult.debug.finalizedOrder.map((row) => <li key={`${row.placement}-${row.extractedName}`}>{row.extractedName || "(empty)"}</li>)}
-              </ol>
-            </details>
-          </div>
-        ) : null}
-      </div>
-
       <form action={updateLobbyScoresAction} className="mt-5">
         <input name="tournamentId" type="hidden" value={tournamentId} />
         <input name="lobbyId" type="hidden" value={lobbyId} />
         <input name="returnGame" type="hidden" value={returnGame} />
         <input name="returnPage" type="hidden" value={returnPage} />
         <input name="returnNode" type="hidden" value={roundId} />
-        <div className="overflow-x-auto rounded-lg border border-zinc-200 bg-white shadow-sm">
+
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          <h3 className="text-sm font-semibold text-zinc-700">Placements</h3>
+          {!isReadOnly ? (
+            <Modal
+              title="Prefill from screenshot"
+              triggerClassName="h-10 rounded-md border border-sky-300 bg-sky-50 px-4 text-sm font-semibold text-sky-900 transition hover:bg-sky-100 disabled:cursor-not-allowed disabled:opacity-50"
+              triggerLabel="Prefill from screenshot"
+            >
+              <p className="text-sm text-sky-900">
+                Upload a TFT results screen to suggest placements. The image is sent to Google Cloud Vision and is not saved.
+              </p>
+              <div className="mt-3 flex flex-wrap items-center gap-2">
+                <label className="flex h-10 cursor-pointer items-center rounded-md border border-sky-300 bg-white px-4 text-sm font-semibold text-sky-900 hover:bg-sky-100">
+                  Choose image
+                  <input
+                    accept="image/png,image/jpeg,image/webp"
+                    className="sr-only"
+                    onChange={(event) => {
+                      const nextFile = event.target.files?.[0] ?? null;
+                      setSelectedFile(nextFile);
+                      setPreviewUrl(nextFile ? URL.createObjectURL(nextFile) : null);
+                    }}
+                    type="file"
+                  />
+                </label>
+                <button
+                  className="h-10 rounded-md bg-sky-700 px-4 text-sm font-semibold text-white hover:bg-sky-800 disabled:cursor-not-allowed disabled:bg-sky-300"
+                  disabled={!selectedFile || parsing}
+                  onClick={parseScreenshot}
+                  type="button"
+                >
+                  {parsing ? "Parsing…" : "Parse placements"}
+                </button>
+              </div>
+              {selectedFile ? <p className="mt-2 text-xs text-sky-800">Selected: {selectedFile.name}</p> : null}
+              {previewUrl ? (
+                // Blob URLs cannot be passed through next/image's optimizer.
+                // eslint-disable-next-line @next/next/no-img-element
+                <img alt="Selected TFT results screenshot preview" className="mt-3 max-h-48 rounded border border-sky-200 object-contain" src={previewUrl} />
+              ) : null}
+              {parseError ? <p className="mt-3 text-sm font-medium text-red-700" role="alert">{parseError}</p> : null}
+              {parseResult ? (
+                <div className="mt-3 text-sm text-sky-950" role="status">
+                  <p className="font-semibold">
+                    {parseResult.status === "complete" ? "All placements matched. Close this and review them below before saving." : "Some placements need review before saving."}
+                  </p>
+                  {parseResult.issues.length ? (
+                    <ul className="mt-2 list-disc space-y-1 pl-5 text-sky-900">
+                      {parseResult.issues.map((issue, index) => <li key={`${issue.code}-${issue.placement ?? index}`}>{issue.message}</li>)}
+                    </ul>
+                  ) : null}
+                </div>
+              ) : null}
+            </Modal>
+          ) : null}
+        </div>
+
+        <div className="mt-3 overflow-x-auto rounded-lg border border-zinc-200 bg-white shadow-sm">
           <table className="w-full min-w-[32rem] border-collapse text-left text-sm">
             <thead className="bg-zinc-50 text-zinc-600">
               <tr>
@@ -224,7 +205,6 @@ export function LobbyResultsEditor({
 
         <div className="mt-5 flex flex-col-reverse gap-3 sm:flex-row sm:items-center sm:justify-end">
           <Link className="flex h-11 items-center justify-center rounded-md border border-zinc-300 bg-white px-5 text-sm font-semibold text-zinc-700 transition hover:bg-zinc-50" href={backHref}>Cancel</Link>
-          <RandomizeLobbyScoresButton disabled={isReadOnly} />
           <button className="flex h-11 items-center justify-center rounded-md bg-emerald-700 px-5 text-sm font-semibold text-white transition hover:bg-emerald-800 focus:outline-none focus:ring-2 focus:ring-emerald-600 focus:ring-offset-2 disabled:cursor-not-allowed disabled:bg-zinc-300 disabled:text-zinc-500" disabled={isReadOnly} type="submit">Save lobby results</button>
         </div>
       </form>

@@ -18,8 +18,7 @@ The normal tournament flow is:
    complete. Checkmate progress is checked with checkmate_decisive_game.
 4. Once a graph node is complete, finalize_tournament_node resolves its
    outgoing edges and activates destinations whose incoming edges are resolved.
-5. Trigger functions protect registration and result-edit invariants while
-   randomize_pending_lobby_results provides a test-only result generator.
+5. Trigger functions protect registration and result-edit invariants.
 
 ## Tournament and format functions
 
@@ -190,22 +189,6 @@ assigns ranked contiguous seeds. This two-phase reseed preserves the immediate
 unique (round_id, round_seed_number) index and prevents transient duplicate
 key errors. Calling the function again for a completed node returns
 node_already_finalized without changing data.
-
-### public.randomize_pending_lobby_results
-
-    randomize_pending_lobby_results(
-      p_tournament_id text,
-      p_node_id text
-    )
-    returns table (
-      randomized_lobby_count integer,
-      randomized_participant_count integer
-    )
-
-Testing-only helper for graph tournaments. It locks the tournament and selected
-active node, finds the first pending game block, creates valid random
-placements for its lobbies, and routes them through update_lobby_results.
-Existing results are preserved and completed tournaments are rejected.
 
 ## Route-scoped read functions
 
@@ -543,7 +526,9 @@ current database function catalog:
   removed with the compact graph runtime.
 - generate_fixed_round_lobbies: superseded by generate_round_lobbies.
 - The one-argument randomize_pending_lobby_results(tournament_id) helper:
-  superseded by the graph-aware two-argument form.
+  superseded by the graph-aware two-argument form, which was itself a
+  testing-only result generator and has since been dropped entirely (see
+  20260930000000_drop_randomize_pending_lobby_results.sql).
 
 They are documented here so old migration files remain understandable; new
 application code must not call them.

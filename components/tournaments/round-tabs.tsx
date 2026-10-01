@@ -1,47 +1,43 @@
 import Link from "next/link";
 import type { ReactNode } from "react";
-import type { TournamentPanelView } from "@/lib/db/tournaments/types";
+import type { TournamentScreen, TournamentScreenTab } from "@/app/tournaments/[tournamentId]/screens";
 
-type TournamentViewTabsProps = {
+type RoundTabsProps = {
   tournamentId: string;
-  activeView: TournamentPanelView;
+  activeScreen: TournamentScreen;
+  defaultScreen: TournamentScreen;
+  tabs: TournamentScreenTab[];
   children: ReactNode;
   query?: { node?: string | null; game?: number | null; page?: number | null };
 };
 
-const labels: Array<{ id: TournamentPanelView; label: string }> = [
-  { id: "lobbies", label: "Lobbies" },
-  { id: "scoresheet", label: "Scoresheet" },
-  { id: "graph", label: "Tournament graph" },
-  { id: "details", label: "Details & players" },
-];
-
 function hrefFor(
   tournamentId: string,
-  view: TournamentPanelView,
-  query: TournamentViewTabsProps["query"],
+  screen: TournamentScreen,
+  defaultScreen: TournamentScreen,
+  query: RoundTabsProps["query"],
 ): string {
   const params = new URLSearchParams();
-  if (view !== "lobbies") params.set("view", view);
-  if (view === "lobbies" && query?.node) params.set("node", query.node);
-  if (view === "lobbies" && query?.game) params.set("game", String(query.game));
-  if (view === "lobbies" && query?.page && query.page > 1) params.set("page", String(query.page));
+  if (screen !== defaultScreen) params.set("view", screen);
+  if (screen === "lobbies" && query?.node) params.set("node", query.node);
+  if (screen === "lobbies" && query?.game) params.set("game", String(query.game));
+  if (screen === "lobbies" && query?.page && query.page > 1) params.set("page", String(query.page));
   const suffix = params.toString();
   return `/tournaments/${tournamentId}${suffix ? `?${suffix}` : ""}`;
 }
 
-export function RoundTabs({ tournamentId, activeView, children, query }: TournamentViewTabsProps) {
+export function RoundTabs({ tournamentId, activeScreen, defaultScreen, tabs, children, query }: RoundTabsProps) {
   return (
     <section className="border-t border-zinc-200 py-8">
-      <div aria-label="Tournament views" className="flex flex-wrap gap-1 border-b border-zinc-200" role="tablist">
-        {labels.map((tab) => {
-          const active = tab.id === activeView;
+      <div aria-label="Tournament screens" className="flex flex-wrap gap-1 border-b border-zinc-200" role="tablist">
+        {tabs.map((tab) => {
+          const active = tab.id === activeScreen;
           return (
             <Link
               aria-current={active ? "page" : undefined}
               aria-selected={active}
               className={`border-b-2 px-4 py-3 text-sm font-semibold transition focus:outline-none focus:ring-2 focus:ring-emerald-600 focus:ring-offset-2 ${active ? "border-emerald-700 text-emerald-800" : "border-transparent text-zinc-500 hover:border-zinc-300 hover:text-zinc-800"}`}
-              href={hrefFor(tournamentId, tab.id, query)}
+              href={hrefFor(tournamentId, tab.id, defaultScreen, query)}
               key={tab.id}
               role="tab"
             >
@@ -50,11 +46,9 @@ export function RoundTabs({ tournamentId, activeView, children, query }: Tournam
           );
         })}
       </div>
-      <div aria-label={`${activeView} panel`} role="tabpanel" tabIndex={0}>
+      <div aria-label={`${activeScreen} panel`} role="tabpanel" tabIndex={0}>
         {children}
       </div>
     </section>
   );
 }
-
-export { RoundTabs as TournamentViewTabs };

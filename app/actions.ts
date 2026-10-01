@@ -8,9 +8,7 @@ import defaultTournamentFormat from "@/lib/tournament/formats/default.json";
 import {
   createTournament,
   deleteTournament,
-  addRandomSeededTournamentPlayers,
   finalizeTournamentNode,
-  randomizePendingLobbyResults,
   registerTournamentPlayer,
   startTournament,
   updateLobbyResults,
@@ -289,49 +287,6 @@ export async function registerPlayerAction(formData: FormData) {
   redirect(detailPath);
 }
 
-export async function addRandomSeededPlayersAction(formData: FormData) {
-  const tournamentId = getFormString(formData, "tournamentId");
-  const requestedCount = Number(getFormString(formData, "randomPlayerCount"));
-  const detailPath = `/tournaments/${tournamentId}`;
-
-  if (!tournamentId) {
-    redirectWithParams("/", {
-      createError: "Tournament was not found.",
-    });
-  }
-
-  const hostUserId = await requireTournamentHost(tournamentId, detailPath);
-
-  if (!Number.isInteger(requestedCount) || requestedCount < 1) {
-    redirectWithParams(detailPath, {
-      randomPlayerError: "Choose at least one test player to add.",
-    });
-  }
-
-  let result: Awaited<ReturnType<typeof addRandomSeededTournamentPlayers>>;
-  try {
-    result = await addRandomSeededTournamentPlayers({
-      tournamentId,
-      count: requestedCount,
-    });
-    scheduleTournamentSheetSync(tournamentId, hostUserId);
-  } catch (error) {
-    redirectWithParams(detailPath, {
-      randomPlayerError:
-        error instanceof Error
-          ? error.message
-          : "Random test players could not be added.",
-    });
-  }
-
-  revalidatePath("/");
-  revalidatePath(detailPath);
-  redirectWithParams(detailPath, {
-    randomPlayersAdded: String(result.addedCount),
-    randomPlayersSkipped: String(result.skippedCount),
-  });
-}
-
 export async function startTournamentAction(formData: FormData) {
   const tournamentId = getFormString(formData, "tournamentId");
   const detailPath = `/tournaments/${tournamentId}`;
@@ -589,48 +544,6 @@ export async function updateLobbyScoresAction(formData: FormData) {
   revalidatePath(lobbyPath);
   revalidatePath(`${detailPath}/lobbies`, "layout");
   redirectWithParams(lobbyPath, { saved: "true", ...returnParams });
-}
-
-export async function randomizePendingLobbyResultsAction(formData: FormData) {
-  const tournamentId = getFormString(formData, "tournamentId");
-  const nodeId = getFormString(formData, "nodeId");
-  const returnGame = getFormString(formData, "game");
-  const returnPage = getFormString(formData, "page");
-  const detailPath = `/tournaments/${tournamentId}`;
-  const returnParams = {
-    game: returnGame,
-    page: returnPage,
-  };
-
-  if (!tournamentId) {
-    redirectWithParams("/", {
-      createError: "Tournament was not found.",
-    });
-  }
-  const hostUserId = await requireTournamentHost(tournamentId, detailPath);
-  if (!nodeId) {
-    redirectWithParams(detailPath, {
-      progressionError: "Select a tournament node before randomizing results.",
-    });
-  }
-
-  try {
-    await randomizePendingLobbyResults({ tournamentId, nodeId });
-    scheduleTournamentSheetSync(tournamentId, hostUserId);
-  } catch (error) {
-    redirectWithParams(detailPath, {
-      progressionError:
-        error instanceof Error
-          ? error.message
-          : "Lobby results could not be randomized.",
-      ...returnParams,
-    });
-  }
-
-  revalidatePath("/");
-  revalidatePath(detailPath);
-  revalidatePath(`${detailPath}/lobbies`, "layout");
-  redirectWithParams(detailPath, { randomized: "true", node: nodeId, ...returnParams });
 }
 
 export async function finalizeTournamentNodeAction(formData: FormData) {
