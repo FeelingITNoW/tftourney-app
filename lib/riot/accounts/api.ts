@@ -38,7 +38,7 @@ export class RiotRateLimitError extends RiotRequestError {
 
 // Per-caller cap on Riot ID lookups so one player can't burn the shared Riot
 // API key's quota. Only callers that pass a rateLimitKey are limited.
-const riotLookupLimiter = createRateLimiter({ limit: 5, windowMs: 60 * 1000 });
+const riotLookupLimiter = createRateLimiter({ limit: 20, windowMs: 60 * 1000 });
 
 export function resetRiotLookupLimiter(): void {
   riotLookupLimiter.reset();

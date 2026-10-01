@@ -25,7 +25,7 @@ test("clientIp prefers x-real-ip, then the last x-forwarded-for hop, then unknow
   assert.equal(clientIp(new Headers()), "unknown");
 });
 
-test("Riot lookups with a rate limit key are capped at 5 per minute without calling Riot", async () => {
+test("Riot lookups with a rate limit key are capped at 20 per minute without calling Riot", async () => {
   resetRiotLookupLimiter();
   const originalFetch = globalThis.fetch;
   const originalKey = process.env.RIOT_API_KEY;
@@ -36,18 +36,18 @@ test("Riot lookups with a rate limit key are capped at 5 per minute without call
     return new Response(JSON.stringify({ puuid: "p", gameName: "A", tagLine: "B" }), { status: 200 });
   }) as typeof fetch;
   try {
-    for (let attempt = 0; attempt < 5; attempt += 1) {
+    for (let attempt = 0; attempt < 20; attempt += 1) {
       await getRiotAccountByRiotId({ gameName: "A", tagLine: "B" }, { rateLimitKey: "player:1" });
     }
     await assert.rejects(
       () => getRiotAccountByRiotId({ gameName: "A", tagLine: "B" }, { rateLimitKey: "player:1" }),
       RiotRateLimitError,
     );
-    assert.equal(calls, 5);
+    assert.equal(calls, 20);
     // A different caller is unaffected, and an unkeyed (organizer) call is never limited.
     await getRiotAccountByRiotId({ gameName: "A", tagLine: "B" }, { rateLimitKey: "player:2" });
     await getRiotAccountByRiotId({ gameName: "A", tagLine: "B" });
-    assert.equal(calls, 7);
+    assert.equal(calls, 22);
   } finally {
     globalThis.fetch = originalFetch;
     if (originalKey === undefined) delete process.env.RIOT_API_KEY;
