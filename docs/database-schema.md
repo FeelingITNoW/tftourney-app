@@ -236,12 +236,9 @@ decisive result exists. `finalize_tournament_node(tournament_id, node_id)` locks
 a completed node, evaluates its ordered outgoing edges, and activates
 destinations after all incoming edges resolve. Completed nodes are read-only.
 
-The testing RPC `randomize_pending_lobby_results(tournament_id, node_id)`
-randomizes only pending lobbies in the selected active node and runs the
-updates in one transaction.
-Existing results are preserved. Once a later reseeded block exists, result edits
-to earlier blocks are rejected so persisted lobby assignments cannot diverge from
-the standings that produced them.
+Once a later reseeded block exists, result edits to earlier blocks are
+rejected so persisted lobby assignments cannot diverge from the standings
+that produced them.
 
 ## Graph tournament runtime
 
@@ -271,8 +268,7 @@ incoming edges resolve. Before activating a destination with multiple incoming
 edges, its existing seeds are temporarily moved outside the final range before
 ranked contiguous seeds are assigned; this preserves the unique
 `(round_id, round_seed_number)` index during reseeding. Empty destinations are
-marked `skipped` and propagate zero-player edges. `randomize_pending_lobby_results(tournament_id, node_id)`
-is the graph-aware test helper.
+marked `skipped` and propagate zero-player edges.
 
 ## Google Sheets exports
 

@@ -10,10 +10,6 @@ import {
 } from "../lib/tournament/validation/api";
 import { selectTournamentEntrants } from "../lib/tournament/start/api";
 import {
-  SEEDED_RIOT_IDS,
-  selectRandomSeededRiotIds,
-} from "../lib/riot/accounts/seed";
-import {
   canonicalizeTournamentFormat,
   getFormatGraph,
   getTournamentStartRequirement,
@@ -112,19 +108,6 @@ test("rejects invalid Riot IDs for player registration", () => {
     assert.equal(result.success, false);
     assert.match(result.errors.gameTag ?? "", /GameName#TAG/);
   }
-});
-
-test("selects non-repeating random seeded Riot IDs and excludes registered IDs", () => {
-  const selected = selectRandomSeededRiotIds(
-    [SEEDED_RIOT_IDS[0]!, SEEDED_RIOT_IDS[1]!.toUpperCase()],
-    5,
-    () => 0,
-  );
-
-  assert.equal(selected.length, 5);
-  assert.equal(new Set(selected.map((riotId) => riotId.toLowerCase())).size, 5);
-  assert.equal(selected.some((riotId) => riotId.toLowerCase() === SEEDED_RIOT_IDS[0]!.toLowerCase()), false);
-  assert.equal(selected.some((riotId) => riotId.toLowerCase() === SEEDED_RIOT_IDS[1]!.toLowerCase()), false);
 });
 
 test("default tournament format specifies fixed-game opening and checkmate final rounds", () => {

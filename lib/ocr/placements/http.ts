@@ -149,7 +149,7 @@ export async function handlePlacementOcrRequest(
       return Response.json(
         {
           ...result,
-          error: `Vision detected ${result.debug.orderedNameCandidates.length} ordered player-name candidates, but exactly 8 are required. Open the OCR debug trace to review the detected text.`,
+          error: `Vision detected ${result.debug.orderedNameCandidates.length} ordered player-name candidates, but exactly 8 are required. Enter placements manually for this screenshot.`,
           code: "UNSUPPORTED_LAYOUT",
         },
         { status: 422 },

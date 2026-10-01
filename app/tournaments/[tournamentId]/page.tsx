@@ -1,6 +1,5 @@
 import Link from "next/link";
 import { notFound, redirect } from "next/navigation";
-import { GoogleSheetsPublishingPanel } from "@/components/tournaments/google-sheets-publishing-panel";
 import { AccountHeader } from "@/components/account/account-header";
 import { SiteHeader } from "@/components/layout/site-header";
 import {
@@ -13,9 +12,19 @@ import { getOrganizerSession } from "@/lib/auth/session";
 import { selectTournamentEntrants } from "@/lib/tournament/start/api";
 import { isDiscordConfigPendingTooLong } from "@/lib/discord/api";
 import { LiveRefresh } from "@/components/tournaments/live-refresh";
+import { RoundTabs } from "@/components/tournaments/round-tabs";
+import { TournamentStats } from "@/components/tournaments/tournament-stats";
+import { IntegrationsScreen } from "@/components/tournaments/integrations-screen";
+import { SettingsScreen } from "@/components/tournaments/settings-screen";
 import { PreStartPanels } from "./pre-start-panels";
 import { StartedTournamentView } from "./started-tournament-view";
 import { RegistrationsSection } from "./registrations-section";
+import {
+  defaultScreen,
+  panelViewForRequestedView,
+  resolveTournamentScreen,
+  screensFor,
+} from "./screens";
 
 export const dynamic = "force-dynamic";
 
@@ -30,11 +39,7 @@ type TournamentPageSearchParams = Promise<{
   view?: string | string[];
   game?: string | string[];
   page?: string | string[];
-  randomized?: string | string[];
   registrationError?: string | string[];
-  randomPlayerError?: string | string[];
-  randomPlayersAdded?: string | string[];
-  randomPlayersSkipped?: string | string[];
   startError?: string | string[];
   progressionError?: string | string[];
   progressed?: string | string[];
@@ -72,11 +77,7 @@ export default async function TournamentPage({
   const requestedGame = Number.parseInt(getSearchValue(query.game), 10);
   const requestedPage = Number.parseInt(getSearchValue(query.page), 10);
   const parsedPage = Number.isSafeInteger(requestedPage) && requestedPage > 0 ? requestedPage : 1;
-  const randomized = getSearchValue(query.randomized) === "true";
   const registrationError = getSearchValue(query.registrationError);
-  const randomPlayerError = getSearchValue(query.randomPlayerError);
-  const randomPlayersAdded = Number.parseInt(getSearchValue(query.randomPlayersAdded), 10);
-  const randomPlayersSkipped = Number.parseInt(getSearchValue(query.randomPlayersSkipped), 10);
   const startError = getSearchValue(query.startError);
   const progressionError = getSearchValue(query.progressionError);
   const progressed = getSearchValue(query.progressed) === "true";
@@ -97,15 +98,13 @@ export default async function TournamentPage({
     getOrganizerSession(),
     getPlayerSession(),
   ]);
-  const view: TournamentPanelView = requestedView === "scoresheet" || requestedView === "graph" || requestedView === "details" || requestedView === "lobbies"
-    ? requestedView
-    : "lobbies";
+  const panelView: TournamentPanelView = panelViewForRequestedView(requestedView);
   let tournament: TournamentPageTournament | null | undefined;
   let databaseError = "";
 
   try {
     const pageModel = await getTournamentPageViewModel(tournamentId, {
-      view,
+      view: panelView,
       selectedNodeId: requestedNode || undefined,
       gameNumber: Number.isInteger(requestedGame) && requestedGame > 0 ? requestedGame : undefined,
       page: Number.isInteger(requestedPage) && requestedPage > 0 ? requestedPage : 1,
@@ -163,28 +162,56 @@ export default async function TournamentPage({
   const scoresheetPanel = tournament?.panel.view === "scoresheet" ? tournament.panel : null;
   const graphPanel = tournament?.panel.view === "graph" ? tournament.panel : null;
 
+  let screen = defaultScreen(false);
+
   if (tournament) {
-    const canonicalView: TournamentPanelView = tournament.hasStarted ? view : "details";
+    const hasStarted = tournament.hasStarted;
+    screen = resolveTournamentScreen(
+      requestedView,
+      {
+        discordError,
+        discordConnected,
+        discordDisconnected,
+        discordManagerGranted,
+        managerInvite,
+        authError,
+        authSuccess,
+        checkInError,
+        checkInUpdated,
+        registrationError,
+        deleteError,
+        startError,
+      },
+      hasStarted,
+    );
+
     const pageIsMalformed = Array.isArray(query.page) || (getSearchValue(query.page) !== "" && !/^[1-9]\d*$/.test(getSearchValue(query.page)));
     const gameIsMalformed = Array.isArray(query.game) || (getSearchValue(query.game) !== "" && !/^[1-9]\d*$/.test(getSearchValue(query.game)));
     const viewIsMalformed = Array.isArray(query.view);
     const nodeIsRepeated = Array.isArray(query.node);
     const canonicalParams = new URLSearchParams();
-    if (canonicalView !== "lobbies" && tournament.hasStarted) canonicalParams.set("view", canonicalView);
-    if (canonicalView === "lobbies" && requestedNode && tournament.selectedNodeId) canonicalParams.set("node", tournament.selectedNodeId);
-    if (canonicalView === "lobbies" && Number.isInteger(requestedGame) && requestedGame > 0 && lobbyPanel?.selectedGameNumber) canonicalParams.set("game", String(lobbyPanel.selectedGameNumber));
+    if (screen !== defaultScreen(hasStarted)) canonicalParams.set("view", screen);
+    if (screen === "lobbies" && requestedNode && tournament.selectedNodeId) canonicalParams.set("node", tournament.selectedNodeId);
+    if (screen === "lobbies" && Number.isInteger(requestedGame) && requestedGame > 0 && lobbyPanel?.selectedGameNumber) canonicalParams.set("game", String(lobbyPanel.selectedGameNumber));
     if (!pageIsMalformed && !gameIsMalformed && lobbyPanel && parsedPage > lobbyPanel.totalPages) {
       if (lobbyPanel.totalPages > 1) canonicalParams.set("page", String(lobbyPanel.totalPages));
       redirect(`/tournaments/${tournamentId}${canonicalParams.toString() ? `?${canonicalParams}` : ""}`);
     }
-    const invalidNode = canonicalView === "lobbies" && Boolean(requestedNode) && requestedNode !== tournament.selectedNodeId;
-    const invalidGame = canonicalView === "lobbies" && Number.isInteger(requestedGame) && requestedGame > 0 && requestedGame !== lobbyPanel?.selectedGameNumber;
-    const unrelatedPanelParams = canonicalView !== "lobbies" && Boolean(requestedNode || getSearchValue(query.game) || getSearchValue(query.page));
-    if (pageIsMalformed || gameIsMalformed || viewIsMalformed || nodeIsRepeated || getSearchValue(query.page) === "1" || requestedView === "lobbies" || (requestedView && requestedView !== canonicalView) || invalidNode || invalidGame || unrelatedPanelParams) {
+    const invalidNode = screen === "lobbies" && Boolean(requestedNode) && requestedNode !== tournament.selectedNodeId;
+    const invalidGame = screen === "lobbies" && Number.isInteger(requestedGame) && requestedGame > 0 && requestedGame !== lobbyPanel?.selectedGameNumber;
+    const unrelatedScreenParams = screen !== "lobbies" && Boolean(requestedNode || getSearchValue(query.game) || getSearchValue(query.page));
+    // Only an explicit, invalid/redundant ?view= triggers a redirect here --
+    // when it's simply absent, `screen` may still differ from the default
+    // (e.g. a flash message routed it to Integrations) and that's fine to
+    // render without rewriting the URL.
+    const viewMismatch = requestedView !== "" && requestedView !== screen;
+    if (
+      pageIsMalformed || gameIsMalformed || viewIsMalformed || nodeIsRepeated ||
+      getSearchValue(query.page) === "1" || viewMismatch || invalidNode || invalidGame || unrelatedScreenParams
+    ) {
       redirect(`/tournaments/${tournamentId}${canonicalParams.toString() ? `?${canonicalParams}` : ""}`);
     }
   }
-
 
   const isAcceptingPlayers =
     tournament?.status === TOURNAMENT_STATUS_ACCEPTING_PLAYERS;
@@ -221,19 +248,7 @@ export default async function TournamentPage({
       .filter((registration) => registration.checkedInAt !== null)
       .map((registration) => registration.registrationId),
   );
-  const hasPendingCurrentRoundLobby =
-    lobbyPanel?.lobbies.some(
-      (lobby) =>
-        lobby.participants.length > 0 &&
-        lobby.participants.every(
-          (participant) => participant.resultStatus === "pending",
-        ),
-    ) ?? false;
   const isTournamentCompleted = tournament?.status === "completed";
-  const remainingRegistrationSlots = tournament
-    ? Math.max(tournament.playerCount - tournament.registrations.length, 0)
-    : 0;
-  const defaultRandomPlayerCount = Math.min(8, remainingRegistrationSlots);
 
   return (
     <main className="min-h-screen bg-stone-50 text-zinc-950">
@@ -285,87 +300,99 @@ export default async function TournamentPage({
               ) : (
                 <div className="mb-4 rounded-md border border-zinc-200 bg-white p-4 text-sm text-zinc-600">You are viewing this tournament publicly. Sign in as its host to manage players, results, or Sheets publishing.</div>
               )}
-              {isTournamentHost ? <GoogleSheetsPublishingPanel authError={authError} authSuccess={authSuccess} initialStatus={tournament.sheetStatus} initiallyAuthenticated={hasSheetSession} tournamentId={tournament.id} /> : <div className="rounded-lg border border-indigo-200 bg-indigo-50 p-5 text-sm text-indigo-900"><p className="font-semibold">Google Sheets scoreboard</p><p className="mt-1">The tournament host can connect Google Drive to generate and publish a workbook.</p></div>}
+              {authorizationError ? <p className="mb-4 rounded-md border border-red-200 bg-red-50 p-4 text-sm font-medium text-red-800" role="alert">{authorizationError}</p> : null}
+
+              <p className="text-sm font-semibold uppercase tracking-[0.12em] text-amber-700">
+                Tournament
+              </p>
+              <h1 className="mt-3 text-4xl font-semibold tracking-normal text-zinc-950">
+                {tournament.name}
+              </h1>
+              <TournamentStats currentRoundLabel={currentRoundLabel} formatId={tournament.formatId} status={tournament.status} />
             </div>
-            {authorizationError ? <p className="mb-5 rounded-md border border-red-200 bg-red-50 p-4 text-sm font-medium text-red-800" role="alert">{authorizationError}</p> : null}
-            {!tournament.hasStarted ? (
-              <PreStartPanels
-                checkInError={checkInError}
-                checkInInUse={checkInInUse}
-                checkInState={checkInState}
-                checkInUpdated={checkInUpdated}
-                currentRoundLabel={currentRoundLabel}
-                defaultRandomPlayerCount={defaultRandomPlayerCount}
-                deleteError={deleteError}
-                discordConfig={discordConfig}
-                discordConnected={discordConnected}
-                discordDisconnected={discordDisconnected}
-                discordError={discordError}
-                discordManagerGranted={discordManagerGranted}
-                discordPendingTooLong={discordPendingTooLong}
-                isAcceptingPlayers={isAcceptingPlayers}
-                isTournamentCompleted={isTournamentCompleted}
-                isTournamentHost={isTournamentHost}
-                managerInvite={managerInvite}
-                meetsStartRequirement={meetsStartRequirement}
-                potentialEntrantCount={potentialEntrantCount}
-                randomPlayerError={randomPlayerError}
-                randomPlayersAdded={randomPlayersAdded}
-                randomPlayersSkipped={randomPlayersSkipped}
-                rawDiscordConfig={rawDiscordConfig}
-                registrationError={registrationError}
-                remainingRegistrationSlots={remainingRegistrationSlots}
-                startDisabled={startDisabled}
-                startError={startError}
-                startLabel={startLabel}
-                tournament={tournament}
-              />
-            ) : null}
-            {tournament.hasStarted ? (
-              <StartedTournamentView
-                checkInError={checkInError}
-                checkInState={checkInState}
-                checkInUpdated={checkInUpdated}
-                currentRoundLabel={currentRoundLabel}
-                deleteError={deleteError}
-                discordConfig={discordConfig}
-                discordConnected={discordConnected}
-                discordDisconnected={discordDisconnected}
-                discordError={discordError}
-                discordManagerGranted={discordManagerGranted}
-                discordPendingTooLong={discordPendingTooLong}
-                enteredRegistrationIds={enteredRegistrationIds}
-                graphPanel={graphPanel}
-                hasPendingCurrentRoundLobby={hasPendingCurrentRoundLobby}
-                isTournamentCompleted={isTournamentCompleted}
-                isTournamentHost={isTournamentHost}
-                lobbyPanel={lobbyPanel}
-                managerInvite={managerInvite}
-                potentialEntrantCount={potentialEntrantCount}
-                progressed={progressed}
-                progressionError={progressionError}
-                randomized={randomized}
-                rawDiscordConfig={rawDiscordConfig}
-                registrationError={registrationError}
-                requestedGame={requestedGame}
-                requestedNode={requestedNode}
-                requestedPage={requestedPage}
-                scoresheetPanel={scoresheetPanel}
-                startError={startError}
-                tournament={tournament}
-                view={view}
-              />
+
+            {progressed ? (
+              <div
+                className="mb-5 rounded-md border border-emerald-200 bg-emerald-50 p-4 text-sm font-medium text-emerald-900"
+                role="status"
+              >
+                {isTournamentCompleted
+                  ? "Tournament completed. Final standings are shown below."
+                  : "The next round is active and its first game block is ready."}
+              </div>
             ) : null}
 
-            {!tournament.hasStarted ? (
-              <RegistrationsSection
-                checkedInRegistrationIds={checkedInRegistrationIds}
-                checkInInUse={checkInInUse}
-                enteredRegistrationIds={enteredRegistrationIds}
-                isTournamentHost={isTournamentHost}
-                tournament={tournament}
-              />
-            ) : null}
+            <RoundTabs
+              activeScreen={screen}
+              defaultScreen={defaultScreen(tournament.hasStarted)}
+              query={{ node: requestedNode || null, game: Number.isInteger(requestedGame) ? requestedGame : null, page: Number.isInteger(requestedPage) ? requestedPage : null }}
+              tabs={screensFor(tournament.hasStarted)}
+              tournamentId={tournament.id}
+            >
+              {screen === "players" ? (
+                <RegistrationsSection
+                  checkedInRegistrationIds={checkedInRegistrationIds}
+                  checkInInUse={checkInInUse}
+                  defaultOpenRegisterModal={Boolean(registrationError)}
+                  enteredRegistrationIds={enteredRegistrationIds}
+                  isAcceptingPlayers={isAcceptingPlayers}
+                  isTournamentHost={isTournamentHost}
+                  registrationError={registrationError}
+                  tournament={tournament}
+                />
+              ) : screen === "integrations" ? (
+                <IntegrationsScreen
+                  authError={authError}
+                  authSuccess={authSuccess}
+                  checkInError={checkInError}
+                  checkInState={checkInState}
+                  checkInUpdated={checkInUpdated}
+                  discordConfig={discordConfig}
+                  discordConnected={discordConnected}
+                  discordDisconnected={discordDisconnected}
+                  discordError={discordError}
+                  discordManagerGranted={discordManagerGranted}
+                  discordPendingTooLong={discordPendingTooLong}
+                  hasSheetSession={hasSheetSession}
+                  isTournamentHost={isTournamentHost}
+                  managerInvite={managerInvite}
+                  rawDiscordConfig={rawDiscordConfig}
+                  sheetStatus={tournament.sheetStatus}
+                  tournamentId={tournament.id}
+                />
+              ) : screen === "settings" ? (
+                <SettingsScreen
+                  defaultOpenDeleteModal={Boolean(deleteError)}
+                  deleteError={deleteError}
+                  isTournamentHost={isTournamentHost}
+                  tournamentId={tournament.id}
+                />
+              ) : tournament.hasStarted ? (
+                <StartedTournamentView
+                  graphPanel={graphPanel}
+                  lobbyPanel={lobbyPanel}
+                  progressionError={progressionError}
+                  screen={screen as "lobbies" | "scoresheet" | "graph"}
+                  scoresheetPanel={scoresheetPanel}
+                  tournament={tournament}
+                />
+              ) : (
+                <PreStartPanels
+                  checkInInUse={checkInInUse}
+                  checkInState={checkInState}
+                  isAcceptingPlayers={isAcceptingPlayers}
+                  isTournamentCompleted={isTournamentCompleted}
+                  isTournamentHost={isTournamentHost}
+                  meetsStartRequirement={meetsStartRequirement}
+                  potentialEntrantCount={potentialEntrantCount}
+                  screen={screen as "overview" | "format"}
+                  startDisabled={startDisabled}
+                  startError={startError}
+                  startLabel={startLabel}
+                  tournament={tournament}
+                />
+              )}
+            </RoundTabs>
           </>
         ) : null}
       </div>

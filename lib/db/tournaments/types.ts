@@ -317,18 +317,6 @@ export type RegisterTournamentPlayerInput = {
   playerAccountId?: string;
 };
 
-export type AddRandomSeededTournamentPlayersInput = {
-  tournamentId: string;
-  count: number;
-};
-
-export type AddRandomSeededTournamentPlayersResult = {
-  requestedCount: number;
-  addedCount: number;
-  skippedCount: number;
-  remainingSlots: number;
-};
-
 export type StartTournamentInput = {
   tournamentId: string;
   initialAssignments?: Array<{ registrationId: string; nodeId: string }>;
@@ -366,16 +354,6 @@ export type SubmitLobbyResultsResult = {
   lobby_number: number;
   game_number: number;
   replayed: boolean;
-};
-
-export type RandomizePendingLobbyResultsResult = {
-  randomized_lobby_count: number;
-  randomized_participant_count: number;
-};
-
-export type RandomizePendingLobbyResultsInput = {
-  tournamentId: string;
-  nodeId: string;
 };
 
 export type FinalizeTournamentNodeInput = {

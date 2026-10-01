@@ -22,10 +22,8 @@ export {
   createTournament,
   deleteTournament,
   registerTournamentPlayer,
-  addRandomSeededTournamentPlayers,
   startTournament,
   updateLobbyResults,
   submitLobbyResults,
-  randomizePendingLobbyResults,
   finalizeTournamentNode,
 } from "./commands";

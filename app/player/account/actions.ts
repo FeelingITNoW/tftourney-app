@@ -52,10 +52,10 @@ export async function claimPlayerCredentialsAction(formData: FormData): Promise<
       email,
     });
   } catch (error) {
-    redirectWithParams({ accountError: errorMessage(error, "Your account could not be updated.") });
+    redirectWithParams({ accountError: errorMessage(error, "Your account could not be updated."), section: "profile" });
   }
   revalidatePath(ACCOUNT_PATH);
-  redirectWithParams({ accountUpdated: "credentials" });
+  redirectWithParams({ accountUpdated: "credentials", section: "profile" });
 }
 
 export async function changePasswordAction(formData: FormData): Promise<void> {
@@ -71,9 +71,9 @@ export async function changePasswordAction(formData: FormData): Promise<void> {
       confirmNewPassword,
     });
   } catch (error) {
-    redirectWithParams({ accountError: errorMessage(error, "Your password could not be changed.") });
+    redirectWithParams({ accountError: errorMessage(error, "Your password could not be changed."), section: "profile" });
   }
-  redirectWithParams({ accountUpdated: "password" });
+  redirectWithParams({ accountUpdated: "password", section: "profile" });
 }
 
 export async function changeEmailAction(formData: FormData): Promise<void> {
@@ -82,10 +82,10 @@ export async function changeEmailAction(formData: FormData): Promise<void> {
   try {
     await changePlayerEmail({ playerAccountId: player.playerAccountId, email: email || null });
   } catch (error) {
-    redirectWithParams({ accountError: errorMessage(error, "Your email could not be updated.") });
+    redirectWithParams({ accountError: errorMessage(error, "Your email could not be updated."), section: "profile" });
   }
   revalidatePath(ACCOUNT_PATH);
-  redirectWithParams({ accountUpdated: "email" });
+  redirectWithParams({ accountUpdated: "email", section: "profile" });
 }
 
 export async function linkRiotAccountAction(formData: FormData): Promise<void> {
@@ -94,10 +94,10 @@ export async function linkRiotAccountAction(formData: FormData): Promise<void> {
   try {
     await linkRiotToPlayerAccount({ playerAccountId: player.playerAccountId, gameTag });
   } catch (error) {
-    redirectWithParams({ accountError: errorMessage(error, "That Riot account could not be linked.") });
+    redirectWithParams({ accountError: errorMessage(error, "That Riot account could not be linked."), section: "linked" });
   }
   revalidatePath(ACCOUNT_PATH);
-  redirectWithParams({ accountUpdated: "riot" });
+  redirectWithParams({ accountUpdated: "riot", section: "linked" });
 }
 
 export async function unlinkDiscordAccountAction(): Promise<void> {
@@ -105,8 +105,8 @@ export async function unlinkDiscordAccountAction(): Promise<void> {
   try {
     await unlinkDiscordFromPlayerAccount(player.playerAccountId);
   } catch (error) {
-    redirectWithParams({ accountError: errorMessage(error, "Discord could not be unlinked.") });
+    redirectWithParams({ accountError: errorMessage(error, "Discord could not be unlinked."), section: "linked" });
   }
   revalidatePath(ACCOUNT_PATH);
-  redirectWithParams({ accountUpdated: "discord-unlinked" });
+  redirectWithParams({ accountUpdated: "discord-unlinked", section: "linked" });
 }
