@@ -1,6 +1,7 @@
 import { getHostUserId } from "../../auth/session";
 import { getTournamentLobbyViewModel } from "../../db/tournaments/api";
 import { createGoogleVisionTextDetector } from "./google-vision";
+import { createRateLimiter } from "../../rate-limit";
 import { parsePlacementImage } from "./parser";
 import {
   PlacementParseError,
@@ -10,6 +11,15 @@ import {
 
 const MAX_IMAGE_BYTES = 7 * 1024 * 1024;
 const SUPPORTED_MIME_TYPES = new Set(["image/png", "image/jpeg", "image/webp"]);
+
+// Each web request is a billable Google Vision call, so cap them per
+// organizer. Bot-secret callers are trusted and exempt: the bot's own
+// screenshot processing is limited per Discord user in bot/index.ts.
+const webOcrLimiter = createRateLimiter({ limit: 20, windowMs: 60 * 1000 });
+
+export function resetWebOcrLimiter(): void {
+  webOcrLimiter.reset();
+}
 
 type LobbyRosterLoader = (
   tournamentId: string,
@@ -115,6 +125,13 @@ export async function handlePlacementOcrRequest(
   } else {
     const hostUserId = await dependencies.getHostUserId(request);
     if (!hostUserId) return unauthorized();
+    const rate = webOcrLimiter.check(hostUserId);
+    if (!rate.ok) {
+      return Response.json(
+        { error: `Too many OCR requests. Try again in ${rate.retryAfterSeconds} seconds.`, code: "RATE_LIMITED" },
+        { status: 429, headers: { "Retry-After": String(rate.retryAfterSeconds) } },
+      );
+    }
     const tournamentId = formData.get("tournamentId");
     const lobbyId = formData.get("lobbyId");
     if (typeof tournamentId !== "string" || typeof lobbyId !== "string" || !tournamentId || !lobbyId) {

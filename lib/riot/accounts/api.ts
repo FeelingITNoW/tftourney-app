@@ -1,3 +1,4 @@
+import { createRateLimiter } from "../../rate-limit";
 import type {
   RiotAccountResponse,
   RiotConfig,
@@ -25,6 +26,24 @@ export class RiotRequestError extends Error {
   }
 }
 
+export class RiotRateLimitError extends RiotRequestError {
+  retryAfterSeconds: number;
+
+  constructor(retryAfterSeconds: number) {
+    super(`Too many Riot ID lookups. Try again in ${retryAfterSeconds} second${retryAfterSeconds === 1 ? "" : "s"}.`);
+    this.name = "RiotRateLimitError";
+    this.retryAfterSeconds = retryAfterSeconds;
+  }
+}
+
+// Per-caller cap on Riot ID lookups so one player can't burn the shared Riot
+// API key's quota. Only callers that pass a rateLimitKey are limited.
+const riotLookupLimiter = createRateLimiter({ limit: 5, windowMs: 60 * 1000 });
+
+export function resetRiotLookupLimiter(): void {
+  riotLookupLimiter.reset();
+}
+
 const allowedAccountRegions = new Set(["americas", "asia", "europe", "sea"]);
 
 function getRiotConfig(): RiotConfig {
@@ -49,11 +68,18 @@ function getRiotConfig(): RiotConfig {
   };
 }
 
-export async function getRiotAccountByRiotId(input: {
-  gameName: string;
-  tagLine: string;
-}): Promise<VerifiedRiotAccount> {
+export async function getRiotAccountByRiotId(
+  input: {
+    gameName: string;
+    tagLine: string;
+  },
+  options: { rateLimitKey?: string } = {},
+): Promise<VerifiedRiotAccount> {
   const config = getRiotConfig();
+  if (options.rateLimitKey) {
+    const limit = riotLookupLimiter.check(options.rateLimitKey);
+    if (!limit.ok) throw new RiotRateLimitError(limit.retryAfterSeconds);
+  }
   const encodedGameName = encodeURIComponent(input.gameName);
   const encodedTagLine = encodeURIComponent(input.tagLine);
   const response = await fetch(
