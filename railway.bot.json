@@ -2,7 +2,7 @@
   "$schema": "https://railway.com/railway.schema.json",
   "build": {
     "buildCommand": "npm run bot:build",
-    "watchPatterns": ["bot/**", "lib/discord/**", "package.json", "package-lock.json"]
+    "watchPatterns": ["bot/**", "lib/discord/**", "lib/rate-limit.ts", "package.json", "package-lock.json"]
   },
   "deploy": {
     "startCommand": "npm run bot:start",

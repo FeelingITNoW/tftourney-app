@@ -209,7 +209,10 @@ export async function linkRiotToPlayerAccount(input: {
 }): Promise<PlayerAccount> {
   const parsed = parseRiotGameTag(input.gameTag);
   if (!parsed) throw new Error("Enter a Riot ID in GameName#TAG format.");
-  const account = await getRiotAccountByRiotId({ gameName: parsed.gameName, tagLine: parsed.tagLine });
+  const account = await getRiotAccountByRiotId(
+    { gameName: parsed.gameName, tagLine: parsed.tagLine },
+    { rateLimitKey: `player:${input.playerAccountId}` },
+  );
   return linkRiotAccountToPlayer({
     playerAccountId: input.playerAccountId,
     puuid: account.puuid,

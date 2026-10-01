@@ -33,7 +33,18 @@ import {
 } from "../lib/discord/cooldown";
 import { canManageLobbyCooldown, selectTournamentForCommand, type CommandTournament } from "../lib/discord/commands";
 import type { DiscordReconcileTournament } from "../lib/discord/api";
+import { createRateLimiter } from "../lib/rate-limit";
 import { canSkipProvisioning, computeReconcileFingerprint, type ProvisionCacheEntry } from "../lib/discord/reconcile-fingerprint";
+
+// Discord-native slowmode for lobby threads. Managers and the bot hold
+// ManageThreads, which bypasses it. Matches the DB's 10s per-user spam check.
+const LOBBY_THREAD_SLOWMODE_SECONDS = 10;
+
+// Per-user cap across all lobby threads, applied before any download or
+// facilitator ping. Every message counts, text or image. Notices are limited
+// separately so the bot can't be made to spam replies.
+const messageLimiter = createRateLimiter({ limit: 3, windowMs: 60 * 1000 });
+const messageNoticeLimiter = createRateLimiter({ limit: 1, windowMs: 60 * 1000 });
 
 dotenv.config({ path: ".env.local" });
 dotenv.config();
@@ -363,10 +374,13 @@ async function reconcile(): Promise<void> {
       const key = `${lobby.roundId}:${lobby.lobbyNumber}`;
       let thread = existing.get(key) ? await guild.channels.fetch(existing.get(key)!.threadId).catch(() => null) as ThreadChannel | null : null;
       if (!thread || !thread.isThread()) {
-        thread = await parent.threads.create({ name: `Round ${lobby.roundId} • Lobby ${lobby.lobbyNumber}`, type: ChannelType.PrivateThread, autoArchiveDuration: 10080, reason: "TFTourney score recording lobby" });
+        thread = await parent.threads.create({ name: `Round ${lobby.roundId} • Lobby ${lobby.lobbyNumber}`, type: ChannelType.PrivateThread, autoArchiveDuration: 10080, rateLimitPerUser: LOBBY_THREAD_SLOWMODE_SECONDS, reason: "TFTourney score recording lobby" });
         await appFetch("/api/internal/discord/threads", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ roundId: lobby.roundId, lobbyNumber: lobby.lobbyNumber, threadId: thread.id }) });
         await thread.send({ content: `This thread records Lobby ${lobby.lobbyNumber}. Screenshots are processed in order; the bot announces each accepted game.` });
         existing.set(key, { roundId: lobby.roundId, lobbyNumber: lobby.lobbyNumber, threadId: thread.id, state: "active", acceptedImageCount: 0, lastGameNumber: null });
+      }
+      if (thread.rateLimitPerUser !== LOBBY_THREAD_SLOWMODE_SECONDS) {
+        await thread.setRateLimitPerUser(LOBBY_THREAD_SLOWMODE_SECONDS, "TFTourney lobby slowmode").catch(() => undefined);
       }
       const participantIds = lobby.participants.map((participant) => participant.discordUserId).filter((id): id is string => Boolean(id)).sort();
       const participantKey = participantIds.join(",");
@@ -603,6 +617,13 @@ async function handleMessage(message: Message): Promise<void> {
   if (message.author.bot || !message.channel.isThread()) return;
   const context = threadContext.get(message.channel.id);
   if (!context) return;
+  const messageRate = messageLimiter.check(message.author.id);
+  if (!messageRate.ok) {
+    if (messageNoticeLimiter.check(message.author.id).ok) {
+      await message.reply({ content: `⏳ You're sending messages too fast. Wait ${messageRate.retryAfterSeconds} seconds and resend.`, allowedMentions: { repliedUser: false } });
+    }
+    return;
+  }
   if (message.attachments.size !== 1) {
     await notifyFacilitator(message.channel as ThreadChannel, "Send exactly one score screenshot per message.");
     return;

@@ -55,10 +55,10 @@ export async function resolvePlayerRiotIdentity(
     throw new Error(validation.errors.gameTag ?? "Enter a Riot ID in GameName#TAG format.");
   }
 
-  const account = await getRiotAccountByRiotId({
-    gameName: validation.data.gameName,
-    tagLine: validation.data.tagLine,
-  });
+  const account = await getRiotAccountByRiotId(
+    { gameName: validation.data.gameName, tagLine: validation.data.tagLine },
+    { rateLimitKey: `player:${input.player.id}` },
+  );
   return { verified: true, account, needsLink: true };
 }
 

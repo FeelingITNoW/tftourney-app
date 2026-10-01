@@ -1,7 +1,7 @@
 import { isDiscordBotRequest, discordErrorResponse } from "../../../../../lib/discord/http";
 import { registerTournamentPlayer } from "../../../../../lib/db/tournaments/api";
 import { claimOrCreatePlayerByDiscord, linkRiotAccountToPlayer } from "../../../../../lib/db/players/api";
-import { getRiotAccountByRiotId } from "../../../../../lib/riot/accounts/api";
+import { getRiotAccountByRiotId, RiotRateLimitError } from "../../../../../lib/riot/accounts/api";
 import { validatePlayerRegistration } from "../../../../../lib/tournament/players/api";
 import { getTournamentDiscordConfig } from "../../../../../lib/discord/api";
 
@@ -21,7 +21,7 @@ export async function POST(request: Request): Promise<Response> {
     if (!config || config.state === "disabled") return Response.json({ error: "This tournament is not connected to Discord.", code: "NOT_CONNECTED" }, { status: 409 });
     const validation = validatePlayerRegistration({ gameTag });
     if (!validation.success) return Response.json({ error: validation.errors.gameTag ?? "Invalid Riot ID.", code: "INVALID_RIOT_ID" }, { status: 422 });
-    const riotAccount = await getRiotAccountByRiotId(validation.data);
+    const riotAccount = await getRiotAccountByRiotId(validation.data, { rateLimitKey: `discord:${discordUserId}` });
     // Resolve (or create) the durable player account for this Discord user and
     // attach the freshly verified Riot identity, so the bot can contact the
     // player and match them to a lobby by a stable account id rather than a
@@ -44,6 +44,12 @@ export async function POST(request: Request): Promise<Response> {
     });
     return Response.json(registration, { status: 201 });
   } catch (error) {
+    if (error instanceof RiotRateLimitError) {
+      return Response.json(
+        { error: error.message, code: "RATE_LIMITED" },
+        { status: 429, headers: { "Retry-After": String(error.retryAfterSeconds) } },
+      );
+    }
     return discordErrorResponse(error, "Player could not be registered.");
   }
 }

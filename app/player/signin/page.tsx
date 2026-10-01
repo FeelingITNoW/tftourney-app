@@ -15,6 +15,7 @@ function first(value: string | string[] | undefined): string {
 
 const PLAYER_AUTH_ERRORS: Record<string, string> = {
   invalid_credentials: "Incorrect username or password.",
+  rate_limited: "Too many sign-in attempts. Try again in a few minutes.",
   discord_state_invalid: "Your Discord sign-in request expired. Please try again.",
   discord_oauth_not_configured: "Discord sign-in is not configured yet.",
   player_session_not_configured:

@@ -1,6 +1,6 @@
 "use server";
 
-import { cookies } from "next/headers";
+import { cookies, headers } from "next/headers";
 import { redirect } from "next/navigation";
 import { revalidatePath } from "next/cache";
 import { PLAYER_SESSION_COOKIE_NAME, requirePlayer } from "@/lib/auth/player-session";
@@ -16,6 +16,15 @@ import {
   signUpPlayerAccount,
   type PlayerAuthResult,
 } from "@/lib/players/accounts";
+import { clientIp, createRateLimiter } from "@/lib/rate-limit";
+
+// Brute-force guards on password sign-in/sign-up. Sign-in checks both the
+// per-IP and per-username limiters so an attacker can't dodge the username
+// limit with a new IP per guess, or the IP limit by spreading guesses across
+// usernames from one address.
+const signInIpLimiter = createRateLimiter({ limit: 10, windowMs: 60 * 1000 });
+const signInUsernameLimiter = createRateLimiter({ limit: 10, windowMs: 15 * 60 * 1000 });
+const signUpIpLimiter = createRateLimiter({ limit: 10, windowMs: 60 * 60 * 1000 });
 
 function getFormString(formData: FormData, fieldName: string): string {
   const value = formData.get(fieldName);
@@ -110,6 +119,10 @@ export async function signUpPlayerAccountAction(formData: FormData): Promise<voi
   const email = getFormString(formData, "email");
   const returnTo = getFormString(formData, "returnTo") || "/player";
 
+  if (!signUpIpLimiter.check(clientIp(await headers())).ok) {
+    redirectWithParams("/player/signup", { formError: "Too many sign-up attempts. Try again later.", returnTo });
+  }
+
   const pendingToken = (await cookies()).get(PLAYER_PENDING_DISCORD_COOKIE)?.value;
   const pendingDiscord = readPendingPlayerDiscordToken(pendingToken);
 
@@ -129,6 +142,13 @@ export async function signInPlayerAccountAction(formData: FormData): Promise<voi
   const username = getFormString(formData, "username");
   const password = getFormString(formData, "password");
   const returnTo = getFormString(formData, "returnTo") || "/player";
+
+  // Evaluate both so each attempt counts against both limiters.
+  const ipResult = signInIpLimiter.check(clientIp(await headers()));
+  const usernameResult = signInUsernameLimiter.check(username.trim().toLowerCase());
+  if (!ipResult.ok || !usernameResult.ok) {
+    redirectWithParams("/player/signin", { playerAuthError: "rate_limited", returnTo });
+  }
 
   let auth: PlayerAuthResult;
   try {
