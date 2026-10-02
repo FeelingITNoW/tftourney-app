@@ -10,8 +10,8 @@ export type TournamentFormatPresetId =
   | "custom"
   | "default"
   | "adjacent-lobby-bracket"
-  | "128-knockout"
-  | "128-attrition";
+  | "knockout"
+  | "attrition";
 
 export type TournamentFormatPreset = {
   id: TournamentFormatPresetId;
@@ -159,62 +159,129 @@ function createAdjacentBracket(playerCount: number): TournamentFormat | null {
   );
 }
 
-function createKnockout(): TournamentFormat {
+const LOBBY_SIZE = 8;
+const SEMIFINAL_SIZE = 16;
+const KNOCKOUT_HALVING_FLOOR = 64;
+const ATTRITION_QUALIFIER_FLOOR = 32;
+
+function isLobbyMultiple(playerCount: number): boolean {
+  return Number.isInteger(playerCount) && playerCount % LOBBY_SIZE === 0;
+}
+
+function checkmateFinal(overrides: Partial<TournamentNodeDefinition> = {}): TournamentNodeDefinition {
+  return fixedNode("final", "Checkmate Final", {
+    lobbySeeding: "random",
+    reseed: 0,
+    winCondition: { type: "checkmate", threshold: 18, rankingMetric: "points" },
+    ...overrides,
+  });
+}
+
+/**
+ * Field sizes for each knockout stage: halve (in whole lobbies) until the
+ * field is at most 64, then drop to a 16-player semifinal before the final.
+ */
+function knockoutStageSizes(playerCount: number): number[] {
+  const sizes = [playerCount];
+  let size = playerCount;
+  while (size > SEMIFINAL_SIZE) {
+    size =
+      size > KNOCKOUT_HALVING_FLOOR
+        ? Math.max(KNOCKOUT_HALVING_FLOOR, Math.floor(size / (LOBBY_SIZE * 2)) * LOBBY_SIZE)
+        : SEMIFINAL_SIZE;
+    sizes.push(size);
+  }
+  return sizes;
+}
+
+function createKnockout(playerCount: number): TournamentFormat | null {
+  if (!isLobbyMultiple(playerCount) || playerCount < SEMIFINAL_SIZE) return null;
+
+  const sizes = knockoutStageSizes(playerCount);
+  const nodeId = (size: number) => `knockout-${size}`;
+  const nodes = sizes.map((size, index) => {
+    const overrides: Partial<TournamentNodeDefinition> = {};
+    if (index === 0) overrides.initialEntrantSlots = "all";
+    if (size === SEMIFINAL_SIZE) Object.assign(overrides, { games: 2, reseed: 0 });
+    const name =
+      index === 0
+        ? `${size} Player Opening`
+        : size === SEMIFINAL_SIZE
+          ? `${size} Player Semifinal`
+          : `${size} Player Round`;
+    return fixedNode(nodeId(size), name, overrides);
+  });
+  nodes.push({ ...checkmateFinal(), id: "knockout-final" });
+
+  const edges = sizes.map((size, index) => {
+    const next = sizes[index + 1];
+    return next === undefined
+      ? edge(`knockout-${size}-to-final`, nodeId(size), "knockout-final", LOBBY_SIZE)
+      : edge(`knockout-${size}-to-${next}`, nodeId(size), nodeId(next), next);
+  });
+
   return format(
-    "128-knockout",
-    "128 → 64 → 16 → Checkmate",
-    128,
-    [
-      fixedNode("knockout-128", "128 Player Opening", { initialEntrantSlots: "all" }),
-      fixedNode("knockout-64", "64 Player Round"),
-      fixedNode("knockout-16", "16 Player Semifinal", { games: 2, reseed: 0 }),
-      fixedNode("knockout-final", "Checkmate Final", {
-        lobbySeeding: "random",
-        reseed: 0,
-        winCondition: { type: "checkmate", threshold: 18, rankingMetric: "points" },
-      }),
-    ],
-    [
-      edge("knockout-128-to-64", "knockout-128", "knockout-64", 64),
-      edge("knockout-64-to-16", "knockout-64", "knockout-16", 16),
-      edge("knockout-16-to-final", "knockout-16", "knockout-final", 8),
-    ],
+    "knockout",
+    `${sizes.join(" → ")} → Checkmate`,
+    playerCount,
+    nodes,
+    edges,
   );
 }
 
-function createAttrition(): TournamentFormat {
-  const nodes = [
-    fixedNode("attrition-128", "128 Player Opening", { initialEntrantSlots: "all" }),
-    fixedNode("attrition-112", "112 Player Cut", { games: 2, reseed: 0 }),
-    fixedNode("attrition-96", "96 Player Cut", { games: 1, reseed: 0 }),
-    fixedNode("attrition-80", "80 Player Cut", { games: 1, reseed: 0 }),
-    fixedNode("attrition-64", "64 Player Cut", { games: 1, reseed: 0 }),
-    fixedNode("attrition-48", "48 Player Cut", { games: 1, reseed: 0 }),
-    fixedNode("attrition-32", "32 Player Final Qualifier", { games: 1, reseed: 0 }),
-    fixedNode("attrition-final", "Checkmate Final", {
-      mergeSeeding: "source_rank_interleave",
-      lobbySeeding: "random",
-      reseed: 0,
-      winCondition: { type: "checkmate", threshold: 18, rankingMetric: "points" },
-    }),
-  ];
+/** Players cut per attrition stage: roughly an eighth of the field, in whole lobbies. */
+function attritionCutSize(playerCount: number): number {
+  return Math.max(LOBBY_SIZE, Math.round(playerCount / (LOBBY_SIZE * LOBBY_SIZE)) * LOBBY_SIZE);
+}
+
+function attritionStageSizes(playerCount: number): number[] {
+  const cut = attritionCutSize(playerCount);
+  const sizes = [playerCount];
+  while (sizes[sizes.length - 1] - cut >= ATTRITION_QUALIFIER_FLOOR) {
+    sizes.push(sizes[sizes.length - 1] - cut);
+  }
+  return sizes;
+}
+
+function createAttrition(playerCount: number): TournamentFormat | null {
+  if (!isLobbyMultiple(playerCount)) return null;
+
+  const sizes = attritionStageSizes(playerCount);
+  // Needs an early-qualifier stage and a last-chance stage beyond the opening.
+  if (sizes.length < 3) return null;
+
+  const nodeId = (size: number) => `attrition-${size}`;
+  const lastIndex = sizes.length - 1;
+  const nodes = sizes.map((size, index) => {
+    if (index === 0) return fixedNode(nodeId(size), `${size} Player Opening`, { initialEntrantSlots: "all" });
+    const name = index === lastIndex ? `${size} Player Final Qualifier` : `${size} Player Cut`;
+    return fixedNode(nodeId(size), name, { games: index === 1 ? 2 : 1, reseed: 0 });
+  });
+  nodes.push(checkmateFinal({ mergeSeeding: "source_rank_interleave" }));
+  nodes[nodes.length - 1] = { ...nodes[nodes.length - 1], id: "attrition-final" };
+
   const rankingMetric = "tournament_points" as const;
+  const earlyQualifiers = LOBBY_SIZE / 2;
+  const edges: TournamentEdgeDefinition[] = [];
+  sizes.forEach((size, index) => {
+    const next = sizes[index + 1];
+    if (next === undefined) {
+      edges.push(edge(`attrition-${size}-to-final`, nodeId(size), "attrition-final", earlyQualifiers, 1, rankingMetric));
+      return;
+    }
+    // The first cut stage sends its top finishers straight to the final.
+    if (index === 1) {
+      edges.push(edge(`attrition-${size}-to-final`, nodeId(size), "attrition-final", earlyQualifiers, 1, rankingMetric));
+    }
+    edges.push(edge(`attrition-${size}-to-${next}`, nodeId(size), nodeId(next), next, index === 1 ? 2 : 1, rankingMetric));
+  });
 
   return format(
-    "128-attrition",
-    "128 Player Attrition to Checkmate",
-    128,
+    "attrition",
+    `${playerCount} Player Attrition to Checkmate`,
+    playerCount,
     nodes,
-    [
-      edge("attrition-128-to-112", "attrition-128", "attrition-112", 112, 1, rankingMetric),
-      edge("attrition-112-to-final", "attrition-112", "attrition-final", 4, 1, rankingMetric),
-      edge("attrition-112-to-96", "attrition-112", "attrition-96", 96, 2, rankingMetric),
-      edge("attrition-96-to-80", "attrition-96", "attrition-80", 80, 1, rankingMetric),
-      edge("attrition-80-to-64", "attrition-80", "attrition-64", 64, 1, rankingMetric),
-      edge("attrition-64-to-48", "attrition-64", "attrition-48", 48, 1, rankingMetric),
-      edge("attrition-48-to-32", "attrition-48", "attrition-32", 32, 1, rankingMetric),
-      edge("attrition-32-to-final", "attrition-32", "attrition-final", 4, 1, rankingMetric),
-    ],
+    edges,
   );
 }
 
@@ -238,16 +305,16 @@ export const TOURNAMENT_FORMAT_PRESETS: TournamentFormatPreset[] = [
     supportsPlayerCount: (playerCount) => createAdjacentBracket(playerCount) !== null,
   },
   {
-    id: "128-knockout",
-    name: "128 → 64 → 16 → Checkmate",
-    description: "A fixed-field knockout path into an eight-player final.",
-    supportsPlayerCount: (playerCount) => playerCount === 128,
+    id: "knockout",
+    name: "Knockout to checkmate",
+    description: "Halve the field each stage, then a 16-player semifinal into an eight-player final.",
+    supportsPlayerCount: (playerCount) => createKnockout(playerCount) !== null,
   },
   {
-    id: "128-attrition",
-    name: "128-player attrition",
-    description: "Cut 16 players per stage and reserve four early final seats.",
-    supportsPlayerCount: (playerCount) => playerCount === 128,
+    id: "attrition",
+    name: "Attrition to checkmate",
+    description: "Cut about an eighth of the field per stage and reserve four early final seats.",
+    supportsPlayerCount: (playerCount) => createAttrition(playerCount) !== null,
   },
 ];
 
@@ -272,8 +339,8 @@ export function createTournamentFormatPreset(
     );
   }
   if (presetId === "adjacent-lobby-bracket") return createAdjacentBracket(playerCount);
-  if (presetId === "128-knockout") return playerCount === 128 ? createKnockout() : null;
-  if (presetId === "128-attrition") return playerCount === 128 ? createAttrition() : null;
+  if (presetId === "knockout") return createKnockout(playerCount);
+  if (presetId === "attrition") return createAttrition(playerCount);
   return format(
     "custom",
     "Custom TFT Tournament Format",
