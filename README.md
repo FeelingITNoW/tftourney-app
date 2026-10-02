@@ -165,6 +165,38 @@ check (it trashes the temporary workbook unless `KEEP_LIVE_GOOGLE_SHEET=1`):
 GOOGLE_LIVE_TEST_REFRESH_TOKEN=... npm run test:sheets:live
 ```
 
+## CI/CD
+
+`.github/workflows/ci.yml` runs on every pull request and every push to `main`:
+lint, typecheck, tests, `next build`, and the bot build. No secrets are needed.
+
+On a push to `main`, once those pass, a second job applies pending Supabase
+migrations (`supabase db push`) and deploys the `sync-tournament-sheets` edge
+function. Railway deploys the app and bot only after the whole workflow is
+green, so new code never runs against an old schema. Because of this, the
+"apply all migrations" notes elsewhere in this README happen automatically on
+merge; run `supabase db push` by hand only for local or emergency use.
+
+One-time setup:
+
+1. GitHub → Settings → Environments → `production`: add secrets
+   `SUPABASE_ACCESS_TOKEN` (a personal access token from
+   supabase.com/dashboard/account/tokens), `SUPABASE_DB_PASSWORD`, and
+   `SUPABASE_PROJECT_ID` (`pwhtssicqwaolxgpfoxw`). Optionally add required
+   reviewers to gate database deploys.
+2. Railway → both the app and bot services → Settings → Source: enable
+   **Wait for CI**.
+3. GitHub → Settings → Branches: protect `main` and require the `check` status
+   and a pull request before merging.
+4. Before the first automatic run, check `supabase migration list --linked`
+   shows local and remote in sync. If a migration was ever applied through the
+   dashboard SQL editor, fix it with `supabase migration repair` first, or the
+   job will try to apply it again.
+5. If JWT verification is off for `sync-tournament-sheets` in the Supabase
+   dashboard, add `[functions.sync-tournament-sheets]` with
+   `verify_jwt = false` to `supabase/config.toml` so deploys don't change how
+   the cron job authenticates.
+
 ## Discord tournament operations
 
 The optional Discord Gateway worker provides Riot-verified signup, tournament
