@@ -368,12 +368,12 @@ test("accepts the 64-player A/B/C split graph", () => {
 });
 
 test("preset builder formats resolve to valid advancement graphs", () => {
-  const knockout = createTournamentFormatPreset("128-knockout", 128);
+  const knockout = createTournamentFormatPreset("knockout", 128);
   const knockoutAnalysis = analyzeTournamentFormat(knockout, 128);
   assert.equal(knockoutAnalysis.valid, true, knockoutAnalysis.errors.join(" "));
   assert.deepEqual(knockout?.edges.map((edge) => edge.condition.count), [64, 16, 8]);
 
-  const attrition = createTournamentFormatPreset("128-attrition", 128);
+  const attrition = createTournamentFormatPreset("attrition", 128);
   const attritionAnalysis = analyzeTournamentFormat(attrition, 128);
   assert.equal(attritionAnalysis.valid, true, attritionAnalysis.errors.join(" "));
   assert.equal(attrition?.edges.find((edge) => edge.id === "attrition-112-to-final")?.condition.rankingMetric, "tournament_points");
@@ -384,4 +384,34 @@ test("preset builder formats resolve to valid advancement graphs", () => {
   assert.equal(bracketAnalysis.valid, true, bracketAnalysis.errors.join(" "));
   assert.equal(bracket?.nodes.length, 15);
   assert.equal(bracket?.edges.length, 14);
+});
+
+test("knockout and attrition presets scale with the entrant count", () => {
+  const knockoutPath: Record<number, number[]> = {
+    16: [8],
+    24: [16, 8],
+    32: [16, 8],
+    64: [16, 8],
+    72: [64, 16, 8],
+    256: [128, 64, 16, 8],
+    512: [256, 128, 64, 16, 8],
+  };
+  for (const [count, counts] of Object.entries(knockoutPath)) {
+    const entrants = Number(count);
+    const knockout = createTournamentFormatPreset("knockout", entrants);
+    const analysis = analyzeTournamentFormat(knockout, entrants);
+    assert.equal(analysis.valid, true, `${count}: ${analysis.errors.join(" ")}`);
+    assert.deepEqual(knockout?.edges.map((edge) => edge.condition.count), counts, count);
+  }
+  assert.equal(createTournamentFormatPreset("knockout", 8), null);
+  assert.equal(createTournamentFormatPreset("knockout", 20), null);
+
+  for (let entrants = 48; entrants <= 512; entrants += 8) {
+    const attrition = createTournamentFormatPreset("attrition", entrants);
+    const analysis = analyzeTournamentFormat(attrition, entrants);
+    assert.equal(analysis.valid, true, `${entrants}: ${analysis.errors.join(" ")}`);
+    assert.deepEqual(analysis.warnings, [], `${entrants}`);
+  }
+  assert.equal(createTournamentFormatPreset("attrition", 40), null);
+  assert.equal(createTournamentFormatPreset("attrition", 50), null);
 });
